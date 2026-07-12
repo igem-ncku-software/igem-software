@@ -1,0 +1,38 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# ===== 虛擬環境 =====
+venv/
+.venv/
+env/
+ENV/
+
+# ===== 環境變數 / 機密資訊 =====
+.env
+.env.local
+*.key
+secrets.json
+
+# ===== IDE / 編輯器 =====
+.vscode/
+.idea/
+*.swp
+
+# ===== 作業系統 =====
+.DS_Store
+Thumbs.db
+
+# ===== 上傳/暫存的使用者檔案（如果之後有存圖片等） =====
+uploads/
+*.tmp
+
+# ===== 日誌 =====
+*.log
+
+# ===== 前端（如果之後加 npm 工具鏈） =====
+node_modules/
+dist/

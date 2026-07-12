@@ -1,0 +1,141 @@
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --accent: #2563eb;
+  --accent-dim: #1d4ed8;
+  --text: #1a1a1a;
+  --text-dim: #6b7280;
+  --border: #e5e7eb;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 20px 80px;
+}
+
+.site-header h1 {
+  font-size: 2rem;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  margin-top: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  margin-top: 24px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin-top: 14px;
+}
+
+textarea,
+input[type="file"] {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 10px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+textarea:focus,
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#image-preview {
+  max-width: 100%;
+  max-height: 220px;
+  margin-top: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+}
+
+button {
+  margin-top: 22px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+button:hover {
+  background: var(--accent-dim);
+}
+
+button:disabled {
+  background: var(--accent-dim);
+  cursor: not-allowed;
+}
+
+#result-section {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+#result-output {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9rem;
+}
+
+#status-message {
+  min-height: 1.2em;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.site-footer {
+  margin-top: 32px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+#backend-status {
+  font-weight: 600;
+}

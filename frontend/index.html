@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>iGEM Analyzer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <h1>iGEM Analyzer</h1>
+      <p class="subtitle">上傳文字或圖片，交給後端進行分析</p>
+    </header>
+
+    <main class="card">
+      <form id="analyze-form">
+        <label for="text-input">文字輸入（例如 DNA 序列、實驗描述）</label>
+        <textarea
+          id="text-input"
+          name="text"
+          rows="5"
+          placeholder="在這裡貼上你的文字或序列..."
+        ></textarea>
+
+        <label for="image-input">圖片上傳（可選）</label>
+        <input type="file" id="image-input" name="image" accept="image/*" />
+        <img id="image-preview" alt="" hidden />
+
+        <button type="submit" id="submit-btn">送出分析</button>
+      </form>
+
+      <section id="result-section" hidden>
+        <h2>分析結果</h2>
+        <pre id="result-output"></pre>
+      </section>
+
+      <p id="status-message" role="status"></p>
+    </main>
+
+    <footer class="site-footer">
+      <p>Backend status: <span id="backend-status">尚未檢查</span></p>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
