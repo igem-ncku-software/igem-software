@@ -1,6 +1,6 @@
-// ⚠️ 部署後端到 Render/Railway 之後，把這裡改成你的後端網址
 // 本機測試時保持 localhost:8000 即可
-const BACKEND_URL = "http://127.0.0.1:8000";
+// const BACKEND_URL = "http://127.0.0.1:8000";
+const BACKEND_URL = "https://igem-ncku-software.onrender.com";
 
 const form = document.getElementById("analyze-form");
 const textInput = document.getElementById("text-input");
