@@ -10,7 +10,7 @@ app = FastAPI(title="iGEM Analyzer API")
 # allow_origins=["https://<你的帳號>.github.io"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://igem-ncku-software.github.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
