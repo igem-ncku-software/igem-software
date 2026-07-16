@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import base64
 
+from esp32.upload import router as esp32_router
+
 app = FastAPI(title="iGEM Analyzer API")
 
 # CORS：先開放所有來源方便開發。
@@ -15,6 +17,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 加入 ESP32 主題的 API（/esp32/upload, /esp32/records, /esp32/uploads/{filename}）
+app.include_router(esp32_router)
 
 
 @app.get("/health")
