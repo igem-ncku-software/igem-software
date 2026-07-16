@@ -11,6 +11,7 @@ const resultSection = document.getElementById("result-section");
 const resultOutput = document.getElementById("result-output");
 const statusMessage = document.getElementById("status-message");
 const backendStatus = document.getElementById("backend-status");
+const esp32RecordsContainer = document.getElementById("esp32-records");
 
 // 圖片預覽
 imageInput.addEventListener("change", () => {
@@ -80,3 +81,45 @@ async function checkBackend() {
   }
 }
 checkBackend();
+
+// 讀取並顯示 ESP32 上傳紀錄
+async function loadEsp32Records() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/esp32/records`);
+    if (!res.ok) {
+      esp32RecordsContainer.textContent = "無法取得 ESP32 紀錄。";
+      return;
+    }
+
+    const records = await res.json();
+
+    if (records.length === 0) {
+      esp32RecordsContainer.textContent = "目前尚無 ESP32 上傳資料。";
+      return;
+    }
+
+    esp32RecordsContainer.innerHTML = "";
+
+    records.forEach((r) => {
+      const card = document.createElement("div");
+      card.className = "record-card";
+
+      card.innerHTML = `
+        <p><strong>${r.timestamp}</strong></p>
+        <p>${r.text}</p>
+        ${
+          r.image
+            ? `<img src="${BACKEND_URL}/esp32/uploads/${r.image}" alt="ESP32 上傳照片" style="max-width:300px" />`
+            : ""
+        }
+      `;
+
+      esp32RecordsContainer.appendChild(card);
+    });
+  } catch (err) {
+    esp32RecordsContainer.textContent = "連線失敗，無法取得 ESP32 紀錄。";
+  }
+}
+
+loadEsp32Records();
+setInterval(loadEsp32Records, 5000); // 每 5 秒自動更新
