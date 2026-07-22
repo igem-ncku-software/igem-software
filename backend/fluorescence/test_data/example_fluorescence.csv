@@ -1,0 +1,10 @@
+sample,aptamer,concentration,concentration_unit,replicate,gfp,od600
+Control,None,0,nM,1,15000,0.72
+Control,None,0,nM,2,14800,0.70
+Control,None,0,nM,3,15300,0.73
+ALS5_10nM,ALS5,10,nM,1,11200,0.69
+ALS5_10nM,ALS5,10,nM,2,10800,0.68
+ALS5_10nM,ALS5,10,nM,3,11050,0.70
+Cb2_10nM,Cb2,10,nM,1,8200,0.68
+Cb2_10nM,Cb2,10,nM,2,7900,0.67
+Cb2_10nM,Cb2,10,nM,3,8100,0.69

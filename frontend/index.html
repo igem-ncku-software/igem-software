@@ -3,46 +3,125 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>iGEM Analyzer</title>
+  <title>iGEM NCKU Software</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="page">
     <header class="site-header">
-      <h1>iGEM NCKU Software</h1>
-      <p class="subtitle">上傳文字或圖片，交給後端進行分析</p>
+      <p class="eyebrow">iGEM NCKU SOFTWARE</p>
+      <h1>AHL Aptamer Analysis Platform</h1>
+      <p class="subtitle">整合螢光數據分析、圖片上傳與 ESP32 實驗紀錄。</p>
     </header>
 
-    <main class="card">
-      <form id="analyze-form">
-        <label for="text-input">文字輸入（例如 DNA 序列、實驗描述）</label>
-        <textarea
-          id="text-input"
-          name="text"
-          rows="5"
-          placeholder="在這裡貼上你的文字或序列..."
-        ></textarea>
+    <main>
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Analysis 01</p>
+            <h2>Fluorescence Analysis</h2>
+          </div>
+          <span class="status-badge">CSV</span>
+        </div>
 
-        <label for="image-input">圖片上傳（可選）</label>
-        <input type="file" id="image-input" name="image" accept="image/*" />
-        <img id="image-preview" alt="" hidden />
+        <p class="section-description">
+          上傳包含 GFP 與 OD600 的 CSV 檔案，系統會自動計算 normalized GFP、
+          平均值、標準差與相對 Control 的抑制率。
+        </p>
 
-        <button type="submit" id="submit-btn">送出分析</button>
-      </form>
+        <div class="format-box">
+          <strong>必要欄位</strong>
+          <code>sample, aptamer, concentration, concentration_unit, replicate, gfp, od600</code>
+        </div>
 
-      <section id="result-section" hidden>
-        <h2>分析結果</h2>
-        <pre id="result-output"></pre>
+        <form id="fluorescence-form">
+          <label for="fluorescence-file">選擇 fluorescence CSV</label>
+          <input
+            type="file"
+            id="fluorescence-file"
+            name="file"
+            accept=".csv,text/csv"
+            required
+          />
+          <button type="submit" id="fluorescence-submit">分析 CSV</button>
+        </form>
+
+        <p id="fluorescence-status" class="status-message" role="status" aria-live="polite"></p>
+
+        <section id="fluorescence-summary" class="result-block" hidden>
+          <h3>分析摘要</h3>
+          <div id="fluorescence-summary-content" class="summary-grid"></div>
+        </section>
+
+        <section id="fluorescence-results" class="result-block" hidden>
+          <h3>分組結果</h3>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Sample</th>
+                  <th>Aptamer</th>
+                  <th>Concentration</th>
+                  <th>Replicates</th>
+                  <th>Mean GFP / OD600</th>
+                  <th>SD</th>
+                  <th>Inhibition</th>
+                </tr>
+              </thead>
+              <tbody id="fluorescence-results-body"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
-      <p id="status-message" role="status"></p>
-    </main>
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Analysis 02</p>
+            <h2>文字與圖片測試</h2>
+          </div>
+          <span class="status-badge">Demo</span>
+        </div>
 
-    <section class="card">
-      <h2>ESP32 上傳紀錄</h2>
-      <p class="subtitle">培養皿照片轉灰階與 RGB 影像處理，同步接收 ESP32 傳來的資料</p>
-      <div id="esp32-records"></div>
-    </section>
+        <p class="section-description">保留原本功能，方便後續擴充其他分析模組。</p>
+
+        <form id="analyze-form">
+          <label for="text-input">文字輸入</label>
+          <textarea
+            id="text-input"
+            name="text"
+            rows="5"
+            placeholder="例如 DNA 序列、實驗描述或備註..."
+          ></textarea>
+
+          <label for="image-input">圖片上傳（可選）</label>
+          <input type="file" id="image-input" name="image" accept="image/*" />
+          <img id="image-preview" alt="圖片預覽" hidden />
+
+          <button type="submit" id="submit-btn">送出分析</button>
+        </form>
+
+        <section id="result-section" class="result-block" hidden>
+          <h3>分析結果</h3>
+          <pre id="result-output"></pre>
+        </section>
+
+        <p id="status-message" class="status-message" role="status"></p>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Monitoring</p>
+            <h2>ESP32 上傳紀錄</h2>
+          </div>
+          <span class="status-badge">Live</span>
+        </div>
+
+        <p class="section-description">顯示 ESP32 傳來的圖片與文字紀錄，每 5 秒自動更新。</p>
+        <div id="esp32-records" class="records-grid"></div>
+      </section>
+    </main>
 
     <footer class="site-footer">
       <p>Backend status: <span id="backend-status">尚未檢查</span></p>
