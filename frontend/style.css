@@ -211,6 +211,17 @@ th {
 td { font-size: 0.9rem; }
 tbody tr:last-child td { border-bottom: 0; }
 .inhibition-cell { color: var(--accent); font-weight: 700; }
+.significance-cell { color: var(--success); font-weight: 700; }
+
+.chart-note {
+  margin: -8px 0 16px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+#fluorescence-chart {
+  max-width: 100%;
+}
 
 #result-output {
   max-height: 420px;

@@ -27,12 +27,17 @@ const fluorescenceSummary = document.getElementById(
 const fluorescenceSummaryContent = document.getElementById(
   "fluorescence-summary-content"
 );
+const fluorescenceChartSection = document.getElementById(
+  "fluorescence-chart-section"
+);
 const fluorescenceResults = document.getElementById(
   "fluorescence-results"
 );
 const fluorescenceResultsBody = document.getElementById(
   "fluorescence-results-body"
 );
+
+let fluorescenceChartInstance = null;
 
 fluorescenceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -68,6 +73,7 @@ fluorescenceForm.addEventListener("submit", async (event) => {
   );
 
   fluorescenceSummary.hidden = true;
+  fluorescenceChartSection.hidden = true;
   fluorescenceResults.hidden = true;
   fluorescenceResultsBody.innerHTML = "";
 
@@ -89,6 +95,7 @@ fluorescenceForm.addEventListener("submit", async (event) => {
     }
 
     renderSummary(data.summary);
+    renderChart(data.chart_data);
     renderResults(data.results);
 
     fluorescenceSummary.hidden = false;
@@ -165,6 +172,67 @@ function renderSummary(summary) {
 }
 
 // ========================================
+// 顯示抑制率比較圖（Chart.js）
+// ========================================
+
+function renderChart(chartData) {
+  if (!chartData || !Array.isArray(chartData.labels)) {
+    fluorescenceChartSection.hidden = true;
+    return;
+  }
+
+  const canvas = document.getElementById("fluorescence-chart");
+
+  if (fluorescenceChartInstance) {
+    fluorescenceChartInstance.destroy();
+  }
+
+  // 有顯著性的組別，直接把星號標在 X 軸標籤上
+  const labelsWithSignificance = chartData.labels.map(
+    (label, index) => {
+      const sig = chartData.significance[index];
+      return sig && sig !== "ns" ? `${label} ${sig}` : label;
+    }
+  );
+
+  fluorescenceChartInstance = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: labelsWithSignificance,
+      datasets: [
+        {
+          label: "Inhibition Rate (%)",
+          data: chartData.inhibition_rates,
+          backgroundColor: chartData.inhibition_rates.map(
+            (value) =>
+              value >= 0
+                ? "rgba(37, 99, 235, 0.7)"
+                : "rgba(180, 35, 24, 0.7)"
+          ),
+          borderRadius: 6,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        y: {
+          title: {
+            display: true,
+            text: "Inhibition Rate (%)",
+          },
+        },
+      },
+    },
+  });
+
+  fluorescenceChartSection.hidden = false;
+}
+
+// ========================================
 // 顯示 Fluorescence 分組結果
 // ========================================
 
@@ -178,6 +246,11 @@ function renderResults(results) {
       `${formatNumber(row.concentration)} ${
         row.concentration_unit || ""
       }`.trim();
+
+    const pValueDisplay =
+      row.p_value === null || row.p_value === undefined
+        ? "-"
+        : formatNumber(row.p_value);
 
     const values = [
       row.sample,
@@ -193,6 +266,8 @@ function renderResults(results) {
       `${formatNumber(
         row.inhibition_rate
       )}%`,
+      pValueDisplay,
+      row.significance || "-",
     ];
 
     values.forEach((value, index) => {
@@ -202,6 +277,10 @@ function renderResults(results) {
 
       if (index === 6) {
         cell.className = "inhibition-cell";
+      }
+
+      if (index === 8 && row.significance && row.significance !== "ns" && row.significance !== "") {
+        cell.className = "significance-cell";
       }
 
       tableRow.appendChild(cell);
@@ -227,7 +306,7 @@ function formatNumber(value) {
   return Number(value).toLocaleString(
     "zh-TW",
     {
-      maximumFractionDigits: 2,
+      maximumFractionDigits: 4,
     }
   );
 }

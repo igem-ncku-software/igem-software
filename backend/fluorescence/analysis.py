@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from scipy import stats
 
 
 REQUIRED_COLUMNS = {
@@ -27,6 +28,7 @@ def analyze_fluorescence_csv(
     3. 每組 normalized GFP 的標準差
     4. 每組 replicate 數量
     5. 相對 Control 的 inhibition rate
+    6. 相對 Control 的統計顯著性（Welch's t-test）
 
     Parameters
     ----------
@@ -36,7 +38,7 @@ def analyze_fluorescence_csv(
     Returns
     -------
     dict:
-        包含 summary、results 與 raw_data。
+        包含 summary、results、raw_data 與 chart_data。
     """
 
     file_path = Path(file_path)
@@ -317,6 +319,20 @@ def analyze_fluorescence_csv(
         .fillna(0)
     )
 
+    # 16.5 保留每組的原始 normalized_gfp 數值，供 t-test 使用
+    group_raw_values = {
+        key: sub_df["normalized_gfp"].tolist()
+        for key, sub_df in df.groupby(
+            [
+                "sample",
+                "aptamer",
+                "concentration",
+                "concentration_unit",
+            ],
+            dropna=False,
+        )
+    }
+
     # 17. 找出 Control
     #
     # casefold 可以讓 Control、control、CONTROL
@@ -396,6 +412,72 @@ def analyze_fluorescence_csv(
         "inhibition_rate",
     ] = 0
 
+    # 19.5 計算每組相對 Control 的顯著性檢定（Welch's t-test）
+    #
+    # 使用 Welch's t-test（equal_var=False），
+    # 不假設兩組變異數相等，對 replicate 數不同、
+    # 變異數不同的情況較穩健。
+    control_key = (
+        control_rows.iloc[0]["sample"],
+        control_rows.iloc[0]["aptamer"],
+        control_rows.iloc[0]["concentration"],
+        control_rows.iloc[0]["concentration_unit"],
+    )
+    control_values = group_raw_values.get(control_key, [])
+
+    p_values: list[float | None] = []
+    significance_labels: list[str] = []
+
+    for _, row in grouped.iterrows():
+        key = (
+            row["sample"],
+            row["aptamer"],
+            row["concentration"],
+            row["concentration_unit"],
+        )
+
+        if key == control_key:
+            p_values.append(None)
+            significance_labels.append("")
+            continue
+
+        treatment_values = group_raw_values.get(key, [])
+
+        # 樣本數不足（例如只有 1 個 replicate）無法做 t-test
+        if len(treatment_values) < 2 or len(control_values) < 2:
+            p_values.append(None)
+            significance_labels.append("n/a")
+            continue
+
+        _, p_value = stats.ttest_ind(
+            treatment_values,
+            control_values,
+            equal_var=False,
+        )
+
+        p_values.append(round(float(p_value), 4))
+
+        if p_value < 0.001:
+            significance_labels.append("***")
+        elif p_value < 0.01:
+            significance_labels.append("**")
+        elif p_value < 0.05:
+            significance_labels.append("*")
+        else:
+            significance_labels.append("ns")  # not significant
+
+    # 用 object dtype 指定欄位，避免 pandas 把 None
+    # 自動轉成 NaN（NaN 不是合法的 JSON 值，
+    # 若不處理，前端會收到無法解析的回應）。
+    grouped["p_value"] = pd.array(p_values, dtype="object")
+    grouped["significance"] = significance_labels
+
+    # 供未來排名模組（模組三）直接讀取的統一分數欄位。
+    # 目前數值與 inhibition_rate 相同，獨立命名是為了讓
+    # 前端顯示欄位與排名系統輸入欄位互不牽連，
+    # 未來調整顯示邏輯不會影響排名模組。
+    grouped["inhibition_score"] = grouped["inhibition_rate"]
+
     # 20. 四捨五入
     grouped = grouped.round(
         {
@@ -405,6 +487,7 @@ def analyze_fluorescence_csv(
             "mean_raw_gfp": 2,
             "mean_od600": 4,
             "inhibition_rate": 2,
+            "inhibition_score": 2,
         }
     )
 
@@ -466,7 +549,33 @@ def analyze_fluorescence_csv(
         drop=True
     )
 
-    # 23. 回傳結果
+    # 23. 準備圖表資料（給前端 Chart.js 直接使用）
+    control_sample_name = str(
+        control_rows.iloc[0]["sample"]
+    )
+
+    chart_labels = []
+
+    for _, row in grouped.iterrows():
+        if (
+            str(row["sample"]).strip().casefold()
+            == control_sample_name.strip().casefold()
+        ):
+            chart_labels.append("Control")
+        else:
+            chart_labels.append(
+                f'{row["aptamer"]} '
+                f'({row["concentration"]}{row["concentration_unit"]})'
+            )
+
+    chart_data = {
+        "labels": chart_labels,
+        "inhibition_rates": grouped["inhibition_rate"].tolist(),
+        "significance": grouped["significance"].tolist(),
+        "p_values": grouped["p_value"].tolist(),
+    }
+
+    # 24. 回傳結果
     return {
         "status": "success",
         "summary": {
@@ -487,6 +596,7 @@ def analyze_fluorescence_csv(
         "raw_data": raw_data.to_dict(
             orient="records"
         ),
+        "chart_data": chart_data,
     }
 
 
@@ -523,6 +633,9 @@ if __name__ == "__main__":
 
         for row in analysis_result["raw_data"]:
             print(row)
+
+        print("\nChart data:")
+        print(analysis_result["chart_data"])
 
     except (
         FileNotFoundError,

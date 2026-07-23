@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>iGEM NCKU Software</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="page">
@@ -26,7 +27,7 @@
 
         <p class="section-description">
           上傳包含 GFP 與 OD600 的 CSV 檔案，系統會自動計算 normalized GFP、
-          平均值、標準差與相對 Control 的抑制率。
+          平均值、標準差、相對 Control 的抑制率，以及統計顯著性（Welch's t-test）。
         </p>
 
         <div class="format-box">
@@ -53,6 +54,12 @@
           <div id="fluorescence-summary-content" class="summary-grid"></div>
         </section>
 
+        <section id="fluorescence-chart-section" class="result-block" hidden>
+          <h3>抑制率比較圖</h3>
+          <p class="chart-note">* p&lt;0.05　** p&lt;0.01　*** p&lt;0.001（相對 Control 的 Welch's t-test）</p>
+          <canvas id="fluorescence-chart" height="300"></canvas>
+        </section>
+
         <section id="fluorescence-results" class="result-block" hidden>
           <h3>分組結果</h3>
           <div class="table-wrapper">
@@ -66,6 +73,8 @@
                   <th>Mean GFP / OD600</th>
                   <th>SD</th>
                   <th>Inhibition</th>
+                  <th>p-value</th>
+                  <th>Sig.</th>
                 </tr>
               </thead>
               <tbody id="fluorescence-results-body"></tbody>
