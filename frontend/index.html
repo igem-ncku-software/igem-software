@@ -122,6 +122,39 @@
         <div class="section-heading">
           <div>
             <p class="section-label">Monitoring</p>
+            <h2>ESP32 即時感測數據</h2>
+          </div>
+          <span class="status-badge" id="sensor-live-badge">Live</span>
+        </div>
+
+        <p class="section-description">
+          顯示 ESP32 傳來的感測數值（例如螢光強度），每 2 秒自動更新一次。
+        </p>
+
+        <div class="sensor-stats">
+          <div class="summary-item">
+            <span class="summary-label">最新數值</span>
+            <strong id="sensor-latest-value">--</strong>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">感測器</span>
+            <strong id="sensor-latest-name">--</strong>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">最後更新時間</span>
+            <strong id="sensor-latest-time">--</strong>
+          </div>
+        </div>
+
+        <div class="result-block">
+          <canvas id="sensor-chart" height="260"></canvas>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Records</p>
             <h2>ESP32 上傳紀錄</h2>
           </div>
           <span class="status-badge">Live</span>

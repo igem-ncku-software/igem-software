@@ -1,22 +1,22 @@
-from typing import Optional
-
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from esp32.upload import router as esp32_router
+from esp32.data import router as esp32_data_router
+
+# 如果你的 fluorescence 資料夾還在，就保留這行；
+# 如果暫時也想拿掉先求後端能跑起來，把這兩行註解掉即可。
 from fluorescence.router import router as fluorescence_router
 
 
 app = FastAPI(
     title="iGEM Analyzer API",
-    description="Backend API for ESP32 image upload and fluorescence data analysis.",
-    version="1.0.0",
+    description="Backend API for ESP32 sensor data and fluorescence analysis.",
+    version="1.2.0",
 )
-
 
 # CORS：
 # - GitHub Pages：正式前端
-# - localhost / 127.0.0.1：本機開發測試
+# - localhost：本機開發測試
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,79 +32,31 @@ app.add_middleware(
 )
 
 
-# ESP32 API
-# 例如：
-# /esp32/upload
-# /esp32/records
-# /esp32/uploads/{filename}
-app.include_router(esp32_router)
+# ESP32 感測數值 API（最小可跑測試用）
+# POST /esp32/data   -> ESP32 上傳一筆數值
+# GET  /esp32/data   -> 讀取最近數值，確認有沒有收到
+app.include_router(esp32_data_router)
 
-
-# Fluorescence analysis API
-# POST /api/fluorescence/analyze
+# Fluorescence CSV 分析 API（保留原功能）
 app.include_router(fluorescence_router)
 
 
 @app.get("/")
 def root() -> dict:
-    """API 根目錄。"""
+    """API 根目錄，順便列出目前有哪些 endpoint 可以測試。"""
     return {
         "message": "iGEM Analyzer API is running.",
         "docs": "/docs",
         "health": "/health",
-        "fluorescence_analysis": "/api/fluorescence/analyze",
+        "esp32_data_post": "POST /esp32/data",
+        "esp32_data_get": "GET /esp32/data",
     }
 
 
 @app.get("/health")
 def health_check() -> dict:
     """給前端與 Render 用來檢查後端是否正常運作。"""
-    return {
-        "status": "ok",
-        "service": "iGEM Analyzer API",
-    }
-
-
-@app.post("/api/analyze")
-async def analyze(
-    text: Optional[str] = Form(default=""),
-    image: Optional[UploadFile] = File(default=None),
-) -> dict:
-    """
-    接收前端送來的文字與可選圖片。
-
-    這個 endpoint 保留原本的示範功能。
-    螢光 CSV 分析請使用：
-    POST /api/fluorescence/analyze
-    """
-
-    result: dict = {}
-
-    cleaned_text = text.strip() if text else ""
-
-    if cleaned_text:
-        result["text_analysis"] = {
-            "original_text": cleaned_text,
-            "length": len(cleaned_text),
-            "word_count": len(cleaned_text.split()),
-        }
-
-    if image is not None:
-        try:
-            contents = await image.read()
-
-            result["image_analysis"] = {
-                "filename": image.filename,
-                "content_type": image.content_type,
-                "size_bytes": len(contents),
-            }
-        finally:
-            await image.close()
-
-    if not result:
-        result["message"] = "沒有收到任何文字或圖片。"
-
-    return result
+    return {"status": "ok", "service": "iGEM Analyzer API"}
 
 
 # 本機測試：

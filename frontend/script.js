@@ -473,6 +473,130 @@ async function checkBackend() {
 }
 
 // ========================================
+// ESP32 即時感測數據（新增）
+// ========================================
+
+const sensorLatestValue = document.getElementById(
+  "sensor-latest-value"
+);
+const sensorLatestName = document.getElementById(
+  "sensor-latest-name"
+);
+const sensorLatestTime = document.getElementById(
+  "sensor-latest-time"
+);
+const sensorLiveBadge = document.getElementById(
+  "sensor-live-badge"
+);
+
+let sensorChartInstance = null;
+
+async function loadSensorData() {
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/esp32/data?limit=100`
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const readings = await response.json();
+
+    updateSensorStats(readings);
+    updateSensorChart(readings);
+
+    sensorLiveBadge.textContent = "Live";
+    sensorLiveBadge.classList.remove("status-badge-offline");
+  } catch (error) {
+    sensorLiveBadge.textContent = "連線失敗";
+    sensorLiveBadge.classList.add("status-badge-offline");
+  }
+}
+
+function updateSensorStats(readings) {
+  if (!Array.isArray(readings) || readings.length === 0) {
+    sensorLatestValue.textContent = "--";
+    sensorLatestName.textContent = "--";
+    sensorLatestTime.textContent = "--";
+    return;
+  }
+
+  const latest = readings[readings.length - 1];
+
+  const unitSuffix = latest.unit ? ` ${latest.unit}` : "";
+  sensorLatestValue.textContent = `${formatNumber(latest.value)}${unitSuffix}`;
+  sensorLatestName.textContent = latest.sensor || "--";
+  sensorLatestTime.textContent = formatTimestamp(latest.timestamp);
+}
+
+function updateSensorChart(readings) {
+  const canvas = document.getElementById("sensor-chart");
+
+  const labels = readings.map((r) => formatTimestamp(r.timestamp, true));
+  const values = readings.map((r) => r.value);
+
+  if (!sensorChartInstance) {
+    sensorChartInstance = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "感測數值",
+            data: values,
+            borderColor: "rgba(37, 99, 235, 0.9)",
+            backgroundColor: "rgba(37, 99, 235, 0.12)",
+            fill: true,
+            tension: 0.25,
+            pointRadius: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 8 },
+          },
+          y: {
+            title: {
+              display: true,
+              text: "數值",
+            },
+          },
+        },
+      },
+    });
+    return;
+  }
+
+  sensorChartInstance.data.labels = labels;
+  sensorChartInstance.data.datasets[0].data = values;
+  sensorChartInstance.update();
+}
+
+function formatTimestamp(isoString, shortForm = false) {
+  if (!isoString) return "-";
+
+  const date = new Date(isoString);
+
+  if (Number.isNaN(date.getTime())) {
+    return isoString;
+  }
+
+  if (shortForm) {
+    return date.toLocaleTimeString("zh-TW", { hour12: false });
+  }
+
+  return date.toLocaleString("zh-TW", { hour12: false });
+}
+
+// ========================================
 // ESP32 上傳紀錄
 // ========================================
 
@@ -562,9 +686,13 @@ async function loadEsp32Records() {
 // ========================================
 
 checkBackend();
+loadSensorData();
 loadEsp32Records();
 
-// 每 5 秒重新取得 ESP32 紀錄
+// 每 2 秒更新即時感測數據
+setInterval(loadSensorData, 2000);
+
+// 每 5 秒重新取得 ESP32 上傳紀錄（圖片/文字）
 setInterval(
   loadEsp32Records,
   5000
