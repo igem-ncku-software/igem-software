@@ -1,14 +1,14 @@
 const BACKEND_URL = "https://igem-ncku-software.onrender.com";
 
 // ========================================
-// 共用 DOM
+// Shared DOM
 // ========================================
 
 const backendStatus = document.getElementById("backend-status");
 const esp32RecordsContainer = document.getElementById("esp32-records");
 
 // ========================================
-// Fluorescence CSV 分析
+// Fluorescence CSV analysis
 // ========================================
 
 const fluorescenceForm = document.getElementById("fluorescence-form");
@@ -47,7 +47,7 @@ fluorescenceForm.addEventListener("submit", async (event) => {
   if (!file) {
     showStatus(
       fluorescenceStatus,
-      "請先選擇一個 CSV 檔案。",
+      "Please select a CSV file first.",
       "error"
     );
     return;
@@ -56,7 +56,7 @@ fluorescenceForm.addEventListener("submit", async (event) => {
   if (!file.name.toLowerCase().endsWith(".csv")) {
     showStatus(
       fluorescenceStatus,
-      "目前只支援 CSV 檔案。",
+      "Only CSV files are supported.",
       "error"
     );
     return;
@@ -69,7 +69,7 @@ fluorescenceForm.addEventListener("submit", async (event) => {
 
   showStatus(
     fluorescenceStatus,
-    "分析中，請稍候..."
+    "Analyzing, please wait..."
   );
 
   fluorescenceSummary.hidden = true;
@@ -103,13 +103,13 @@ fluorescenceForm.addEventListener("submit", async (event) => {
 
     showStatus(
       fluorescenceStatus,
-      "分析完成。",
+      "Analysis complete.",
       "success"
     );
   } catch (error) {
     showStatus(
       fluorescenceStatus,
-      `分析失敗：${error.message}`,
+      `Analysis failed: ${error.message}`,
       "error"
     );
   } finally {
@@ -118,23 +118,23 @@ fluorescenceForm.addEventListener("submit", async (event) => {
 });
 
 // ========================================
-// 顯示 Fluorescence 摘要
+// Render fluorescence summary
 // ========================================
 
 function renderSummary(summary) {
   const items = [
     [
-      "檔案名稱",
+      "File name",
       summary.original_file_name
         || summary.file_name
         || "-"
     ],
     [
-      "資料筆數",
+      "Total rows",
       summary.total_rows ?? "-"
     ],
     [
-      "分組數量",
+      "Groups",
       summary.groups ?? "-"
     ],
     [
@@ -172,7 +172,7 @@ function renderSummary(summary) {
 }
 
 // ========================================
-// 顯示抑制率比較圖（Chart.js）
+// Render inhibition rate comparison chart (Chart.js)
 // ========================================
 
 function renderChart(chartData) {
@@ -187,7 +187,7 @@ function renderChart(chartData) {
     fluorescenceChartInstance.destroy();
   }
 
-  // 有顯著性的組別，直接把星號標在 X 軸標籤上
+  // Append the significance marker directly to the x-axis label
   const labelsWithSignificance = chartData.labels.map(
     (label, index) => {
       const sig = chartData.significance[index];
@@ -233,7 +233,7 @@ function renderChart(chartData) {
 }
 
 // ========================================
-// 顯示 Fluorescence 分組結果
+// Render fluorescence group results
 // ========================================
 
 function renderResults(results) {
@@ -291,7 +291,7 @@ function renderResults(results) {
 }
 
 // ========================================
-// 數字格式
+// Number formatting
 // ========================================
 
 function formatNumber(value) {
@@ -304,7 +304,7 @@ function formatNumber(value) {
   }
 
   return Number(value).toLocaleString(
-    "zh-TW",
+    "en-US",
     {
       maximumFractionDigits: 4,
     }
@@ -312,7 +312,7 @@ function formatNumber(value) {
 }
 
 // ========================================
-// 狀態訊息
+// Status message
 // ========================================
 
 function showStatus(
@@ -327,7 +327,7 @@ function showStatus(
 }
 
 // ========================================
-// 原本的文字與圖片分析功能
+// Text & image analysis demo (original feature)
 // ========================================
 
 const form = document.getElementById("analyze-form");
@@ -349,7 +349,7 @@ const statusMessage = document.getElementById(
 
 let previewUrl = null;
 
-// 圖片預覽
+// Image preview
 imageInput.addEventListener("change", () => {
   const file = imageInput.files[0];
 
@@ -370,7 +370,7 @@ imageInput.addEventListener("change", () => {
   imagePreview.hidden = false;
 });
 
-// 傳送文字與圖片
+// Submit text and image
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -380,7 +380,7 @@ form.addEventListener("submit", async (event) => {
   if (!text && !imageFile) {
     showStatus(
       statusMessage,
-      "請至少輸入文字或選擇一張圖片。",
+      "Please enter text or select an image.",
       "error"
     );
     return;
@@ -401,7 +401,7 @@ form.addEventListener("submit", async (event) => {
 
   showStatus(
     statusMessage,
-    "傳送中，請稍候..."
+    "Sending, please wait..."
   );
 
   resultSection.hidden = true;
@@ -434,13 +434,13 @@ form.addEventListener("submit", async (event) => {
 
     showStatus(
       statusMessage,
-      "分析完成。",
+      "Analysis complete.",
       "success"
     );
   } catch (error) {
     showStatus(
       statusMessage,
-      `發生錯誤：${error.message}`,
+      `An error occurred: ${error.message}`,
       "error"
     );
   } finally {
@@ -449,7 +449,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 // ========================================
-// 後端連線檢查
+// Backend connectivity check
 // ========================================
 
 async function checkBackend() {
@@ -464,16 +464,16 @@ async function checkBackend() {
       );
     }
 
-    backendStatus.textContent = "已連線";
+    backendStatus.textContent = "Connected";
     backendStatus.className = "online";
   } catch (error) {
-    backendStatus.textContent = "連線失敗";
+    backendStatus.textContent = "Connection failed";
     backendStatus.className = "offline";
   }
 }
 
 // ========================================
-// ESP32 即時感測數據（新增）
+// ESP32 live sensor data
 // ========================================
 
 const sensorLatestValue = document.getElementById(
@@ -509,7 +509,7 @@ async function loadSensorData() {
     sensorLiveBadge.textContent = "Live";
     sensorLiveBadge.classList.remove("status-badge-offline");
   } catch (error) {
-    sensorLiveBadge.textContent = "連線失敗";
+    sensorLiveBadge.textContent = "Connection failed";
     sensorLiveBadge.classList.add("status-badge-offline");
   }
 }
@@ -543,7 +543,7 @@ function updateSensorChart(readings) {
         labels,
         datasets: [
           {
-            label: "感測數值",
+            label: "Sensor value",
             data: values,
             borderColor: "rgba(37, 99, 235, 0.9)",
             backgroundColor: "rgba(37, 99, 235, 0.12)",
@@ -566,7 +566,7 @@ function updateSensorChart(readings) {
           y: {
             title: {
               display: true,
-              text: "數值",
+              text: "Value",
             },
           },
         },
@@ -590,14 +590,14 @@ function formatTimestamp(isoString, shortForm = false) {
   }
 
   if (shortForm) {
-    return date.toLocaleTimeString("zh-TW", { hour12: false });
+    return date.toLocaleTimeString("en-US", { hour12: false });
   }
 
-  return date.toLocaleString("zh-TW", { hour12: false });
+  return date.toLocaleString("en-US", { hour12: false });
 }
 
 // ========================================
-// ESP32 上傳紀錄
+// ESP32 upload records
 // ========================================
 
 async function loadEsp32Records() {
@@ -609,7 +609,7 @@ async function loadEsp32Records() {
     if (!response.ok) {
       esp32RecordsContainer.innerHTML =
         '<p class="empty-message">'
-        + "無法取得 ESP32 紀錄。"
+        + "Unable to retrieve ESP32 records."
         + "</p>";
 
       return;
@@ -623,7 +623,7 @@ async function loadEsp32Records() {
     ) {
       esp32RecordsContainer.innerHTML =
         '<p class="empty-message">'
-        + "目前尚無 ESP32 上傳資料。"
+        + "No ESP32 upload data yet."
         + "</p>";
 
       return;
@@ -665,7 +665,7 @@ async function loadEsp32Records() {
             encodeURIComponent(record.image)
           }`;
 
-        image.alt = "ESP32 上傳照片";
+        image.alt = "ESP32 uploaded photo";
         image.loading = "lazy";
 
         card.appendChild(image);
@@ -676,23 +676,23 @@ async function loadEsp32Records() {
   } catch (error) {
     esp32RecordsContainer.innerHTML =
       '<p class="empty-message">'
-      + "連線失敗，無法取得 ESP32 紀錄。"
+      + "Connection failed, unable to retrieve ESP32 records."
       + "</p>";
   }
 }
 
 // ========================================
-// 頁面初始化
+// Page init
 // ========================================
 
 checkBackend();
 loadSensorData();
 loadEsp32Records();
 
-// 每 2 秒更新即時感測數據
+// Refresh live sensor data every 2 seconds
 setInterval(loadSensorData, 2000);
 
-// 每 5 秒重新取得 ESP32 上傳紀錄（圖片/文字）
+// Refresh ESP32 upload records (images/text) every 5 seconds
 setInterval(
   loadEsp32Records,
   5000
