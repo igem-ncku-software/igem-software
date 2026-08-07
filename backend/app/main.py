@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from esp32.data import router as esp32_data_router
+from app.config import settings
+from app.fluorescence.router import router as fluorescence_router
 
-# 如果你的 fluorescence 資料夾還在，就保留這行；
-# 如果暫時也想拿掉先求後端能跑起來，把這兩行註解掉即可。
-from fluorescence.router import router as fluorescence_router
+# TODO: hardware（原 esp32）模組搬移到 app/hardware/ 之後，
+# 取消下面這行註解，並把對應的 include_router 也打開。
+# from app.hardware.router import router as esp32_data_router
 
 
 app = FastAPI(
@@ -14,31 +15,21 @@ app = FastAPI(
     version="1.2.0",
 )
 
-# CORS：
-# - GitHub Pages：正式前端
-# - localhost：本機開發測試
+# CORS 來源清單統一從 app/config.py 讀取（可由 .env 覆寫）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://igem-ncku-software.github.io",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ESP32 感測數值 API（最小可跑測試用）
-# POST /esp32/data   -> ESP32 上傳一筆數值
-# GET  /esp32/data   -> 讀取最近數值，確認有沒有收到
-app.include_router(esp32_data_router)
-
-# Fluorescence CSV 分析 API（保留原功能）
+# Fluorescence CSV 分析 API（保留原功能，搬到 app/fluorescence/）
 app.include_router(fluorescence_router)
+
+# ESP32 感測數值 API（等 hardware 模組搬移完成後再打開）
+# app.include_router(esp32_data_router)
 
 
 @app.get("/")
@@ -48,8 +39,7 @@ def root() -> dict:
         "message": "iGEM Analyzer API is running.",
         "docs": "/docs",
         "health": "/health",
-        "esp32_data_post": "POST /esp32/data",
-        "esp32_data_get": "GET /esp32/data",
+        "fluorescence_analyze": "POST /api/fluorescence/analyze",
     }
 
 
@@ -61,15 +51,16 @@ def health_check() -> dict:
 
 # 本機測試：
 # 1. 進入 backend 資料夾
-# 2. 執行 python main.py
+# 2. 執行 uvicorn app.main:app --reload
 #
-# 或使用：
-# uvicorn main:app --reload
+# 注意：因為 main.py 現在是 app 這個套件裡的模組，
+# 不能再直接用 `python main.py` 或 `uvicorn main:app` 執行，
+# 一律要用 `app.main:app` 這個路徑。
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

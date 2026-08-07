@@ -3,3 +3,6 @@ uvicorn
 python-multipart
 pandas
 scipy
+pytest
+httpx
+python-dotenv
