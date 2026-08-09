@@ -4,9 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.fluorescence.router import router as fluorescence_router
 
-# TODO: hardware（原 esp32）模組搬移到 app/hardware/ 之後，
-# 取消下面這行註解，並把對應的 include_router 也打開。
-# from app.hardware.router import router as esp32_data_router
+from app.hardware.router import router as esp32_data_router
 
 
 app = FastAPI(
@@ -28,8 +26,8 @@ app.add_middleware(
 # Fluorescence CSV 分析 API（保留原功能，搬到 app/fluorescence/）
 app.include_router(fluorescence_router)
 
-# ESP32 感測數值 API（等 hardware 模組搬移完成後再打開）
-# app.include_router(esp32_data_router)
+# ESP32 感測數值 API
+app.include_router(esp32_data_router)
 
 
 @app.get("/")
@@ -40,6 +38,8 @@ def root() -> dict:
         "docs": "/docs",
         "health": "/health",
         "fluorescence_analyze": "POST /api/fluorescence/analyze",
+        "hardware_upload": "POST /api/hardware/upload",
+        "hardware_latest": "GET /api/hardware/latest",
     }
 
 
