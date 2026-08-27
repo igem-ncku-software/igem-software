@@ -71,6 +71,7 @@ button, input, textarea { font: inherit; }
 }
 
 .section-heading h2 { margin: 0; font-size: 1.55rem; }
+.subsection-heading { margin: 0; font-size: 1.1rem; }
 
 .status-badge {
   padding: 6px 10px;
@@ -224,6 +225,9 @@ td { font-size: 0.9rem; }
 tbody tr:last-child td { border-bottom: 0; }
 .inhibition-cell { color: var(--accent); font-weight: 700; }
 .significance-cell { color: var(--success); font-weight: 700; }
+
+#result-warnings { margin: 14px 0 0; padding-left: 20px; color: var(--error); font-size: 0.88rem; }
+#result-warnings:empty { display: none; margin: 0; }
 
 .chart-note {
   margin: -8px 0 16px;

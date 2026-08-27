@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.dose_response.router import router as dose_response_router
 from app.hardware.router import router as esp32_data_router
 
 
 app = FastAPI(
     title="iGEM Analyzer API",
-    description="Backend API for ESP32 sensor data.",
+    description="Backend API for ESP32 sensor data and AHL dose-response analysis.",
     version="1.2.0",
 )
 
@@ -24,6 +25,9 @@ app.add_middleware(
 # ESP32 感測數值 API
 app.include_router(esp32_data_router)
 
+# AHL dose-response (4PL) 分析 API
+app.include_router(dose_response_router)
+
 
 @app.get("/")
 def root() -> dict:
@@ -34,6 +38,8 @@ def root() -> dict:
         "health": "/health",
         "hardware_upload": "POST /api/hardware/upload",
         "hardware_latest": "GET /api/hardware/latest",
+        "dose_response_fit": "POST /api/dose_response/fit",
+        "dose_response_simulate": "POST /api/dose_response/simulate",
     }
 
 

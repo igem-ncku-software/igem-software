@@ -12,113 +12,10 @@
     <header class="site-header">
       <p class="eyebrow">iGEM NCKU SOFTWARE</p>
       <h1>AHL Aptamer Analysis Platform</h1>
-      <p class="subtitle">Fluorescence data analysis, image upload, and ESP32 experiment logs, all in one place.</p>
+      <p class="subtitle">ESP32 experiment logs, all in one place.</p>
     </header>
 
     <main>
-      <section class="card">
-        <div class="section-heading">
-          <div>
-            <p class="section-label">Analysis 01</p>
-            <h2>Fluorescence Analysis</h2>
-          </div>
-          <span class="status-badge">CSV</span>
-        </div>
-
-        <p class="section-description">
-          Upload a CSV file containing GFP and OD600 readings. The system automatically
-          calculates normalized GFP, group means, standard deviations, inhibition rate
-          relative to Control, and statistical significance (Welch's t-test).
-        </p>
-
-        <div class="format-box">
-          <strong>Required columns</strong>
-          <code>sample, aptamer, concentration, concentration_unit, replicate, gfp, od600</code>
-        </div>
-
-        <form id="fluorescence-form">
-          <label for="fluorescence-file">Select fluorescence CSV</label>
-          <input
-            type="file"
-            id="fluorescence-file"
-            name="file"
-            accept=".csv,text/csv"
-            required
-          />
-          <button type="submit" id="fluorescence-submit">Analyze CSV</button>
-        </form>
-
-        <p id="fluorescence-status" class="status-message" role="status" aria-live="polite"></p>
-
-        <section id="fluorescence-summary" class="result-block" hidden>
-          <h3>Summary</h3>
-          <div id="fluorescence-summary-content" class="summary-grid"></div>
-        </section>
-
-        <section id="fluorescence-chart-section" class="result-block" hidden>
-          <h3>Inhibition rate comparison</h3>
-          <p class="chart-note">* p&lt;0.05　** p&lt;0.01　*** p&lt;0.001 (Welch's t-test vs. Control)</p>
-          <canvas id="fluorescence-chart" height="300"></canvas>
-        </section>
-
-        <section id="fluorescence-results" class="result-block" hidden>
-          <h3>Group results</h3>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Sample</th>
-                  <th>Aptamer</th>
-                  <th>Concentration</th>
-                  <th>Replicates</th>
-                  <th>Mean GFP / OD600</th>
-                  <th>SD</th>
-                  <th>Inhibition</th>
-                  <th>p-value</th>
-                  <th>Sig.</th>
-                </tr>
-              </thead>
-              <tbody id="fluorescence-results-body"></tbody>
-            </table>
-          </div>
-        </section>
-      </section>
-
-      <section class="card">
-        <div class="section-heading">
-          <div>
-            <p class="section-label">Analysis 02</p>
-            <h2>Text & Image Test</h2>
-          </div>
-          <span class="status-badge">Demo</span>
-        </div>
-
-        <p class="section-description">Kept from the original build to make room for future analysis modules.</p>
-
-        <form id="analyze-form">
-          <label for="text-input">Text input</label>
-          <textarea
-            id="text-input"
-            name="text"
-            rows="5"
-            placeholder="e.g. DNA sequence, experiment description, or notes..."
-          ></textarea>
-
-          <label for="image-input">Image upload (optional)</label>
-          <input type="file" id="image-input" name="image" accept="image/*" />
-          <img id="image-preview" alt="Image preview" hidden />
-
-          <button type="submit" id="submit-btn">Submit</button>
-        </form>
-
-        <section id="result-section" class="result-block" hidden>
-          <h3>Result</h3>
-          <pre id="result-output"></pre>
-        </section>
-
-        <p id="status-message" class="status-message" role="status"></p>
-      </section>
-
       <section class="card">
         <div class="section-heading">
           <div>
@@ -155,14 +52,108 @@
       <section class="card">
         <div class="section-heading">
           <div>
-            <p class="section-label">Records</p>
-            <h2>ESP32 Upload Records</h2>
+            <p class="section-label">Analysis</p>
+            <h2>AHL Dose-Response (4PL) Analysis</h2>
           </div>
-          <span class="status-badge">Live</span>
         </div>
 
-        <p class="section-description">Displays images and text records sent by ESP32, refreshed every 5 seconds.</p>
-        <div id="esp32-records" class="records-grid"></div>
+        <p class="section-description">
+          Fit AHL concentration vs. fluorescence data to a 4-parameter logistic curve
+          to estimate the biosensor's EC50, Hill slope, Top and Bottom. Real
+          wet-lab concentration-gradient data isn't ready yet — use "Generate
+          simulated data" below to try the full pipeline in the meantime.
+        </p>
+
+        <form id="dose-response-form">
+          <label for="dose-response-data">Concentration, response (one pair per line)</label>
+          <div class="format-box">
+            <code>0, 6.1<br />1, 9.8<br />10, 22.4<br />100, 58.0<br />1000, 88.2<br />10000, 96.5</code>
+          </div>
+          <textarea
+            id="dose-response-data"
+            rows="8"
+            placeholder="concentration, response"
+          ></textarea>
+
+          <label for="fix-bottom">Fix Bottom (optional, e.g. from a negative control)</label>
+          <input type="number" id="fix-bottom" step="any" placeholder="leave blank to fit Bottom too" />
+
+          <button type="submit" id="analyze-button">Analyze</button>
+        </form>
+
+        <div class="result-block">
+          <div class="section-heading">
+            <div>
+              <p class="section-label">No real data yet?</p>
+              <h2 class="subsection-heading">Generate simulated data</h2>
+            </div>
+          </div>
+
+          <div class="sensor-stats" id="simulate-params">
+            <div class="summary-item">
+              <span class="summary-label">Top</span>
+              <input type="number" id="sim-top" value="100" step="any" />
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Bottom</span>
+              <input type="number" id="sim-bottom" value="5" step="any" />
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">EC50</span>
+              <input type="number" id="sim-ec50" value="50" step="any" />
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Hill slope</span>
+              <input type="number" id="sim-hill" value="1.5" step="any" />
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Noise (SD)</span>
+              <input type="number" id="sim-noise" value="3" step="any" min="0" />
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Replicates</span>
+              <input type="number" id="sim-replicates" value="3" step="1" min="1" />
+            </div>
+          </div>
+
+          <button type="button" id="simulate-button">Generate simulated data</button>
+        </div>
+
+        <p class="status-message" id="dose-response-status"></p>
+
+        <div class="result-block" id="dose-response-result" hidden>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">EC50</span>
+              <strong id="result-ec50">--</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Hill slope</span>
+              <strong id="result-hill">--</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Top</span>
+              <strong id="result-top">--</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Bottom</span>
+              <strong id="result-bottom">--</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">R²</span>
+              <strong id="result-r2">--</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Converged</span>
+              <strong id="result-converged">--</strong>
+            </div>
+          </div>
+
+          <ul id="result-warnings"></ul>
+
+          <p class="chart-note">Log scale on the concentration axis. Dashed line marks EC50.</p>
+          <canvas id="dose-response-chart" height="280"></canvas>
+        </div>
       </section>
     </main>
 
@@ -171,6 +162,7 @@
     </footer>
   </div>
 
-  <script src="js/fluorescence.js"></script>
+  <script src="js/hardware.js"></script>
+  <script src="js/dose_response.js"></script>
 </body>
 </html>
