@@ -2,14 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.fluorescence.router import router as fluorescence_router
-
 from app.hardware.router import router as esp32_data_router
 
 
 app = FastAPI(
     title="iGEM Analyzer API",
-    description="Backend API for ESP32 sensor data and fluorescence analysis.",
+    description="Backend API for ESP32 sensor data.",
     version="1.2.0",
 )
 
@@ -23,9 +21,6 @@ app.add_middleware(
 )
 
 
-# Fluorescence CSV 分析 API（保留原功能，搬到 app/fluorescence/）
-app.include_router(fluorescence_router)
-
 # ESP32 感測數值 API
 app.include_router(esp32_data_router)
 
@@ -37,7 +32,6 @@ def root() -> dict:
         "message": "iGEM Analyzer API is running.",
         "docs": "/docs",
         "health": "/health",
-        "fluorescence_analyze": "POST /api/fluorescence/analyze",
         "hardware_upload": "POST /api/hardware/upload",
         "hardware_latest": "GET /api/hardware/latest",
     }
