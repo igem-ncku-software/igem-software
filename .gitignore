@@ -4,35 +4,53 @@ __pycache__/
 *$py.class
 *.egg-info/
 .eggs/
+build/
+dist/
 
 # ===== 虛擬環境 =====
-venv/
 .venv/
+venv/
 env/
 ENV/
 
+# ===== 測試 / 覆蓋率 =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
 # ===== 環境變數 / 機密資訊 =====
+# 注意：只忽略 .env 本身，不要用 .env* 這種萬用字元，
+# 否則會連 backend/.env.example（範本，應該要進版控）都忽略掉。
 .env
 .env.local
 *.key
+*.pem
 secrets.json
 
 # ===== IDE / 編輯器 =====
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
 # ===== 作業系統 =====
 .DS_Store
 Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
 
-# ===== 上傳/暫存的使用者檔案（如果之後有存圖片等） =====
+# ===== 上傳 / 暫存的使用者檔案（如果之後有存圖片等） =====
 uploads/
 *.tmp
 
 # ===== 日誌 =====
 *.log
 
+# ===== Jupyter（如果之後用 notebook 做資料分析） =====
+.ipynb_checkpoints/
+
 # ===== 前端（如果之後加 npm 工具鏈） =====
 node_modules/
-dist/
