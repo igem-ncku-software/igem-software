@@ -247,10 +247,10 @@ hill:
 
 `tests/test_models.py`：
 1. 用已知參數 (`EC50=1e-7, n=1.5, top=8000, bottom=200`) 產生 6 個濃度的合成 plateau，加小量高斯雜訊 → `fit_hill()` 應還原 EC50 在 ±20% 內、n 在 ±0.3 內。
-   > **TODO（§10 item 4）**：現階段 `fit_hill()` 還沒寫，`tests/dose_response/test_models.py` 先用 `scipy.optimize.curve_fit` 直接對 `hill()` 做暫代版本，只證明數學形狀可還原，不代表 `fit_hill()` 屆時一定會通過。等 `doseresponse.py` 的 `fit_hill()` 寫出來後，要補一個真的呼叫 `fit_hill()` 的還原測試，取代或補齊這個暫代版本。
 2. 產生一條**平的**合成曲線（top≈bottom）→ `flatness_test()` 應回 `responsive=False`。
-   > **TODO（§10 item 4）**：`flatness_test()` 還沒實作，這項測試還沒寫，等 `doseresponse.py` 完成後補上。
 3. `hill()` 邊界：`[A]→0` 回 `bottom`、`[A]→∞` 回 `top`、`[A]=EC50` 回 `(top+bottom)/2`。
+
+> **完成（§10 item 4）**：item 1、2 實際落在 `tests/dose_response/test_doseresponse.py`，直接呼叫 `doseresponse.py` 的真正 `fit_hill()`/`flatness_test()`（不是暫代版本）。`test_models.py` 當初那個用 `scipy.optimize.curve_fit` 直接對 `hill()` 擬合的暫代測試已移除。
 
 `tests/test_normalize.py`：給定人工 RFU/OD/blank 矩陣，驗證 blank 扣除與 OD gating 正確。
 
