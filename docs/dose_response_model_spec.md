@@ -122,6 +122,8 @@ F(w,t)        = RFU_corr(w,t) / OD_corr(w,t)       # 若 OD_corr < OD_min 則設
 
 `OD_min` 建議 0.02（放 config）。之後每個 (strain, conc, t) 對 replicate 取 mean ± SD。
 
+> **決定（§10 item 3，實作 `normalize.py` 時）**：`F(w,t)` 算出負值時**不做任何截斷**，原始負值直接保留傳給下游。原因：負值只出現在早期低訊號時間點（背景 > 訊號的雜訊區間；模擬資料集中在 t=0–2h，t≥3h 後全部轉正），不影響 plateau 或後續 EC50 擬合；若歸零會系統性墊高低劑量組（尤其 0 nM 對照）的平均值，污染 §5.4 平坦檢定與 §5.5 LOD/LOQ 的基線估計。之後畫圖（§6）如果想要非負的視覺呈現，只能在畫圖時把 y 軸下限夾在 0，不能改動 `tidy_normalized.csv` 裡的原始數據。**這是預期行為，不是 bug**，之後看到負的 F 不要直接當成錯誤去「修」。
+
 ### 5.2 時間動力學指標（每條 strain×conc 曲線）
 **主方法：擬時間 logistic**
 
