@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-iGEM NCKU Software: a frontend/backend-split web app for the team's wet-lab data tools (fluorescence CSV analysis, ESP32 sensor monitoring). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
+iGEM NCKU Software: a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response 4PL curve fitting, ESP32 sensor monitoring). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
 
 - `frontend/` — static HTML/CSS/vanilla JS, no framework, no bundler. Deployed as-is to GitHub Pages.
 - `backend/` — FastAPI app. Deployed to Render at `https://igem-ncku-software.onrender.com`.
@@ -25,7 +25,9 @@ uvicorn app.main:app --reload
 
 Because `main.py` lives inside the `app` package, it must be run as `app.main:app` — running `python main.py` or `uvicorn main:app` directly will fail.
 
-`pytest` is listed in `requirements.txt` but there is currently no `tests/` directory in the working tree (a prior `backend/tests/` with fluorescence/hardware tests was removed) — check `git status`/`git log` before assuming test coverage exists.
+`pytest` is listed in `requirements.txt` but there is currently no `tests/` directory in the working tree (a prior `backend/tests/` with dose_response/hardware tests was removed) — check `git status`/`git log` before assuming test coverage exists.
+
+`app/dose_response/` and `app/hardware/` are being rewritten from scratch — as of the last review their folders were empty (only `__init__.py`/`router.py` etc. deleted, unstaged) while `main.py` still imports both routers, so `uvicorn app.main:app` fails with `ModuleNotFoundError` until the rewrite lands. Check `git status` before assuming either module is importable.
 
 ### Frontend
 
@@ -37,10 +39,9 @@ No build step. Open `frontend/index.html` directly or serve the folder with any 
 
 Each feature lives in its own folder under `backend/app/`, containing at minimum a `router.py` that defines an `APIRouter` with its own path prefix; feature-specific logic (data validation, computation) goes in sibling modules (e.g. `analysis.py`). The router is then imported and mounted in `backend/app/main.py` via `app.include_router(...)`. There is no shared base class or plugin registry — wiring a new feature in means adding the import + `include_router` line by hand.
 
-Current features:
-- `app/fluorescence/` — prefix `/api/fluorescence`. `router.py` handles CSV upload (`POST /analyze`), writes it to a temp file, and delegates to `analysis.py`, which uses pandas to validate the CSV (required columns, numeric ranges, duplicate detection, a mandatory "Control" sample) and compute normalized GFP (`gfp / od600`), per-group means/SD, inhibition rate relative to Control, and statistical significance via Welch's t-test (`scipy.stats.ttest_ind`, `equal_var=False`). Returns `summary` / `results` / `raw_data` / `chart_data` for direct use by Chart.js on the frontend.
+Current features (both mid-rewrite — see the note in Commands above; the description below is of the pre-rewrite implementation, kept as a reference for the intended shape):
+- `app/dose_response/` — prefix `/api/dose_response`. `POST /fit` takes `{concentrations, responses, fix_bottom?}` and fits a 4-parameter logistic curve (`fitting.py`, via `scipy.optimize`), returning params (`top`/`bottom`/`ec50`/`hill_slope`), std errors, 95% CIs, R², convergence, warnings, and Chart.js-ready `chart_data` (`chart_data.py`). `POST /simulate` (`simulate.py`) generates synthetic concentration/response pairs from given 4PL params + noise, for trying the pipeline before real wet-lab dose-gradient data exists.
 - `app/hardware/` — prefix `/api/hardware`. Minimal: `POST /upload` (ESP32 pushes a sensor reading) and `GET /latest` (frontend polls it). State is a single in-memory dict (`latest_data`), not persisted — restarting the server loses it. No history/database yet.
-- `app/model/` — prefix `/api/model`. Scaffold only (empty `router.py` with no endpoints yet) — this is where the iGEM mathematical/computational model will live.
 
 When adding a new feature, follow this same pattern (own folder under `app/`, own `router.py` + prefix, mounted in `main.py`) rather than adding routes directly to `main.py`.
 
@@ -48,14 +49,14 @@ When adding a new feature, follow this same pattern (own folder under `app/`, ow
 
 `app/config.py` loads `backend/.env` via `python-dotenv` (silently no-ops if absent, e.g. on Render where env vars are injected by the platform) and centralizes `CORS_ORIGINS` (comma-separated). Default allowed origins cover the GitHub Pages URL plus common local dev ports (5500, 8000). Any new local frontend port needs to be added here or to `.env`.
 
-### Frontend wiring caveats (verified inconsistencies as of last review)
+### Frontend wiring
 
-The frontend has two independent entry points that are not fully consistent with each other or with the backend — check current behavior before relying on either:
+`index.html` is the only page and loads two independent scripts, each owning one section of the page and matching it against the pre-rewrite backend contract above:
 
-- `index.html` loads only `js/fluorescence.js`. That file's ESP32 polling code calls `${BACKEND_URL}/esp32/data`, `/esp32/records`, `/esp32/uploads/{id}` — endpoints that do not exist in `app/hardware/router.py` (which only exposes `/api/hardware/upload` and `/api/hardware/latest`). The "ESP32 Live Sensor Data" / "ESP32 Upload Records" sections on the main page are likely non-functional against the current backend.
-- `js/hardware.js` (loaded only by the separate `hardware.html` test page) correctly calls `/api/hardware/latest`, but targets DOM ids (`sensor-latest-value`, `sensor-chart`, `backend-status`, …) that belong to `index.html`, not to `hardware.html` (which uses different ids: `sensor-value`, `sensor-device`, `sensor-time`, `sensor-status`).
+- `js/hardware.js` — polls `GET /api/hardware/latest` every 2s, renders into the "ESP32 Live Sensor Data" card (`#sensor-latest-value`, `#sensor-latest-name`, `#sensor-latest-time`, a Chart.js line chart in `#sensor-chart`, live/offline state via `#sensor-live-badge` / `#backend-status`). Hardcodes the Render URL — no local/prod branching.
+- `js/dose_response.js` — drives the "AHL Dose-Response (4PL) Analysis" card: submits `#dose-response-form` to `POST /api/dose_response/fit`, "Generate simulated data" button to `POST /api/dose_response/simulate` (then auto-runs a fit on the result), and renders params/warnings/a Chart.js scatter+fit-curve+EC50-line chart. Branches backend URL on `window.location.hostname` (`localhost`/`127.0.0.1` → `http://127.0.0.1:8000`, else the Render URL).
 
-If asked to fix ESP32/hardware live data, expect to reconcile these three pieces (backend route, and both JS files' expectations) rather than assume any one of them is the current source of truth.
+Both scripts' DOM ids and endpoint calls matched `index.html` and the backend routes as of the last review — but since the backend routers are mid-rewrite (see Commands), re-verify both against whatever the new `router.py` files expose before assuming this wiring still holds.
 
 ### Deployment
 
