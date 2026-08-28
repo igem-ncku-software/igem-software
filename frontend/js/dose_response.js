@@ -107,6 +107,8 @@ function renderDoseResponseChart(chartData) {
           data: scatterPoints,
           pointRadius: 4,
           showLine: false,
+          pointBackgroundColor: "#075a3e",
+          pointBorderColor: "#075a3e",
         },
         {
           label: "4PL fit",
@@ -115,6 +117,7 @@ function renderDoseResponseChart(chartData) {
           pointRadius: 0,
           borderWidth: 2,
           tension: 0,
+          borderColor: "#c9a227",
         },
         {
           label: "EC50",
@@ -126,14 +129,27 @@ function renderDoseResponseChart(chartData) {
           pointRadius: 0,
           borderWidth: 1.5,
           borderDash: [6, 4],
+          borderColor: "#a3382c",
         },
       ],
     },
     options: {
       responsive: true,
       scales: {
-        x: { type: "logarithmic", title: { display: true, text: "Concentration" } },
-        y: { title: { display: true, text: "Response" } },
+        x: {
+          type: "logarithmic",
+          title: { display: true, text: "Concentration", color: "#4a3f35" },
+          grid: { color: "#e0d6c0" },
+          ticks: { color: "#6b6055" },
+        },
+        y: {
+          title: { display: true, text: "Response", color: "#4a3f35" },
+          grid: { color: "#e0d6c0" },
+          ticks: { color: "#6b6055" },
+        },
+      },
+      plugins: {
+        legend: { labels: { color: "#4a3f35" } },
       },
     },
   });

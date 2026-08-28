@@ -1,18 +1,36 @@
+@font-face {
+  font-family: "Changa";
+  src: url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Changa";
+  src: url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --bg: #f8fafc;
+  --bg: #f6f4ee;
   --panel: #ffffff;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-soft: #eff6ff;
-  --text: #172033;
-  --text-dim: #667085;
-  --border: #e4e7ec;
-  --success: #16803c;
-  --success-bg: #ecfdf3;
-  --error: #b42318;
-  --error-bg: #fef3f2;
-  --radius: 14px;
-  --shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+  --panel-soft: #faf9f5;
+  --accent: #075a3e;
+  --accent-hover: #0a6f4b;
+  --accent-soft: #e6f2ea;
+  --text: #21261f;
+  --text-dim: #667169;
+  --border: #e2e0d6;
+  --success: #1f7a6f;
+  --success-bg: #eaf6f3;
+  --error: #a3382c;
+  --error-bg: #fbeae7;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 16px rgba(15, 23, 42, 0.06);
+  --heading-font: "Changa", "Noto Sans TC", sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -22,7 +40,7 @@ body {
   min-height: 100vh;
   font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
   color: var(--text);
-  background: radial-gradient(circle at top left, #eef5ff 0, transparent 28rem), var(--bg);
+  background: var(--bg);
 }
 
 button, input, textarea { font: inherit; }
@@ -30,32 +48,50 @@ button, input, textarea { font: inherit; }
 .page {
   width: min(1080px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 56px 0 80px;
+  padding: 48px 0 80px;
 }
 
-.site-header { max-width: 760px; margin-bottom: 32px; }
+/* Header matches the wiki's actual hero: a light pastel wash with dark ink
+   text — the deep green is an accent color there, not a background fill. */
+.site-header {
+  max-width: none;
+  margin-bottom: 28px;
+  padding: 40px 36px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #ecffb5, #dbf9bd, #dbec94);
+  box-shadow: var(--shadow);
+}
 
-.eyebrow, .section-label {
+.eyebrow {
   margin: 0 0 8px;
   color: var(--accent);
   font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .site-header h1 {
   margin: 0;
-  font-size: clamp(2rem, 5vw, 3.5rem);
-  line-height: 1.08;
-  letter-spacing: -0.04em;
+  font-family: var(--heading-font);
+  font-weight: 700;
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
-.subtitle, .section-description { color: var(--text-dim); line-height: 1.7; }
-.subtitle { margin: 16px 0 0; font-size: 1.05rem; }
+.subtitle {
+  margin: 14px 0 0;
+  color: var(--text-dim);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.section-description { color: var(--text-dim); line-height: 1.7; }
 
 .card {
-  margin-top: 24px;
+  margin-top: 20px;
   padding: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -70,16 +106,31 @@ button, input, textarea { font: inherit; }
   gap: 20px;
 }
 
-.section-heading h2 { margin: 0; font-size: 1.55rem; }
-.subsection-heading { margin: 0; font-size: 1.1rem; }
+.section-heading h2, .subsection-heading {
+  font-family: var(--heading-font);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.section-heading h2 { margin: 0; font-size: 1.4rem; }
+.subsection-heading { margin: 0; font-size: 1.05rem; }
+
+.section-label {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 .status-badge {
-  padding: 6px 10px;
+  padding: 5px 12px;
   border-radius: 999px;
   color: var(--accent);
   background: var(--accent-soft);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .status-badge-offline {
@@ -87,64 +138,82 @@ button, input, textarea { font: inherit; }
   background: var(--error-bg);
 }
 
+/* Example/format callout: a plain doc-style note with an accent rule, not a sticky note. */
 .format-box {
   display: grid;
   gap: 8px;
-  margin: 22px 0;
-  padding: 16px;
-  border: 1px solid #cfe0ff;
-  border-radius: 10px;
-  background: #f8fbff;
+  margin: 20px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel-soft);
 }
 
-.format-box code { overflow-wrap: anywhere; color: #344054; font-size: 0.86rem; }
+.format-box code { overflow-wrap: anywhere; color: var(--text-dim); font-size: 0.86rem; }
 
 form { display: flex; flex-direction: column; gap: 8px; }
 
 label {
   margin-top: 12px;
-  color: #475467;
+  color: var(--text-dim);
   font-size: 0.9rem;
   font-weight: 600;
 }
 
-textarea, input[type="file"] {
+textarea, input[type="file"], input[type="number"] {
   width: 100%;
-  padding: 12px;
+  padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--text);
-  background: #fcfcfd;
+  background: var(--panel-soft);
 }
 
 textarea { resize: vertical; }
 
 textarea:focus, input:focus {
-  outline: 3px solid rgba(37, 99, 235, 0.15);
+  outline: 3px solid rgba(7, 90, 62, 0.14);
   border-color: var(--accent);
 }
 
 button {
   align-self: flex-start;
   margin-top: 14px;
-  padding: 11px 18px;
-  border: 0;
-  border-radius: 9px;
+  padding: 10px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
   color: #fff;
   background: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
-button:hover { background: var(--accent-hover); }
-button:disabled { cursor: wait; opacity: 0.65; }
+button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button:active { background: #064730; }
+button:disabled { cursor: wait; opacity: 0.6; }
+
+/* Secondary action: outline button, standard hierarchy pattern. */
+button.btn-secondary {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+button.btn-secondary:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+button.btn-secondary:active { background: #d7ecdf; }
 
 #image-preview {
   max-width: 100%;
   max-height: 280px;
   margin-top: 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   object-fit: contain;
 }
 
@@ -155,23 +224,27 @@ button:disabled { cursor: wait; opacity: 0.65; }
   font-size: 0.92rem;
 }
 
+.status-message.success, .status-message.error {
+  padding: 10px 14px;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+}
+
 .status-message.success {
-  padding: 10px 12px;
-  border-radius: 8px;
   color: var(--success);
   background: var(--success-bg);
+  border-left-color: var(--success);
 }
 
 .status-message.error {
-  padding: 10px 12px;
-  border-radius: 8px;
   color: var(--error);
   background: var(--error-bg);
+  border-left-color: var(--error);
 }
 
 .result-block {
-  margin-top: 26px;
-  padding-top: 22px;
+  margin-top: 24px;
+  padding-top: 20px;
   border-top: 1px solid var(--border);
 }
 
@@ -186,8 +259,8 @@ button:disabled { cursor: wait; opacity: 0.65; }
   gap: 6px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fcfcfd;
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
 
 .summary-label { color: var(--text-dim); font-size: 0.78rem; }
@@ -202,27 +275,30 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 table { width: 100%; min-width: 860px; border-collapse: collapse; }
 
 th, td {
-  padding: 13px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
 }
 
 th {
-  color: #475467;
-  background: #f9fafb;
-  font-size: 0.78rem;
+  color: var(--text-dim);
+  background: var(--panel-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 td { font-size: 0.9rem; }
 tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--panel-soft); }
 .inhibition-cell { color: var(--accent); font-weight: 700; }
 .significance-cell { color: var(--success); font-weight: 700; }
 
@@ -244,8 +320,8 @@ tbody tr:last-child td { border-bottom: 0; }
   overflow: auto;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
-  background: #f8fafc;
+  border-radius: 8px;
+  background: var(--panel-soft);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -260,14 +336,20 @@ tbody tr:last-child td { border-bottom: 0; }
 .record-card {
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fcfcfd;
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
 
 .record-time { margin: 0; color: var(--text-dim); font-size: 0.78rem; font-weight: 700; }
-.record-card img { display: block; width: 100%; margin-top: 12px; border-radius: 8px; }
+.record-card img { display: block; width: 100%; margin-top: 12px; border-radius: 6px; }
 .empty-message, .site-footer { color: var(--text-dim); }
-.site-footer { margin-top: 30px; font-size: 0.85rem; }
+
+.site-footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
 
 #backend-status.online { color: var(--success); font-weight: 700; }
 #backend-status.offline { color: var(--error); font-weight: 700; }
@@ -276,6 +358,7 @@ tbody tr:last-child td { border-bottom: 0; }
 
 @media (max-width: 640px) {
   .page { width: min(100% - 20px, 1080px); padding-top: 32px; }
+  .site-header { padding: 28px 22px; }
   .card { padding: 20px; }
   button { width: 100%; }
 }

@@ -31,6 +31,8 @@ function initChart() {
           tension: 0.3,
           pointRadius: 2,
           fill: false,
+          borderColor: "#075a3e",
+          pointBackgroundColor: "#075a3e",
         },
       ],
     },
@@ -38,8 +40,8 @@ function initChart() {
       responsive: true,
       animation: false,
       scales: {
-        x: { display: true, ticks: { maxTicksLimit: 6 } },
-        y: { display: true, beginAtZero: false },
+        x: { display: true, ticks: { maxTicksLimit: 6, color: "#6b6055" }, grid: { color: "#e0d6c0" } },
+        y: { display: true, beginAtZero: false, ticks: { color: "#6b6055" }, grid: { color: "#e0d6c0" } },
       },
       plugins: {
         legend: { display: false },
