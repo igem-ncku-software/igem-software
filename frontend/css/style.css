@@ -289,6 +289,28 @@ canvas {
 .record-card img { display: block; width: 100%; margin-top: 12px; border-radius: 6px; }
 .empty-message { color: var(--text-dim); }
 
+.site-footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.backend-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: var(--success);
+  background: var(--success-bg);
+  font-weight: 600;
+}
+
+.backend-status-badge.offline {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
 [hidden] { display: none !important; }
 
 @media (max-width: 640px) {
