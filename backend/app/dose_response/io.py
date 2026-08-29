@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app.dose_response.config import load_config
+from app.dose_response.config import ExperimentConfig, load_config
 
 _TIME_RE = re.compile(r"^Time\s+(\d+):(\d+):(\d+)")
 _ROW_LETTERS = {"A", "B", "C", "D", "E", "F", "G", "H"}
@@ -90,15 +90,20 @@ def load_reader_export(path: str | Path) -> pd.DataFrame:
     return wide
 
 
-def load_plate_map() -> dict[str, dict]:
+def load_plate_map(config: ExperimentConfig | None = None) -> dict[str, dict]:
     """Design v.1 plate map (spec §1 / §7's experiment.yaml), expanded to a
     per-well lookup table.
+
+    config defaults to this module's own load_config() call (the shipped
+    config/experiment.yaml) - pass one explicitly (e.g. from pipeline.py) to
+    run against a different plate layout without touching this file.
     """
-    strain_columns = _CONFIG.strains
+    config = config or _CONFIG
+    strain_columns = config.strains
     col_to_strain = {col: strain for strain, cols in strain_columns.items() for col in cols}
     plate_map: dict[str, dict] = {}
 
-    for row_letter, concentration_M in _CONFIG.concentrations_M.items():
+    for row_letter, concentration_M in config.concentrations_M.items():
         for col, strain in col_to_strain.items():
             well = f"{row_letter}{col}"
             plate_map[well] = {
@@ -109,7 +114,7 @@ def load_plate_map() -> dict[str, dict]:
             }
 
     for col, strain in col_to_strain.items():
-        well = f"{_CONFIG.roles.blank_row}{col}"
+        well = f"{config.roles.blank_row}{col}"
         plate_map[well] = {
             "strain": strain,
             "concentration_M": np.nan,
@@ -117,7 +122,7 @@ def load_plate_map() -> dict[str, dict]:
             "role": "blank",
         }
 
-    for replicate, well in enumerate(_CONFIG.roles.positive_wells, start=1):
+    for replicate, well in enumerate(config.roles.positive_wells, start=1):
         plate_map[well] = {
             "strain": None,
             "concentration_M": np.nan,
