@@ -14,14 +14,17 @@ class Settings:
     # 允許呼叫後端 API 的前端來源。
     # 正式環境（GitHub Pages）與本機開發用的 origin 都列在這裡，
     # 用逗號分隔，可透過 .env 覆寫，不需要改程式碼。
-    CORS_ORIGINS: list[str] = os.getenv(
-        "CORS_ORIGINS",
-        "https://igem-ncku-software.github.io,"
-        "http://localhost:5500,"
-        "http://127.0.0.1:5500,"
-        "http://localhost:8000,"
-        "http://127.0.0.1:8000",
-    ).split(",")
+    CORS_ORIGINS: list[str] = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "https://igem-ncku-software.github.io,"
+            "http://localhost:5500,"
+            "http://127.0.0.1:5500,"
+            "http://localhost:8000,"
+            "http://127.0.0.1:8000",
+        ).split(",")
+    ]
 
 
 settings = Settings()
