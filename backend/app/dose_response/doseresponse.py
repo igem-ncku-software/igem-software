@@ -35,6 +35,14 @@ class FitHillResult:
 
 
 @dataclass
+class ConcentrationPrediction:
+    concentration_M: float | None  # None when out of range
+    concentration_M_ci95: tuple[float, float] | None
+    in_range: bool
+    message: str | None  # explains why, when in_range is False
+
+
+@dataclass
 class FlatnessResult:
     responsive: bool
     p_value: float
@@ -124,6 +132,52 @@ def fit_hill(
         converged=bool(result.success),
         lmfit_result=result,
     )
+
+
+def predict_concentration(
+    F: float,
+    bottom: float,
+    top: float,
+    ec50_M: float,
+    n: float,
+    ec50_M_ci95: tuple[float, float] | None = None,
+) -> ConcentrationPrediction:
+    """Invert the Hill equation to back-calculate [A] from a measured F.
+
+    Algebraic inverse of spec §5.3's F = bottom + (top-bottom)*A^n/(EC50^n+A^n):
+    [A] = EC50 * ((F-bottom)/(top-F))^(1/n).
+
+    The model's achievable range for A in (0, inf) is the OPEN interval
+    (bottom, top) - F<=bottom or F>=top means no positive concentration
+    could have produced this reading (not a fit failure), so this reports
+    in_range=False with a message instead of returning NaN or raising.
+
+    ec50_M_ci95, when given (e.g. fit.ec50_M_ci95 from fit_hill()), is
+    propagated through the same formula to get concentration_M_ci95. This
+    is EC50's uncertainty only, not bottom/top/n's - but for fixed
+    F/bottom/top/n the inverse is exactly linear in EC50 (the rest of the
+    formula is just a positive scale factor), so that one-parameter
+    propagation is exact, not an approximation, for what it covers. Full
+    multi-parameter propagation isn't implemented.
+    """
+    if F <= bottom:
+        return ConcentrationPrediction(
+            None, None, False, f"F={F:g} is at or below the bottom asymptote ({bottom:g}): out of range"
+        )
+    if F >= top:
+        return ConcentrationPrediction(
+            None, None, False, f"F={F:g} is at or above the top asymptote ({top:g}): out of range"
+        )
+
+    scale = ((F - bottom) / (top - F)) ** (1.0 / n)
+    concentration_M = ec50_M * scale
+
+    ci95 = None
+    if ec50_M_ci95 is not None:
+        lo_ec50, hi_ec50 = ec50_M_ci95
+        ci95 = (lo_ec50 * scale, hi_ec50 * scale)
+
+    return ConcentrationPrediction(concentration_M, ci95, True, None)
 
 
 def flatness_test(fit_result: FitHillResult, plateau_fitted: np.ndarray) -> FlatnessResult:

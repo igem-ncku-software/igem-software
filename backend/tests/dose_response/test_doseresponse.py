@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from app.dose_response.models import hill
-from app.dose_response.doseresponse import fit_hill, flatness_test, lod_loq
+from app.dose_response.doseresponse import fit_hill, flatness_test, lod_loq, predict_concentration
 
 CONCENTRATIONS = np.array([0.0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5])
 
@@ -168,3 +168,74 @@ def test_lod_loq_returns_none_when_nothing_clears_the_bar():
 
     assert result.lod_nM is None
     assert result.loq_nM is None
+
+
+# --- predict_concentration(): inverts hill(), round-trips a known concentration ---
+
+BOTTOM, TOP, EC50, N = 200.0, 8000.0, 1e-7, 1.5
+
+
+@pytest.mark.parametrize("true_conc", [1e-9, 3e-8, 1e-7, 4e-7, 5e-6])
+def test_predict_concentration_recovers_known_concentration(true_conc):
+    """spec §9 style: compute F from a known concentration via hill(), then
+    invert it back and check the original concentration is recovered.
+    """
+    F = hill(true_conc, BOTTOM, TOP, EC50, N)
+
+    result = predict_concentration(F, BOTTOM, TOP, EC50, N)
+
+    assert result.in_range
+    assert result.concentration_M == pytest.approx(true_conc, rel=1e-6)
+
+
+def test_predict_concentration_at_or_below_bottom_is_out_of_range():
+    result = predict_concentration(BOTTOM, BOTTOM, TOP, EC50, N)
+    assert not result.in_range
+    assert result.concentration_M is None
+    assert result.message is not None
+
+    result_below = predict_concentration(BOTTOM - 50.0, BOTTOM, TOP, EC50, N)
+    assert not result_below.in_range
+    assert result_below.concentration_M is None
+
+
+def test_predict_concentration_at_or_above_top_is_out_of_range():
+    result = predict_concentration(TOP, BOTTOM, TOP, EC50, N)
+    assert not result.in_range
+    assert result.concentration_M is None
+    assert result.message is not None
+
+    result_above = predict_concentration(TOP + 50.0, BOTTOM, TOP, EC50, N)
+    assert not result_above.in_range
+    assert result_above.concentration_M is None
+
+
+def test_predict_concentration_never_returns_nan_or_raises_out_of_range():
+    """The spec explicitly says out-of-range must not surface as NaN or an
+    exception - check both boundary directions produce a clean structured
+    result, not a NaN slipping through.
+    """
+    for F in (BOTTOM, BOTTOM - 1.0, TOP, TOP + 1.0):
+        result = predict_concentration(F, BOTTOM, TOP, EC50, N)
+        assert result.concentration_M is None  # not float("nan")
+        assert not result.in_range
+
+
+def test_predict_concentration_propagates_ec50_ci_linearly():
+    true_conc = EC50 * 2  # arbitrary point away from EC50 itself
+    F = hill(true_conc, BOTTOM, TOP, EC50, N)
+    ci95 = (EC50 * 0.8, EC50 * 1.2)  # a made-up +/-20% EC50 CI
+
+    result = predict_concentration(F, BOTTOM, TOP, EC50, N, ec50_M_ci95=ci95)
+
+    assert result.concentration_M_ci95 is not None
+    lo, hi = result.concentration_M_ci95
+    assert lo == pytest.approx(true_conc * 0.8, rel=1e-6)
+    assert hi == pytest.approx(true_conc * 1.2, rel=1e-6)
+    assert lo < result.concentration_M < hi
+
+
+def test_predict_concentration_ci_is_none_when_not_given():
+    F = hill(EC50, BOTTOM, TOP, EC50, N)
+    result = predict_concentration(F, BOTTOM, TOP, EC50, N)
+    assert result.concentration_M_ci95 is None
