@@ -12,157 +12,60 @@
     <header class="site-header">
       <p class="eyebrow">iGEM NCKU SOFTWARE</p>
       <h1>AHL Aptamer Analysis Platform</h1>
-      <p class="subtitle">ESP32 experiment logs, all in one place.</p>
+      <p class="subtitle">From a raw plate reader export to EC50, Hill slope, and detection limits per strain.</p>
     </header>
 
     <main>
       <section class="card">
         <div class="section-heading">
           <div>
-            <p class="section-label">Monitoring</p>
-            <h2>ESP32 Live Sensor Data</h2>
-          </div>
-          <span class="status-badge" id="sensor-live-badge">Live</span>
-        </div>
-
-        <p class="section-description">
-          Displays sensor readings from ESP32 (e.g. fluorescence intensity), refreshed every 2 seconds.
-        </p>
-
-        <div class="sensor-stats">
-          <div class="summary-item">
-            <span class="summary-label">Latest value</span>
-            <strong id="sensor-latest-value">--</strong>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Sensor</span>
-            <strong id="sensor-latest-name">--</strong>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Last updated</span>
-            <strong id="sensor-latest-time">--</strong>
-          </div>
-        </div>
-
-        <div class="result-block">
-          <canvas id="sensor-chart" height="260"></canvas>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-heading">
-          <div>
             <p class="section-label">Analysis</p>
-            <h2>AHL Dose-Response (4PL) Analysis</h2>
+            <h2>AHL Dose-Response Analysis</h2>
           </div>
         </div>
 
         <p class="section-description">
-          Fit AHL concentration vs. fluorescence data to a 4-parameter logistic curve
-          to estimate the biosensor's EC50, Hill slope, Top and Bottom. Real
-          wet-lab concentration-gradient data isn't ready yet — use "Generate
-          simulated data" below to try the full pipeline in the meantime.
+          Upload a raw plate reader export (SpectraMax M2/M2e ASCII export) to run
+          the full pipeline — blank subtraction, time-course kinetics, and a Hill
+          dose-response fit per strain, with a diagnostic check for whether a real
+          dose-response exists before reporting an EC50.
         </p>
 
         <form id="dose-response-form">
-          <label for="dose-response-data">Concentration, response (one pair per line)</label>
-          <div class="format-box">
-            <code>0, 6.1<br />1, 9.8<br />10, 22.4<br />100, 58.0<br />1000, 88.2<br />10000, 96.5</code>
-          </div>
-          <textarea
-            id="dose-response-data"
-            rows="8"
-            placeholder="concentration, response"
-          ></textarea>
+          <label for="dose-response-file">Plate reader export file</label>
+          <input type="file" id="dose-response-file" accept=".txt" />
 
-          <label for="fix-bottom">Fix Bottom (optional, e.g. from a negative control)</label>
-          <input type="number" id="fix-bottom" step="any" placeholder="leave blank to fit Bottom too" />
-
-          <button type="submit" id="analyze-button">Analyze</button>
+          <button type="submit" id="analyze-button">Upload &amp; Analyze</button>
         </form>
-
-        <div class="result-block">
-          <div class="section-heading">
-            <div>
-              <p class="section-label">No real data yet?</p>
-              <h2 class="subsection-heading">Generate simulated data</h2>
-            </div>
-          </div>
-
-          <div class="sensor-stats" id="simulate-params">
-            <div class="summary-item">
-              <span class="summary-label">Top</span>
-              <input type="number" id="sim-top" value="100" step="any" />
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Bottom</span>
-              <input type="number" id="sim-bottom" value="5" step="any" />
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">EC50</span>
-              <input type="number" id="sim-ec50" value="50" step="any" />
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Hill slope</span>
-              <input type="number" id="sim-hill" value="1.5" step="any" />
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Noise (SD)</span>
-              <input type="number" id="sim-noise" value="3" step="any" min="0" />
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Replicates</span>
-              <input type="number" id="sim-replicates" value="3" step="1" min="1" />
-            </div>
-          </div>
-
-          <button type="button" id="simulate-button" class="btn-secondary">Generate simulated data</button>
-        </div>
 
         <p class="status-message" id="dose-response-status"></p>
 
         <div class="result-block" id="dose-response-result" hidden>
-          <div class="summary-grid">
-            <div class="summary-item">
-              <span class="summary-label">EC50</span>
-              <strong id="result-ec50">--</strong>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Hill slope</span>
-              <strong id="result-hill">--</strong>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Top</span>
-              <strong id="result-top">--</strong>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Bottom</span>
-              <strong id="result-bottom">--</strong>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">R²</span>
-              <strong id="result-r2">--</strong>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Converged</span>
-              <strong id="result-converged">--</strong>
-            </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Strain</th>
+                  <th>EC50 (nM)</th>
+                  <th>95% CI (nM)</th>
+                  <th>Hill n</th>
+                  <th>R²</th>
+                  <th>Responsive</th>
+                  <th>LOD (nM)</th>
+                  <th>LOQ (nM)</th>
+                </tr>
+              </thead>
+              <tbody id="results-table-body"></tbody>
+            </table>
           </div>
 
-          <ul id="result-warnings"></ul>
-
-          <p class="chart-note">Log scale on the concentration axis. Dashed line marks EC50.</p>
-          <canvas id="dose-response-chart" height="280"></canvas>
+          <div id="strain-charts"></div>
         </div>
       </section>
     </main>
-
-    <footer class="site-footer">
-      <p>Backend status: <span id="backend-status">Not checked yet</span></p>
-    </footer>
   </div>
 
-  <script src="js/hardware.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/dose_response.js"></script>
 </body>
 </html>

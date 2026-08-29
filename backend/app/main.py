@@ -3,7 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.dose_response.router import router as dose_response_router
-from app.hardware.router import router as esp32_data_router
+
+# app/hardware/router.py doesn't exist yet (deleted, not yet rebuilt) -
+# importing it here would break `uvicorn app.main:app` for the whole app,
+# not just hardware's endpoints. Re-enable both this import and its
+# app.include_router() call below once that module is rebuilt.
+# from app.hardware.router import router as esp32_data_router
 
 
 app = FastAPI(
@@ -22,10 +27,10 @@ app.add_middleware(
 )
 
 
-# ESP32 感測數值 API
-app.include_router(esp32_data_router)
+# ESP32 感測數值 API - 暫時停用，見上面的 TODO
+# app.include_router(esp32_data_router)
 
-# AHL dose-response (4PL) 分析 API
+# AHL dose-response 分析 API
 app.include_router(dose_response_router)
 
 
@@ -36,10 +41,8 @@ def root() -> dict:
         "message": "iGEM Analyzer API is running.",
         "docs": "/docs",
         "health": "/health",
-        "hardware_upload": "POST /api/hardware/upload",
-        "hardware_latest": "GET /api/hardware/latest",
-        "dose_response_fit": "POST /api/dose_response/fit",
-        "dose_response_simulate": "POST /api/dose_response/simulate",
+        "dose_response_analyze": "POST /api/dose_response/analyze",
+        "dose_response_predict": "POST /api/dose_response/predict",
     }
 
 

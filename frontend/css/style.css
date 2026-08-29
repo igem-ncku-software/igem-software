@@ -124,34 +124,6 @@ button, input, textarea { font: inherit; }
   text-transform: uppercase;
 }
 
-.status-badge {
-  padding: 5px 12px;
-  border-radius: 999px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.status-badge-offline {
-  color: var(--error);
-  background: var(--error-bg);
-}
-
-/* Example/format callout: a plain doc-style note with an accent rule, not a sticky note. */
-.format-box {
-  display: grid;
-  gap: 8px;
-  margin: 20px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
-  background: var(--panel-soft);
-}
-
-.format-box code { overflow-wrap: anywhere; color: var(--text-dim); font-size: 0.86rem; }
-
 form { display: flex; flex-direction: column; gap: 8px; }
 
 label {
@@ -248,30 +220,6 @@ button.btn-secondary:active { background: #d7ecdf; }
   border-top: 1px solid var(--border);
 }
 
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-}
-
-.summary-item {
-  display: grid;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
-}
-
-.summary-label { color: var(--text-dim); font-size: 0.78rem; }
-
-.sensor-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-top: 20px;
-}
-
 .table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -302,16 +250,13 @@ tbody tr:hover td { background: var(--panel-soft); }
 .inhibition-cell { color: var(--accent); font-weight: 700; }
 .significance-cell { color: var(--success); font-weight: 700; }
 
-#result-warnings { margin: 14px 0 0; padding-left: 20px; color: var(--error); font-size: 0.88rem; }
-#result-warnings:empty { display: none; margin: 0; }
-
 .chart-note {
   margin: -8px 0 16px;
   color: var(--text-dim);
   font-size: 0.8rem;
 }
 
-#fluorescence-chart, #sensor-chart {
+canvas {
   max-width: 100%;
 }
 
@@ -342,17 +287,7 @@ tbody tr:hover td { background: var(--panel-soft); }
 
 .record-time { margin: 0; color: var(--text-dim); font-size: 0.78rem; font-weight: 700; }
 .record-card img { display: block; width: 100%; margin-top: 12px; border-radius: 6px; }
-.empty-message, .site-footer { color: var(--text-dim); }
-
-.site-footer {
-  margin-top: 32px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  font-size: 0.85rem;
-}
-
-#backend-status.online { color: var(--success); font-weight: 700; }
-#backend-status.offline { color: var(--error); font-weight: 700; }
+.empty-message { color: var(--text-dim); }
 
 [hidden] { display: none !important; }
 
