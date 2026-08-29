@@ -7,7 +7,9 @@ per-well, per-time-point corrected values and normalized fluorescence F.
 import numpy as np
 import pandas as pd
 
-OD_MIN_DEFAULT = 0.02
+from app.dose_response.config import load_config
+
+OD_MIN_DEFAULT = load_config().thresholds.od_min
 
 
 def blank_subtract(tidy: pd.DataFrame) -> pd.DataFrame:
@@ -48,9 +50,7 @@ def normalize_fluorescence(blank_subtracted: pd.DataFrame, od_min: float = OD_MI
     A non-negative *display* should be done by clamping the plot axis at
     the plotting layer (§6), never by changing this data.
 
-    TODO(§7): od_min should eventually come from experiment.yaml
-    (thresholds.od_min), same as load_plate_map()'s TODO in io.py -
-    hardcoded to the spec's suggested default (0.02) for now.
+    od_min defaults to config/experiment.yaml's thresholds.od_min (§7).
     """
     result = blank_subtracted.copy()
     valid = result["OD_corr"] >= od_min

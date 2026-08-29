@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 
+from app.dose_response.config import load_config
 from app.dose_response.models import logistic_time
 
 MIN_POINTS_TO_FIT = 4
-ONSET_K_SD_DEFAULT = 3
+ONSET_K_SD_DEFAULT = load_config().thresholds.onset_k_sd
 T0_MARGIN_FRACTION = 0.5
 
 
@@ -152,8 +153,7 @@ def onset_time(
     per time_h instead keeps SD in the single digits and the comparison
     apples-to-apples ("this dose vs. 0 nM at the same hour").
 
-    TODO(§7): k should eventually come from experiment.yaml
-    (thresholds.onset_k_sd), same as od_min's TODO in normalize.py.
+    k defaults to config/experiment.yaml's thresholds.onset_k_sd (§7).
     """
     curve = pd.DataFrame({"time_h": np.asarray(t, dtype=float), "F": np.asarray(F, dtype=float)})
     curve = curve.merge(baseline[["time_h", "F_mean", "F_sd"]], on="time_h", how="inner")

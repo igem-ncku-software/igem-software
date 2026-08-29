@@ -14,10 +14,12 @@ import pandas as pd
 from lmfit import Model
 from scipy import stats
 
+from app.dose_response.config import load_config
 from app.dose_response.models import hill
 from app.dose_response.timeseries import plateau
 
 MIN_POSITIVE_CONCENTRATIONS = 4  # >= free Hill params (bottom, top, log10_ec50, n)
+_N_BOUNDS = load_config().hill.n_bounds
 
 
 @dataclass
@@ -94,7 +96,7 @@ def fit_hill(
     params = model.make_params(bottom=bottom0, top=float(y.max()), log10_ec50=float(np.median(x_log)), n=1.0)
     params["bottom"].min = 0
     params["top"].min = params["bottom"].value
-    params["n"].set(min=0.5, max=4.0)
+    params["n"].set(min=_N_BOUNDS[0], max=_N_BOUNDS[1])
 
     weights = 1.0 / plateau_sd[mask] if plateau_sd is not None else None
     result = model.fit(y, params, log10_A=x_log, weights=weights)

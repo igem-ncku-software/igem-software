@@ -12,32 +12,23 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from app.dose_response.config import load_config
+
 _TIME_RE = re.compile(r"^Time\s+(\d+):(\d+):(\d+)")
 _ROW_LETTERS = {"A", "B", "C", "D", "E", "F", "G", "H"}
 
 # The file's own block labels ("Plate:\t<label>\t...") don't match the tidy
-# schema's column names (§4.1), so map them explicitly.
+# schema's column names (§4.1), so map them explicitly. This is specific to
+# the SpectraMax export's own vocabulary, not an experiment-design setting,
+# so it stays a code constant rather than moving to experiment.yaml.
 _PLATE_LABEL_TO_MEASUREMENT = {
     "GFP_fluorescence": "RFU",
     "OD600": "OD600",
 }
 
 # Design v.1 plate map (§1): row -> AHL concentration, column -> strain.
-_ROW_CONCENTRATIONS_M = {
-    "A": 0.0,
-    "B": 1e-9,
-    "C": 1e-8,
-    "D": 1e-7,
-    "E": 1e-6,
-    "F": 1e-5,
-}
-_STRAIN_COLUMNS = {
-    "TOP10": (1, 2, 3),
-    "DH5α": (4, 5, 6),
-    "BL21": (7, 8, 9),
-}
-_BLANK_ROW = "G"
-_POSITIVE_WELLS = ("H1", "H2", "H3")
+# Loaded from config/experiment.yaml (§7) - see load_plate_map().
+_CONFIG = load_config()
 
 
 def load_reader_export(path: str | Path) -> pd.DataFrame:
@@ -100,36 +91,33 @@ def load_reader_export(path: str | Path) -> pd.DataFrame:
 
 
 def load_plate_map() -> dict[str, dict]:
-    """Design v.1 plate map (§1), expanded to a per-well lookup table.
-
-    TODO(§7): hardcoded here for now. Once config/experiment.yaml + pyyaml
-    loading exist, this should read the same shape from that file instead,
-    so plate layouts can change without editing code (per §1's own note:
-    "Plate map 不要寫死在程式裡，放進 config").
+    """Design v.1 plate map (spec §1 / §7's experiment.yaml), expanded to a
+    per-well lookup table.
     """
-    col_to_strain = {col: strain for strain, cols in _STRAIN_COLUMNS.items() for col in cols}
+    strain_columns = _CONFIG.strains
+    col_to_strain = {col: strain for strain, cols in strain_columns.items() for col in cols}
     plate_map: dict[str, dict] = {}
 
-    for row_letter, concentration_M in _ROW_CONCENTRATIONS_M.items():
+    for row_letter, concentration_M in _CONFIG.concentrations_M.items():
         for col, strain in col_to_strain.items():
             well = f"{row_letter}{col}"
             plate_map[well] = {
                 "strain": strain,
                 "concentration_M": concentration_M,
-                "replicate": _STRAIN_COLUMNS[strain].index(col) + 1,
+                "replicate": strain_columns[strain].index(col) + 1,
                 "role": "sample",
             }
 
     for col, strain in col_to_strain.items():
-        well = f"{_BLANK_ROW}{col}"
+        well = f"{_CONFIG.roles.blank_row}{col}"
         plate_map[well] = {
             "strain": strain,
             "concentration_M": np.nan,
-            "replicate": _STRAIN_COLUMNS[strain].index(col) + 1,
+            "replicate": strain_columns[strain].index(col) + 1,
             "role": "blank",
         }
 
-    for replicate, well in enumerate(_POSITIVE_WELLS, start=1):
+    for replicate, well in enumerate(_CONFIG.roles.positive_wells, start=1):
         plate_map[well] = {
             "strain": None,
             "concentration_M": np.nan,
