@@ -14,8 +14,11 @@ import numpy as np
 from app.dose_response.config import ExperimentConfig, load_config
 from app.dose_response.doseresponse import fit_hill, flatness_test, lod_loq
 from app.dose_response.io import load_plate_map, load_reader_export, to_tidy
+from app.dose_response.models import hill
 from app.dose_response.normalize import blank_subtract, normalize_fluorescence
 from app.dose_response.timeseries import aggregate_by_condition, plateau
+
+FIT_CURVE_POINTS = 50
 
 
 @dataclass
@@ -31,6 +34,8 @@ class StrainResult:
     p_value: float
     lod_nM: float | None
     loq_nM: float | None
+    plateau_points: list[tuple[float, float]]  # (concentration_nM, plateau), every tested concentration incl. 0
+    fit_curve: list[tuple[float, float]] | None  # (concentration_nM, predicted F); None when not responsive
 
 
 def run_pipeline(export_path: str | Path, config: ExperimentConfig | None = None) -> dict[str, StrainResult]:
@@ -74,6 +79,14 @@ def run_pipeline(export_path: str | Path, config: ExperimentConfig | None = None
         if flat.responsive and fit.ec50_M_ci95 is not None:
             ci95_nM = (fit.ec50_M_ci95[0] * 1e9, fit.ec50_M_ci95[1] * 1e9)
 
+        plateau_points = [(float(c) * 1e9, float(p)) for c, p in zip(conc_arr, plateau_arr)]
+
+        fit_curve = None
+        if flat.responsive and positive_mask.any():
+            x_M = np.logspace(np.log10(conc_arr[positive_mask].min()), np.log10(conc_arr[positive_mask].max()), FIT_CURVE_POINTS)
+            y = hill(x_M, fit.bottom, fit.top, fit.ec50_M, fit.n)
+            fit_curve = [(float(x) * 1e9, float(v)) for x, v in zip(x_M, y)]
+
         results[strain] = StrainResult(
             strain=strain,
             ec50_nM=ec50_nM,
@@ -86,6 +99,8 @@ def run_pipeline(export_path: str | Path, config: ExperimentConfig | None = None
             p_value=flat.p_value,
             lod_nM=lod.lod_nM,
             loq_nM=lod.loq_nM,
+            plateau_points=plateau_points,
+            fit_curve=fit_curve,
         )
 
     return results
