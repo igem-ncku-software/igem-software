@@ -132,9 +132,10 @@ async def predict(payload: PredictRequest):
     Stateless by design, like /analyze: the client resends the fitted
     parameters rather than the server remembering a prior analysis by a
     session id. There's no session/result-storage mechanism anywhere in
-    this backend (hardware/'s in-memory latest_data is the only precedent,
-    and that's one global value, not per-session), so building one just for
-    this endpoint would be new infrastructure beyond what was asked.
+    this backend (hardware_gy302/'s in-memory latest reading is the only
+    precedent, and that's one global value, not per-session), so building
+    one just for this endpoint would be new infrastructure beyond what was
+    asked.
     """
     hp = payload.hill_params
     ec50_M = hp.ec50_nM * 1e-9

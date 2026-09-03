@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.dose_response.router import router as dose_response_router
-from app.hardware.router import router as esp32_data_router
 from app.hardware_gy302.router import router as gy302_data_router
 
 
@@ -23,9 +22,6 @@ app.add_middleware(
 )
 
 
-# ESP32 感測數值 API
-app.include_router(esp32_data_router)
-
 # ESP32 + GY-302 (BH1750) 環境光照感測數值 API
 app.include_router(gy302_data_router)
 
@@ -42,8 +38,6 @@ def root() -> dict:
         "health": "/health",
         "dose_response_analyze": "POST /api/dose_response/analyze",
         "dose_response_predict": "POST /api/dose_response/predict",
-        "hardware_upload": "POST /api/hardware/upload",
-        "hardware_latest": "GET /api/hardware/latest",
         "hardware_gy302_upload": "POST /api/hardware_gy302/upload",
         "hardware_gy302_latest": "GET /api/hardware_gy302/latest",
     }
