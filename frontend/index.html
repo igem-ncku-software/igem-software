@@ -88,6 +88,31 @@
 
         <p class="status-message" id="sensor-latest-time"></p>
       </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Live Data</p>
+            <h2>GY-302 Ambient Light Sensor</h2>
+          </div>
+          <span id="gy302-live-badge" class="backend-status-badge offline">Offline</span>
+        </div>
+
+        <p class="section-description">
+          Illuminance (lux) from the ESP32's GY-302 (BH1750) module, polled every 2 seconds.
+        </p>
+
+        <canvas id="gy302-chart" height="220"></canvas>
+
+        <div class="sensor-stats">
+          <div class="sensor-stat">
+            <span class="sensor-stat-label">Lux</span>
+            <span class="sensor-stat-value" id="gy302-lux-value">--</span>
+          </div>
+        </div>
+
+        <p class="status-message" id="gy302-latest-time"></p>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -98,6 +123,7 @@
   <script src="js/config.js"></script>
   <script src="js/dose_response.js"></script>
   <script src="js/hardware.js"></script>
+  <script src="js/hardware_gy302.js"></script>
   <script src="js/backend_status.js"></script>
 </body>
 </html>
