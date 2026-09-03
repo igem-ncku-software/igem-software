@@ -1,103 +1,113 @@
 /*
- * NodeMCU-32S (ESP32) + GY-302 (BH1750) ambient light sensor.
- *
- * Connects to WiFi, reads illuminance (lux) from the GY-302 over I2C
- * every UPLOAD_INTERVAL_MS, and POSTs it as JSON to the backend's
- * /api/hardware_gy302/upload endpoint:
- *   { "lux": 123.45 }
- *
- * Wiring (GY-302 -> ESP32, default I2C pins):
- *   VCC  -> 3V3
- *   GND  -> GND
- *   SCL  -> GPIO22
- *   SDA  -> GPIO21
- *   ADDR -> GND (I2C address 0x23; leave floating/high for 0x5C)
- *
- * Required libraries (Arduino Library Manager):
- *   - "BH1750" by claudio rocchini
- *   - ArduinoJson (by Benoit Blanchon)
- */
+  ESP32 -> Render 後端 連線測試
+  功能：模擬感測器數值，每隔幾秒用 HTTPS POST 傳到後端
 
-#include <Wire.h>
+  需要安裝的函式庫（Arduino IDE -> 程式庫管理員）：
+    - ArduinoJson (by Benoit Blanchon)
+  ESP32 board package 內建就有 WiFi.h / HTTPClient.h / WiFiClientSecure.h，不用額外裝
+*/
+
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <BH1750.h>
 #include <ArduinoJson.h>
 
-// ---- Wifi credentials ----
-const char *WIFI_SSID = "YOUR_WIFI_SSID";
-const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+// ====== 請修改成你的資訊 ======
+const char* WIFI_SSID     = "";
+const char* WIFI_PASSWORD = "";
 
-// ---- Backend endpoint ----
-// 本機測試用電腦的區網 IP + uvicorn 預設埠（例如 http://192.168.1.23:8000）；
-// 正式環境改成 Render 的網址 https://igem-ncku-software.onrender.com
-const char *UPLOAD_URL = "http://192.168.1.23:8000/api/hardware_gy302/upload";
+// Render 後端網址
+const char* SERVER_URL = "https://igem-ncku-software.onrender.com/api/hardware/upload";
 
-const unsigned long UPLOAD_INTERVAL_MS = 2000;
+// 這台 ESP32 的識別名稱（之後多顆板子時用來分辨來源）
+const char* DEVICE_ID = "esp32-test-01";
+// ==============================
 
-BH1750 lightMeter;
-
-void connectWifi() {
-  Serial.printf("Connecting to WiFi \"%s\"", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.print("WiFi connected, IP address: ");
-  Serial.println(WiFi.localIP());
-}
+unsigned long lastSendTime = 0;
+const unsigned long SEND_INTERVAL_MS = 3000; // 每 3 秒送一次
 
 void setup() {
   Serial.begin(115200);
-  delay(200);
+  delay(500);
 
-  Wire.begin(); // 預設 SDA=GPIO21, SCL=GPIO22
-  if (!lightMeter.begin()) {
-    Serial.println("Failed to initialize BH1750 (GY-302). Check wiring.");
+  WiFi.mode(WIFI_STA); // 確保是 station 模式，不是 AP 模式
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("正在連接 WiFi: ");
+  Serial.println(WIFI_SSID);
+
+  int attempt = 0;
+  const int MAX_ATTEMPTS = 30; // 最多等 15 秒（30 x 500ms）
+
+  while (WiFi.status() != WL_CONNECTED && attempt < MAX_ATTEMPTS) {
+    delay(500);
+    Serial.print(".");
+    attempt++;
   }
+  Serial.println();
 
-  connectWifi();
-}
-
-void uploadReading(float lux) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected, attempting to reconnect...");
-    connectWifi();
-    return;
-  }
-
-  HTTPClient http;
-  http.begin(UPLOAD_URL);
-  http.addHeader("Content-Type", "application/json");
-
-  JsonDocument doc;
-  doc["lux"] = lux;
-  String body;
-  serializeJson(doc, body);
-
-  int statusCode = http.POST(body);
-  if (statusCode > 0) {
-    Serial.printf("Uploaded lux=%.2f, HTTP %d\n", lux, statusCode);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi 已連線，IP: ");
+    Serial.println(WiFi.localIP());
   } else {
-    Serial.printf("Upload failed: %s\n", http.errorToString(statusCode).c_str());
+    Serial.print("WiFi 連線失敗，狀態碼: ");
+    Serial.println(WiFi.status());
+    Serial.println("常見狀態碼意思：");
+    Serial.println("  1 = 找不到這個 SSID（名稱打錯，或該頻段ESP32不支援，例如5GHz）");
+    Serial.println("  4 = 連線失敗（通常是密碼錯誤）");
+    Serial.println("  6 = 密碼錯誤");
+    Serial.println("請檢查 WIFI_SSID 是否為 2.4GHz 頻段，並確認密碼正確。");
   }
-
-  http.end();
 }
 
 void loop() {
-  float lux = lightMeter.readLightLevel();
+  if (millis() - lastSendTime >= SEND_INTERVAL_MS) {
+    lastSendTime = millis();
+    sendSimulatedData();
+  }
+}
 
-  if (lux < 0) {
-    Serial.println("Failed to read from BH1750 sensor.");
-  } else {
-    uploadReading(lux);
+void sendSimulatedData() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi 未連線，略過本次傳送");
+    return;
   }
 
-  delay(UPLOAD_INTERVAL_MS);
+  // 模擬感測數值：用 sin 波 + 一點雜訊，看起來比純隨機更像真實訊號
+  static float t = 0;
+  t += 0.3;
+  float simulatedValue = 500 + 200 * sin(t) + random(-20, 20);
+
+  WiFiClientSecure client;
+  client.setInsecure(); // 測試階段先跳過憑證驗證，正式上線建議改用憑證驗證
+
+  HTTPClient https;
+  Serial.print("連線到後端: ");
+  Serial.println(SERVER_URL);
+
+  if (https.begin(client, SERVER_URL)) {
+    https.addHeader("Content-Type", "application/json");
+
+    // 組 JSON payload
+    StaticJsonDocument<200> doc;
+    doc["device_id"] = DEVICE_ID;
+    doc["value"] = simulatedValue;
+    doc["unit"] = "a.u."; // 之後可改成你實際的單位，例如 "RFU"
+
+    String payload;
+    serializeJson(doc, payload);
+
+    int httpCode = https.POST(payload);
+
+    if (httpCode > 0) {
+      Serial.printf("HTTP 回應碼: %d\n", httpCode);
+      String response = https.getString();
+      Serial.println("後端回應: " + response);
+    } else {
+      Serial.printf("傳送失敗，錯誤: %s\n", https.errorToString(httpCode).c_str());
+    }
+
+    https.end();
+  } else {
+    Serial.println("無法連線到後端");
+  }
 }
