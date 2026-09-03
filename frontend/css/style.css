@@ -297,6 +297,38 @@ canvas {
   font-size: 0.85rem;
 }
 
+.sensor-stats {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sensor-stat {
+  flex: 1;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.sensor-stat-label {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sensor-stat-value {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--heading-font);
+  font-weight: 700;
+  font-size: 1.6rem;
+  color: var(--accent);
+}
+
 .backend-status-badge {
   display: inline-block;
   padding: 3px 10px;
