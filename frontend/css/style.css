@@ -351,3 +351,72 @@ canvas {
   .card { padding: 20px; }
   button { width: 100%; }
 }
+
+/* ---------------------------------------------------------------
+   Landing page (index.html): two entry cards linking to the two
+   feature pages. .nav-card reuses .card's panel look, so only the
+   link-specific bits are declared here.
+   --------------------------------------------------------------- */
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 720px) {
+  .nav-grid { grid-template-columns: 1fr; }
+}
+
+.nav-card {
+  display: flex;
+  flex-direction: column;
+  /* .card ships a 20px top margin for the stacked layout; inside the
+     grid the gap handles spacing, so cancel it or the row sits low. */
+  margin-top: 0;
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 12px 24px rgba(15, 23, 42, 0.1);
+}
+
+.nav-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.nav-card h2 {
+  margin: 0 0 10px;
+  font-family: var(--heading-font);
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--text);
+}
+
+.nav-card .section-description { margin: 0; }
+
+.nav-card-cue {
+  /* margin-top:auto pins the cue to the bottom so both cards line up
+     even when their descriptions differ in length. */
+  margin-top: auto;
+  padding-top: 18px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+/* Back link in the sub-page headers. */
+.back-link {
+  display: inline-block;
+  margin-bottom: 16px;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.back-link:hover { text-decoration: underline; }

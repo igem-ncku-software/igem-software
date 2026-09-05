@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>iGEM NCKU Software</title>
   <link rel="stylesheet" href="css/style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="page">
@@ -16,74 +15,26 @@
     </header>
 
     <main>
-      <section class="card">
-        <div class="section-heading">
-          <div>
-            <p class="section-label">Analysis</p>
-            <h2>AHL Dose-Response Analysis</h2>
-          </div>
-        </div>
+      <nav class="nav-grid">
+        <a class="card nav-card" href="dose-response.html">
+          <p class="section-label">Analysis</p>
+          <h2>AHL Dose-Response Analysis</h2>
+          <p class="section-description">
+            Upload a plate reader export to fit EC50, Hill slope, and detection
+            limits per strain.
+          </p>
+          <span class="nav-card-cue">Open analysis &rarr;</span>
+        </a>
 
-        <p class="section-description">
-          Upload a raw plate reader export
-        </p>
-
-        <form id="dose-response-form">
-          <label for="dose-response-file">Plate reader export file</label>
-          <input type="file" id="dose-response-file" accept=".txt" />
-
-          <button type="submit" id="analyze-button">Upload &amp; Analyze</button>
-        </form>
-
-        <p class="status-message" id="dose-response-status"></p>
-
-        <div class="result-block" id="dose-response-result" hidden>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Strain</th>
-                  <th>EC50 (nM)</th>
-                  <th>95% CI (nM)</th>
-                  <th>Hill n</th>
-                  <th>R²</th>
-                  <th>Responsive</th>
-                  <th>LOD (nM)</th>
-                  <th>LOQ (nM)</th>
-                </tr>
-              </thead>
-              <tbody id="results-table-body"></tbody>
-            </table>
-          </div>
-
-          <div id="strain-charts"></div>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-heading">
-          <div>
-            <p class="section-label">Live Data</p>
-            <h2>GY-302 Light Sensor</h2>
-          </div>
-          <span id="gy302-live-badge" class="backend-status-badge offline">Offline</span>
-        </div>
-
-        <p class="section-description">
-          Illuminance (lux) from the GY-302 module
-        </p>
-
-        <canvas id="gy302-chart" height="220"></canvas>
-
-        <div class="sensor-stats">
-          <div class="sensor-stat">
-            <span class="sensor-stat-label">Lux</span>
-            <span class="sensor-stat-value" id="gy302-lux-value">--</span>
-          </div>
-        </div>
-
-        <p class="status-message" id="gy302-latest-time"></p>
-      </section>
+        <a class="card nav-card" href="hardware.html">
+          <p class="section-label">Live Data</p>
+          <h2>GY-302 Light Sensor</h2>
+          <p class="section-description">
+            Live illuminance readings streamed from the ESP32 module.
+          </p>
+          <span class="nav-card-cue">Open live view &rarr;</span>
+        </a>
+      </nav>
     </main>
 
     <footer class="site-footer">
@@ -92,8 +43,6 @@
   </div>
 
   <script src="js/config.js"></script>
-  <script src="js/dose_response.js"></script>
-  <script src="js/hardware_gy302.js"></script>
   <script src="js/backend_status.js"></script>
 </body>
 </html>

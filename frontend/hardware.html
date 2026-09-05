@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GY-302 Light Sensor · iGEM NCKU Software</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="back-link" href="index.html">&larr; Back to overview</a>
+      <p class="eyebrow">iGEM NCKU SOFTWARE</p>
+      <h1>GY-302 Light Sensor</h1>
+      <p class="subtitle">Live illuminance readings from the ESP32 module</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <div class="section-heading">
+          <p class="section-label">Live Data</p>
+          <span id="gy302-live-badge" class="backend-status-badge offline">Offline</span>
+        </div>
+
+        <p class="section-description">
+          Illuminance (lux) from the GY-302 module
+        </p>
+
+        <canvas id="gy302-chart" height="220"></canvas>
+
+        <div class="sensor-stats">
+          <div class="sensor-stat">
+            <span class="sensor-stat-label">Lux</span>
+            <span class="sensor-stat-value" id="gy302-lux-value">--</span>
+          </div>
+        </div>
+
+        <p class="status-message" id="gy302-latest-time"></p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+    </footer>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/hardware_gy302.js"></script>
+  <script src="js/backend_status.js"></script>
+</body>
+</html>

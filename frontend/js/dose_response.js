@@ -1,5 +1,5 @@
 // =========================================================
-// 對接 index.html 裡「AHL Dose-Response Analysis」區塊
+// 對接 dose-response.html 的分析區塊
 // 目標元素：
 //   #dose-response-form / #dose-response-file / #analyze-button
 //   #dose-response-status

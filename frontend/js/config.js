@@ -7,7 +7,7 @@
 // 集中在這一個檔案管理，而不是每支 script 各自寫一份。
 //
 // 之後若 Render 網址換掉，只要改這一行，所有打後端的地方
-// （dose_response.js、backend_status.js）都會自動生效。
+// （dose_response.js、hardware_gy302.js、backend_status.js）都會自動生效。
 //
 // 必須在其他會用到 BACKEND_BASE_URL 的 <script> 之前載入。
 // =========================================================
