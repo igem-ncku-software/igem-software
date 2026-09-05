@@ -1,0 +1,10 @@
+# Shell 腳本一定要是 LF：CRLF 會讓 Linux/macOS 上的 bash 連 shebang 都認不得
+# （會報 "bad interpreter: /usr/bin/env bash^M"）。
+*.sh text eol=lf
+
+# PowerShell 腳本反過來，維持 CRLF。這兩支還必須存成 UTF-8 with BOM，
+# 否則 Windows PowerShell 5.1 會用系統 ANSI 解讀，中文註解變亂碼並語法錯誤。
+*.ps1 text eol=crlf
+
+# Arduino sketch 用 Arduino IDE 開，維持 Windows 慣例。
+*.ino text eol=crlf
