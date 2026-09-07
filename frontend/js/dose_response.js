@@ -60,9 +60,10 @@ function renderStrainChart(strain, result) {
     return message;
   }
 
+  // 不設 canvas.height：Chart.js 只要 canvas 有寫死高度就會忽略 aspectRatio，
+  // 圖會被拉成跟卡片一樣寬的超高空白區塊。高度改由下面的 aspectRatio 決定。
   const canvas = document.createElement("canvas");
   canvas.id = `chart-${strain}`;
-  canvas.height = 260;
 
   // Chart.js 的對數 x 軸畫不出 x=0，跟舊版 4PL 圖表一樣把 0 nM（負對照）那個點濾掉，
   // 摘要表格裡還是看得到每株菌的完整結果，只有這張圖不畫。
@@ -112,6 +113,10 @@ function renderStrainChart(strain, result) {
     },
     options: {
       responsive: true,
+      // Without this Chart.js derives the ratio from the canvas element's own
+      // width/height, which on a full-width card renders a ~800px-tall plot
+      // that is almost entirely empty space.
+      aspectRatio: 2.6,
       scales: {
         x: {
           type: "logarithmic",

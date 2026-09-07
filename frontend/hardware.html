@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GY-302 Light Sensor · iGEM NCKU Software</title>
+  <meta name="description" content="Live illuminance readings from the GY-302 light sensor on the ESP32 module." />
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
@@ -27,7 +28,9 @@
           Illuminance (lux) from the GY-302 module
         </p>
 
-        <canvas id="gy302-chart" height="220"></canvas>
+        <!-- No height attribute: Chart.js ignores its aspectRatio option when
+             the canvas carries an explicit height. See js/hardware_gy302.js. -->
+        <canvas id="gy302-chart"></canvas>
 
         <div class="sensor-stats">
           <div class="sensor-stat">

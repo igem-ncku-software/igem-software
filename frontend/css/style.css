@@ -144,13 +144,26 @@ textarea, input[type="file"], input[type="number"] {
 
 textarea { resize: vertical; }
 
+/* One focus treatment for every control. The ring was previously 14% alpha,
+   which was all but invisible against the panel — a keyboard user could not
+   tell where they were. */
 textarea:focus, input:focus {
-  outline: 3px solid rgba(7, 90, 62, 0.14);
+  outline: 3px solid rgba(7, 90, 62, 0.45);
+  outline-offset: 2px;
   border-color: var(--accent);
+}
+
+button:focus-visible,
+.back-link:focus-visible,
+.nav-card-cue:focus-visible {
+  outline: 3px solid rgba(7, 90, 62, 0.45);
+  outline-offset: 2px;
 }
 
 button {
   align-self: flex-start;
+  /* Comfortable tap target; the padding alone came to about 40px. */
+  min-height: 44px;
   margin-top: 14px;
   padding: 10px 18px;
   border: 1px solid var(--accent);
@@ -179,15 +192,6 @@ button.btn-secondary:hover {
 }
 
 button.btn-secondary:active { background: #d7ecdf; }
-
-#image-preview {
-  max-width: 100%;
-  max-height: 280px;
-  margin-top: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  object-fit: contain;
-}
 
 .status-message {
   min-height: 1.4em;
@@ -244,10 +248,15 @@ th {
   text-transform: uppercase;
 }
 
-td { font-size: 0.9rem; }
+td {
+  font-size: 0.9rem;
+  /* Fixed-width digits, so EC50s and R² values line up on the decimal point
+     down each column and can be compared at a glance. */
+  font-variant-numeric: tabular-nums;
+}
+
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--panel-soft); }
-.inhibition-cell { color: var(--accent); font-weight: 700; }
 .significance-cell { color: var(--success); font-weight: 700; }
 
 .chart-note {
@@ -259,35 +268,6 @@ tbody tr:hover td { background: var(--panel-soft); }
 canvas {
   max-width: 100%;
 }
-
-#result-output {
-  max-height: 420px;
-  overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.records-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.record-card {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
-}
-
-.record-time { margin: 0; color: var(--text-dim); font-size: 0.78rem; font-weight: 700; }
-.record-card img { display: block; width: 100%; margin-top: 12px; border-radius: 6px; }
-.empty-message { color: var(--text-dim); }
 
 .site-footer {
   margin-top: 32px;
@@ -327,6 +307,9 @@ canvas {
   font-weight: 700;
   font-size: 1.6rem;
   color: var(--accent);
+  /* The reading refreshes every 2s; fixed-width digits stop the number from
+     changing width (and nudging the layout) as the value changes. */
+  font-variant-numeric: tabular-nums;
 }
 
 .backend-status-badge {
@@ -420,3 +403,52 @@ canvas {
 }
 
 .back-link:hover { text-decoration: underline; }
+
+/* ---------------------------------------------------------------
+   Respect a reduced-motion preference: the nav cards are the only
+   thing on the site that moves, and the lift is decoration only.
+   --------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .nav-card { transition: none; }
+  .nav-card:hover { transform: none; }
+}
+
+/* ---------------------------------------------------------------
+   Print: analysis results get pasted into lab notebooks and
+   reports, so drop the controls and chrome, let the table use the
+   full width, and keep each strain's block on one page.
+   --------------------------------------------------------------- */
+@media print {
+  body { background: #fff; }
+  .page { width: 100%; padding: 0; }
+
+  /* Controls and live status have no meaning on paper. */
+  .back-link,
+  form,
+  .predict-form,
+  .backend-status-badge,
+  .nav-card-cue { display: none; }
+
+  .site-header {
+    padding: 0 0 12pt;
+    border-radius: 0;
+    border-bottom: 1px solid #000;
+    background: none;
+    box-shadow: none;
+  }
+
+  .card {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .table-wrapper { overflow: visible; }
+  table { min-width: 0; }
+
+  /* A strain's heading, chart and numbers belong together. */
+  .result-block { break-inside: avoid; }
+
+  .site-footer { border-top: 1px solid #000; }
+}

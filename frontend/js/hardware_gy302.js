@@ -37,10 +37,19 @@ function initGy302Chart() {
     },
     options: {
       responsive: true,
+      // See dose_response.js: the canvas's own dimensions would otherwise set
+      // the ratio and make the plot far taller than a live readout needs.
+      aspectRatio: 3,
       animation: false,
       scales: {
         x: { ticks: { color: "#6b6055" }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: "#6b6055" }, grid: { color: "#e0d6c0" } },
+        y: {
+          beginAtZero: true,
+          // 圖例是關掉的，沒有軸標題的話這張圖單獨看（或印出來）不知道單位是什麼。
+          title: { display: true, text: "Illuminance (lux)", color: "#4a3f35" },
+          ticks: { color: "#6b6055" },
+          grid: { color: "#e0d6c0" },
+        },
       },
       plugins: { legend: { display: false } },
     },

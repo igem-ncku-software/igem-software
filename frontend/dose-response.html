@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AHL Dose-Response Analysis · iGEM NCKU Software</title>
+  <meta name="description" content="Upload a plate reader export to fit EC50, Hill slope, and detection limits for each strain." />
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
@@ -31,21 +32,23 @@
           <button type="submit" id="analyze-button">Upload &amp; Analyze</button>
         </form>
 
-        <p class="status-message" id="dose-response-status"></p>
+        <!-- aria-live: the analysis result is announced when it arrives, so a
+             screen reader user is not left waiting on a silent page. -->
+        <p class="status-message" id="dose-response-status" aria-live="polite"></p>
 
         <div class="result-block" id="dose-response-result" hidden>
           <div class="table-wrapper">
             <table>
               <thead>
                 <tr>
-                  <th>Strain</th>
-                  <th>EC50 (nM)</th>
-                  <th>95% CI (nM)</th>
-                  <th>Hill n</th>
-                  <th>R&sup2;</th>
-                  <th>Responsive</th>
-                  <th>LOD (nM)</th>
-                  <th>LOQ (nM)</th>
+                  <th scope="col">Strain</th>
+                  <th scope="col">EC50 (nM)</th>
+                  <th scope="col">95% CI (nM)</th>
+                  <th scope="col">Hill n</th>
+                  <th scope="col">R&sup2;</th>
+                  <th scope="col">Responsive</th>
+                  <th scope="col">LOD (nM)</th>
+                  <th scope="col">LOQ (nM)</th>
                 </tr>
               </thead>
               <tbody id="results-table-body"></tbody>
