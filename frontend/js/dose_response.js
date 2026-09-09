@@ -13,6 +13,13 @@
 // strain -> Chart 實例，重新分析時要先 destroy 舊的，避免 canvas 殘留舊圖層。
 const strainCharts = {};
 
+// Chart.js 收的是實際色碼，沒辦法直接吃 CSS 變數，所以在這裡讀出來。
+// 這樣配色只有 css/style.css 的 :root 一個來源，改色票圖表會跟著變，
+// 不用兩邊各改一次（以前這裡是寫死的字面值，跟樣式表對不起來）。
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 function setDoseResponseStatus(text, kind) {
   const el = document.getElementById("dose-response-status");
   if (!el) return;
@@ -65,6 +72,19 @@ function renderStrainChart(strain, result) {
   const canvas = document.createElement("canvas");
   canvas.id = `chart-${strain}`;
 
+  // 圖表坐在不透明的 .chart-plate 上，不套玻璃：曲線和格線疊在模糊的
+  // 面板上會看不清楚，玻璃只負責外框。
+  const plate = document.createElement("div");
+  plate.className = "chart-plate";
+  plate.appendChild(canvas);
+
+  const accent = cssVar("--accent");
+  const gold = cssVar("--gold");
+  const error = cssVar("--error");
+  const ink = cssVar("--text");
+  const muted = cssVar("--muted");
+  const rule = cssVar("--border");
+
   // Chart.js 的對數 x 軸畫不出 x=0，跟舊版 4PL 圖表一樣把 0 nM（負對照）那個點濾掉，
   // 摘要表格裡還是看得到每株菌的完整結果，只有這張圖不畫。
   const scatterPoints = result.plateau_points
@@ -85,8 +105,8 @@ function renderStrainChart(strain, result) {
           data: scatterPoints,
           pointRadius: 5,
           showLine: false,
-          pointBackgroundColor: "#075a3e",
-          pointBorderColor: "#075a3e",
+          pointBackgroundColor: accent,
+          pointBorderColor: accent,
         },
         {
           label: "Hill fit",
@@ -95,7 +115,7 @@ function renderStrainChart(strain, result) {
           pointRadius: 0,
           borderWidth: 2,
           tension: 0,
-          borderColor: "#c9a227",
+          borderColor: gold,
         },
         {
           label: "EC50",
@@ -107,7 +127,7 @@ function renderStrainChart(strain, result) {
           pointRadius: 0,
           borderWidth: 1.5,
           borderDash: [6, 4],
-          borderColor: "#a3382c",
+          borderColor: error,
         },
       ],
     },
@@ -120,23 +140,23 @@ function renderStrainChart(strain, result) {
       scales: {
         x: {
           type: "logarithmic",
-          title: { display: true, text: "Concentration (nM)", color: "#4a3f35" },
-          grid: { color: "#e0d6c0" },
-          ticks: { color: "#6b6055" },
+          title: { display: true, text: "Concentration (nM)", color: ink },
+          grid: { color: rule },
+          ticks: { color: muted },
         },
         y: {
-          title: { display: true, text: "Normalized fluorescence (F)", color: "#4a3f35" },
-          grid: { color: "#e0d6c0" },
-          ticks: { color: "#6b6055" },
+          title: { display: true, text: "Normalized fluorescence (F)", color: ink },
+          grid: { color: rule },
+          ticks: { color: muted },
         },
       },
       plugins: {
-        legend: { labels: { color: "#4a3f35" } },
+        legend: { labels: { color: ink } },
       },
     },
   });
 
-  return canvas;
+  return plate;
 }
 
 // 螢光 -> 濃度反推小工具，每個 responsive 的菌株一份，直接沿用 /analyze

@@ -28,9 +28,14 @@
           Illuminance (lux) from the GY-302 module
         </p>
 
-        <!-- No height attribute: Chart.js ignores its aspectRatio option when
-             the canvas carries an explicit height. See js/hardware_gy302.js. -->
-        <canvas id="gy302-chart"></canvas>
+        <!-- .chart-plate is an opaque surface: the card behind it is frosted
+             glass, and a line plot over a blurred backdrop is unreadable.
+             No height attribute on the canvas: Chart.js ignores its aspectRatio
+             option when the canvas carries an explicit height. See
+             js/hardware_gy302.js. -->
+        <div class="chart-plate">
+          <canvas id="gy302-chart"></canvas>
+        </div>
 
         <div class="sensor-stats">
           <div class="sensor-stat">

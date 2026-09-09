@@ -1,35 +1,63 @@
-@font-face {
-  font-family: "Changa";
-  src: url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
+/* ============================================================
+   Original layout, glass surfaces, wiki palette.
 
-@font-face {
-  font-family: "Changa";
-  src: url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
+   Layout is untouched: the 1080px column, the header block, the
+   panels and the one-line footer all sit exactly where they did.
+   What changes is the material - panels become frosted glass, in
+   the team wiki's colours.
+
+   Ink is the wiki's own warm near-black (#3d3229 / #5c4e42), not a
+   neutral grey. On a cream-green ground a cold grey reads as a
+   different design system; the warm ink reads as black and belongs.
+   ============================================================ */
+
+@font-face { font-family:"Changa"; src:url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-regular.ttf") format("truetype"); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:"Changa"; src:url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-medium.ttf") format("truetype");  font-weight:500; font-style:normal; font-display:swap; }
+@font-face { font-family:"Changa"; src:url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-bold.ttf") format("truetype");    font-weight:700; font-style:normal; font-display:swap; }
 
 :root {
-  --bg: #f6f4ee;
-  --panel: #ffffff;
-  --panel-soft: #faf9f5;
+  /* Ink and paper, from wiki/pages/software.html. */
+  --text: #3d3229;
+  --text-dim: #5c4e42;
+  --muted: #8a7a6a;
+  --border: #dfe8e2;
+  --gold: #c9a227;
+  --gold-ink: #8a6d12;
+
+  /* Greens, straight from the wiki's style.css - no mixed values:
+       #075a3e  the brand green it uses 95 times
+       #1f4a38  the deeper green its headings use
+       #05442e  the ink of the navigation bar, and our pressed state */
   --accent: #075a3e;
-  --accent-hover: #0a6f4b;
-  --accent-soft: #e6f2ea;
-  --text: #21261f;
-  --text-dim: #667169;
-  --border: #e2e0d6;
-  --success: #1f7a6f;
-  --success-bg: #eaf6f3;
+  --accent-hover: #1f4a38;
+  --accent-active: #05442e;
   --error: #a3382c;
-  --error-bg: #fbeae7;
-  --radius: 10px;
-  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 16px rgba(15, 23, 42, 0.06);
+
+  /* Ground and panels, also the wiki's own:
+       #f2f9f5  its palest green-white, here the page ground
+       #fffdf7  the cream it paints panels and buttons with
+       #eaf7dd  its pale green, here the one green surface (the header) */
+  --bg: #f2f9f5;
+
+  --glass-panel: rgba(255,253,247,.68);
+  --glass-band: rgba(234,247,221,.78);
+  --glass-chip: rgba(255,253,247,.60);
+  --blur: blur(22px) saturate(190%);
+  --blur-chip: blur(10px) saturate(160%);
+
+  /* What actually reads as glass on a quiet ground: a lit top edge, a
+     faint lower one, and a soft shadow underneath. The bevel gives the
+     panel thickness; the backdrop-filter alone would not. */
+  --bevel:
+    inset 0  1px 0 rgba(255,255,255,.9),
+    inset 0 -1px 0 rgba(255,255,255,.35),
+    0 6px 18px rgba(61,50,41,.09);
+
+  /* Opaque surfaces: anything carrying numbers opts out of the glass. */
+  --solid: rgba(255,253,247,.95);
+  --solid-soft: rgba(242,249,245,.96);
+
+  --radius: 16px;
   --heading-font: "Changa", "Noto Sans TC", sans-serif;
 }
 
@@ -39,292 +67,180 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
-  color: var(--text);
+  color: var(--text-dim);
   background: var(--bg);
 }
 
 button, input, textarea { font: inherit; }
 
-.page {
-  width: min(1080px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 48px 0 80px;
-}
+.page { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 80px; }
 
-/* Header matches the wiki's actual hero: a light pastel wash with dark ink
-   text — the deep green is an accent color there, not a background fill. */
 .site-header {
-  max-width: none;
   margin-bottom: 28px;
   padding: 40px 36px;
   border-radius: var(--radius);
-  background: linear-gradient(135deg, #ecffb5, #dbf9bd, #dbec94);
-  box-shadow: var(--shadow);
+  background: var(--glass-band);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid rgba(255,255,255,.65);
+  box-shadow: var(--bevel);
 }
 
 .eyebrow {
-  margin: 0 0 8px;
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin: 0 0 8px; color: var(--gold-ink);
+  font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
 }
 
 .site-header h1 {
   margin: 0;
-  font-family: var(--heading-font);
-  font-weight: 700;
-  font-size: clamp(1.9rem, 4.5vw, 3rem);
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  font-family: var(--heading-font); font-weight: 700;
+  font-size: clamp(1.9rem, 4.5vw, 2.9rem); line-height: 1.15;
   color: var(--text);
 }
 
-.subtitle {
-  margin: 14px 0 0;
-  color: var(--text-dim);
-  font-size: 1.05rem;
-  line-height: 1.6;
-}
-
+.subtitle { margin: 14px 0 0; color: var(--text-dim); font-size: 1.05rem; line-height: 1.6; }
 .section-description { color: var(--text-dim); line-height: 1.7; }
 
 .card {
   margin-top: 20px;
   padding: 30px;
-  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--glass-panel);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid rgba(255,255,255,.65);
+  box-shadow: var(--bevel);
 }
 
-.section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.section-heading h2, .subsection-heading {
-  font-family: var(--heading-font);
-  font-weight: 700;
-  color: var(--text);
-}
-
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.section-heading h2, .subsection-heading { font-family: var(--heading-font); font-weight: 700; color: var(--text); }
 .section-heading h2 { margin: 0; font-size: 1.4rem; }
 .subsection-heading { margin: 0; font-size: 1.05rem; }
 
 .section-label {
-  margin: 0 0 8px;
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin: 0 0 8px; color: var(--gold-ink);
+  font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
 }
 
 form { display: flex; flex-direction: column; gap: 8px; }
+label { margin-top: 12px; color: var(--text); font-size: .9rem; font-weight: 600; }
 
-label {
-  margin-top: 12px;
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
+/* Controls and results are opaque: glass frames the data, never sits
+   underneath it. */
 textarea, input[type="file"], input[type="number"] {
-  width: 100%;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  background: var(--panel-soft);
+  width: 100%; padding: 11px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); background: var(--solid);
 }
-
 textarea { resize: vertical; }
 
-/* One focus treatment for every control. The ring was previously 14% alpha,
-   which was all but invisible against the panel — a keyboard user could not
-   tell where they were. */
-textarea:focus, input:focus {
-  outline: 3px solid rgba(7, 90, 62, 0.45);
-  outline-offset: 2px;
-  border-color: var(--accent);
-}
+textarea:focus, input:focus { outline: 3px solid var(--gold); outline-offset: 2px; border-color: var(--text-dim); }
+button:focus-visible, .back-link:focus-visible, .nav-card-cue:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 
-button:focus-visible,
-.back-link:focus-visible,
-.nav-card-cue:focus-visible {
-  outline: 3px solid rgba(7, 90, 62, 0.45);
-  outline-offset: 2px;
-}
-
+/* Buttons are glass too: a rectangular pane rather than a solid fill,
+   so the primary action belongs to the same material as the panels.
+   Body font, not Changa - Changa is a display face and reads as a
+   headline on a control. */
 button {
   align-self: flex-start;
-  /* Comfortable tap target; the padding alone came to about 40px. */
-  min-height: 44px;
-  margin-top: 14px;
-  padding: 10px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  color: #fff;
-  background: var(--accent);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-}
-
-button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-button:active { background: #064730; }
-button:disabled { cursor: wait; opacity: 0.6; }
-
-/* Secondary action: outline button, standard hierarchy pattern. */
-button.btn-secondary {
+  min-height: 44px; margin-top: 14px; padding: 11px 22px;
+  border-radius: 10px;
   color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--border);
+  background: rgba(255,253,247,.62);
+  backdrop-filter: var(--blur-chip);
+  -webkit-backdrop-filter: var(--blur-chip);
+  border: 1px solid rgba(255,255,255,.85);
+  box-shadow:
+    inset 0  1px 0 rgba(255,255,255,.95),
+    inset 0 -1px 0 rgba(255,255,255,.4),
+    0 3px 10px rgba(61,50,41,.10);
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
 
-button.btn-secondary:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+button:hover {
+  background: rgba(255,253,247,.88);
+  border-color: #fff;
+  box-shadow:
+    inset 0  1px 0 rgba(255,255,255,1),
+    inset 0 -1px 0 rgba(255,255,255,.5),
+    0 5px 14px rgba(61,50,41,.14);
 }
 
-button.btn-secondary:active { background: #d7ecdf; }
+/* Pressed: the pane sinks - the lit top edge goes, a soft inner shadow
+   replaces it. */
+button:active {
+  color: var(--accent-active);
+  background: rgba(255,253,247,.75);
+  box-shadow: inset 0 2px 5px rgba(61,50,41,.16);
+}
 
-.status-message {
-  min-height: 1.4em;
-  margin: 16px 0 0;
+button:disabled {
+  cursor: wait; opacity: .55;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+/* Secondary reads quieter: the same pane, less of it. */
+button.btn-secondary {
   color: var(--text-dim);
-  font-size: 0.92rem;
+  background: rgba(255,253,247,.38);
+  border-color: rgba(255,255,255,.7);
 }
+button.btn-secondary:hover { color: var(--text); background: rgba(255,253,247,.72); }
 
+.status-message { min-height: 1.4em; margin: 16px 0 0; color: var(--text-dim); font-size: .92rem; }
+
+/* The wiki's notice box: paper, hairline border, one coloured bar. */
 .status-message.success, .status-message.error {
   padding: 10px 14px;
-  border-left: 3px solid transparent;
-  border-radius: 6px;
-}
-
-.status-message.success {
-  color: var(--success);
-  background: var(--success-bg);
-  border-left-color: var(--success);
-}
-
-.status-message.error {
-  color: var(--error);
-  background: var(--error-bg);
-  border-left-color: var(--error);
-}
-
-.result-block {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
-}
-
-.table-wrapper {
-  overflow-x: auto;
   border: 1px solid var(--border);
+  border-left: 4px solid var(--gold);
   border-radius: 8px;
+  background: var(--solid-soft);
 }
+.status-message.error { border-left-color: var(--error); color: var(--error); }
 
+.result-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.7); }
+
+.table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
 table { width: 100%; min-width: 860px; border-collapse: collapse; }
-
-th, td {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  white-space: nowrap;
-}
-
-th {
-  color: var(--text-dim);
-  background: var(--panel-soft);
-  font-size: 0.76rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-td {
-  font-size: 0.9rem;
-  /* Fixed-width digits, so EC50s and R² values line up on the decimal point
-     down each column and can be compared at a glance. */
-  font-variant-numeric: tabular-nums;
-}
-
+th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+th { color: var(--muted); background: var(--solid-soft); font-size: .74rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+td { color: var(--text-dim); font-size: .9rem; font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: 0; }
-tbody tr:hover td { background: var(--panel-soft); }
-.significance-cell { color: var(--success); font-weight: 700; }
+tbody tr:hover td { background: var(--solid-soft); }
+.significance-cell { color: var(--text); font-weight: 700; }
 
-.chart-note {
-  margin: -8px 0 16px;
-  color: var(--text-dim);
-  font-size: 0.8rem;
-}
+.chart-note { margin: -8px 0 16px; color: var(--muted); font-size: .8rem; }
 
-canvas {
-  max-width: 100%;
-}
+.chart-plate { margin: 8px 0 16px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+canvas { max-width: 100%; }
 
-.site-footer {
-  margin-top: 32px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 0.85rem;
-}
+.site-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.7); color: var(--muted); font-size: .85rem; }
 
-.sensor-stats {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.sensor-stat {
-  flex: 1;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
-}
-
-.sensor-stat-label {
-  display: block;
-  color: var(--text-dim);
-  font-size: 0.76rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
+.sensor-stats { display: flex; gap: 12px; margin-top: 16px; }
+.sensor-stat { flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.sensor-stat-label { display: block; color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .sensor-stat-value {
-  display: block;
-  margin-top: 4px;
-  font-family: var(--heading-font);
-  font-weight: 700;
-  font-size: 1.6rem;
-  color: var(--accent);
-  /* The reading refreshes every 2s; fixed-width digits stop the number from
-     changing width (and nudging the layout) as the value changes. */
+  display: block; margin-top: 4px;
+  font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem;
+  color: var(--text);
+  /* The reading refreshes every 2s; fixed-width digits stop the number
+     from changing width as the value changes. */
   font-variant-numeric: tabular-nums;
 }
 
 .backend-status-badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  color: var(--success);
-  background: var(--success-bg);
-  font-weight: 600;
+  display: inline-block; padding: 4px 12px; border-radius: 999px;
+  color: var(--accent); background: var(--glass-chip);
+  backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
+  border: 1px solid rgba(255,255,255,.8);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 6px rgba(61,50,41,.08);
+  font-weight: 700;
 }
-
-.backend-status-badge.offline {
-  color: var(--error);
-  background: var(--error-bg);
-}
+.backend-status-badge.offline { color: var(--error); }
 
 [hidden] { display: none !important; }
 
@@ -335,120 +251,52 @@ canvas {
   button { width: 100%; }
 }
 
-/* ---------------------------------------------------------------
-   Landing page (index.html): two entry cards linking to the two
-   feature pages. .nav-card reuses .card's panel look, so only the
-   link-specific bits are declared here.
-   --------------------------------------------------------------- */
-.nav-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-}
-
-@media (max-width: 720px) {
-  .nav-grid { grid-template-columns: 1fr; }
-}
+/* Landing page ------------------------------------------------------ */
+.nav-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 720px) { .nav-grid { grid-template-columns: 1fr; } }
 
 .nav-card {
-  display: flex;
-  flex-direction: column;
-  /* .card ships a 20px top margin for the stacked layout; inside the
-     grid the gap handles spacing, so cancel it or the row sits low. */
-  margin-top: 0;
-  color: inherit;
-  text-decoration: none;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  display: flex; flex-direction: column; margin-top: 0;
+  color: inherit; text-decoration: none;
+  /* No transform: Safari corrupts a backdrop-filter that moves - the
+     same bug the wiki works around at style.css:208. */
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-
 .nav-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent);
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 12px 24px rgba(15, 23, 42, 0.1);
+  background: rgba(255,253,247,.82);
+  border-color: rgba(255,255,255,.95);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 10px 26px rgba(61,50,41,.14);
 }
-
-.nav-card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
-.nav-card h2 {
-  margin: 0 0 10px;
-  font-family: var(--heading-font);
-  font-weight: 700;
-  font-size: 1.4rem;
-  color: var(--text);
-}
-
+.nav-card:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.nav-card h2 { margin: 0 0 10px; font-family: var(--heading-font); font-weight: 700; font-size: 1.4rem; color: var(--text); }
 .nav-card .section-description { margin: 0; }
+.nav-card-cue { margin-top: auto; padding-top: 18px; color: var(--accent); font-size: .9rem; font-weight: 700; }
 
-.nav-card-cue {
-  /* margin-top:auto pins the cue to the bottom so both cards line up
-     even when their descriptions differ in length. */
-  margin-top: auto;
-  padding-top: 18px;
-  color: var(--accent);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-/* Back link in the sub-page headers. */
-.back-link {
-  display: inline-block;
-  margin-bottom: 16px;
-  color: var(--accent);
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-decoration: none;
-}
-
+.back-link { display: inline-block; margin-bottom: 16px; color: var(--accent); font-size: .85rem; font-weight: 700; text-decoration: none; }
 .back-link:hover { text-decoration: underline; }
 
-/* ---------------------------------------------------------------
-   Respect a reduced-motion preference: the nav cards are the only
-   thing on the site that moves, and the lift is decoration only.
-   --------------------------------------------------------------- */
-@media (prefers-reduced-motion: reduce) {
-  .nav-card { transition: none; }
-  .nav-card:hover { transform: none; }
+@media (prefers-reduced-motion: reduce) { .nav-card { transition: none; } }
+
+/* Without backdrop-filter the panels would be washed-out boxes. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .site-header, .card, .backend-status-badge, button, button.btn-secondary { background: #fffdf7; }
 }
 
-/* ---------------------------------------------------------------
-   Print: analysis results get pasted into lab notebooks and
-   reports, so drop the controls and chrome, let the table use the
-   full width, and keep each strain's block on one page.
-   --------------------------------------------------------------- */
+/* Print: backdrop-filter does not print, and the ground wastes toner. */
 @media print {
   body { background: #fff; }
   .page { width: 100%; padding: 0; }
-
-  /* Controls and live status have no meaning on paper. */
-  .back-link,
-  form,
-  .predict-form,
-  .backend-status-badge,
-  .nav-card-cue { display: none; }
-
+  .back-link, form, .predict-form, .backend-status-badge, .nav-card-cue { display: none; }
   .site-header {
-    padding: 0 0 12pt;
-    border-radius: 0;
-    border-bottom: 1px solid #000;
-    background: none;
-    box-shadow: none;
+    padding: 0 0 12pt; border-radius: 0; border: 0; border-bottom: 1px solid #000;
+    background: none; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
   }
-
-  .card {
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
+  .card, .chart-plate, .table-wrapper {
+    padding: 0; border: 0; border-radius: 0; background: none;
+    backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
   }
-
   .table-wrapper { overflow: visible; }
   table { min-width: 0; }
-
-  /* A strain's heading, chart and numbers belong together. */
   .result-block { break-inside: avoid; }
-
   .site-footer { border-top: 1px solid #000; }
 }

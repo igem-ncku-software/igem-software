@@ -12,12 +12,23 @@ const GY302_POLL_INTERVAL_MS = 2000;
 const GY302_STALE_MS = 10000; // 讀值超過這麼久沒更新就視為 offline（ESP32 斷線/沒在送）
 const GY302_HISTORY_LENGTH = 30; // 折線圖最多保留幾個點
 
+// Chart.js 收的是實際色碼，沒辦法直接吃 CSS 變數，所以在這裡讀出來。
+// 配色只有 css/style.css 的 :root 一個來源，改色票圖表會跟著變。
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 let gy302Chart = null;
 let gy302LastTimestamp = null; // 用來避免同一筆讀值重複畫進折線圖
 
 function initGy302Chart() {
   const canvas = document.getElementById("gy302-chart");
   if (!canvas) return;
+
+  const accent = cssVar("--accent");
+  const ink = cssVar("--text");
+  const muted = cssVar("--muted");
+  const rule = cssVar("--border");
 
   gy302Chart = new Chart(canvas, {
     type: "line",
@@ -27,8 +38,8 @@ function initGy302Chart() {
         {
           label: "Lux",
           data: [],
-          borderColor: "#ffb300",
-          backgroundColor: "rgba(255, 179, 0, 0.15)",
+          borderColor: accent,
+          backgroundColor: "rgba(7, 90, 62, 0.10)",
           fill: true,
           tension: 0.25,
           pointRadius: 2,
@@ -42,13 +53,13 @@ function initGy302Chart() {
       aspectRatio: 3,
       animation: false,
       scales: {
-        x: { ticks: { color: "#6b6055" }, grid: { display: false } },
+        x: { ticks: { color: muted }, grid: { display: false } },
         y: {
           beginAtZero: true,
           // 圖例是關掉的，沒有軸標題的話這張圖單獨看（或印出來）不知道單位是什麼。
-          title: { display: true, text: "Illuminance (lux)", color: "#4a3f35" },
-          ticks: { color: "#6b6055" },
-          grid: { color: "#e0d6c0" },
+          title: { display: true, text: "Illuminance (lux)", color: ink },
+          ticks: { color: muted },
+          grid: { color: rule },
         },
       },
       plugins: { legend: { display: false } },
