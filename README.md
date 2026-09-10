@@ -1,6 +1,6 @@
-# iGEM NCKU Software
+# LasReader
 
-成大 iGEM 團隊的濕實驗資料工具，前後端分離的網頁應用。
+成大 iGEM（NCKU-Tainan 2026 · Capture）的濕實驗資料工具，前後端分離的網頁應用。
 
 - **AHL 劑量反應分析** — 上傳 plate reader 原始匯出檔，自動跑完整條分析流程，算出每株菌的 EC50、Hill 係數、95% 信賴區間、R²、LOD/LOQ，並判斷該菌株對 AHL 到底有沒有反應。
 - **GY-302 光感測即時監控** — ESP32 上的 BH1750 模組把照度（lux）傳回後端，網頁即時顯示數值與折線圖。

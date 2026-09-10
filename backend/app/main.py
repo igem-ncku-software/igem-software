@@ -7,8 +7,8 @@ from app.hardware_gy302.router import router as gy302_data_router
 
 
 app = FastAPI(
-    title="iGEM Analyzer API",
-    description="Backend API for ESP32 sensor data and AHL dose-response analysis.",
+    title="LasReader API",
+    description="Backend API for LasReader: AHL dose-response analysis and ESP32 sensor data.",
     version="1.2.0",
 )
 
@@ -33,7 +33,7 @@ app.include_router(dose_response_router)
 def root() -> dict:
     """API 根目錄，順便列出目前有哪些 endpoint 可以測試。"""
     return {
-        "message": "iGEM Analyzer API is running.",
+        "message": "LasReader API is running.",
         "docs": "/docs",
         "health": "/health",
         "dose_response_analyze": "POST /api/dose_response/analyze",
@@ -46,7 +46,7 @@ def root() -> dict:
 @app.get("/health")
 def health_check() -> dict:
     """給前端與 Render 用來檢查後端是否正常運作。"""
-    return {"status": "ok", "service": "iGEM Analyzer API"}
+    return {"status": "ok", "service": "LasReader API"}
 
 
 # 本機測試：
