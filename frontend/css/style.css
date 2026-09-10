@@ -86,13 +86,21 @@ button, input, textarea { font: inherit; }
   box-shadow: var(--bevel);
 }
 
-/* Team wordmark in the header band. The PNG carries its own white outline,
-   so it needs no plate behind it; height drives the size, width follows. */
+/* Header band: title block on the left, team wordmark on the right. */
+.site-header-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 32px;
+}
+
+/* Lets the heading wrap instead of pushing the logo off the edge. */
+.site-header-text { min-width: 0; }
+
+/* The PNG carries its own white outline, so it needs no plate behind it;
+   height drives the size, width follows. */
 .site-logo {
+  flex: none;
   display: block;
   width: auto;
-  height: clamp(72px, 11vw, 104px);
-  margin: 0 0 18px;
+  height: clamp(76px, 10vw, 116px);
 }
 
 .eyebrow {
@@ -256,6 +264,7 @@ canvas { max-width: 100%; }
 @media (max-width: 640px) {
   .page { width: min(100% - 20px, 1080px); padding-top: 32px; }
   .site-header { padding: 28px 22px; }
+  .site-header-row { flex-direction: column-reverse; align-items: flex-start; gap: 20px; }
   .card { padding: 20px; }
   button { width: 100%; }
 }
