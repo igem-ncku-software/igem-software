@@ -3,7 +3,7 @@
 成大 iGEM（NCKU-Tainan 2026 · Capture）的濕實驗資料工具，前後端分離的網頁應用。
 
 - **AHL 劑量反應分析** — 上傳 plate reader 原始匯出檔，自動跑完整條分析流程，算出每株菌的 EC50、Hill 係數、95% 信賴區間、R²、LOD/LOQ，並判斷該菌株對 AHL 到底有沒有反應。
-- **GY-302 光感測即時監控** — ESP32 上的 BH1750 模組把照度（lux）傳回後端，網頁即時顯示數值與折線圖。
+- **硬體資料（重寫中）** — 原本的 GY-302 光感測版本已移除，新的硬體與分析邏輯正在重新開發。
 
 前端是純靜態網頁（部署在 GitHub Pages），後端是 FastAPI（部署在 Render），兩邊只透過 HTTP/CORS 溝通，沒有共用的建置流程。
 
@@ -14,19 +14,17 @@
 ```mermaid
 flowchart LR
     FILE["plate reader<br/>匯出檔 (.txt)"]
-    ESP["ESP32 + GY-302<br/>firmware/"]
 
     subgraph FE["frontend/ — 靜態網頁 (GitHub Pages)"]
         IDX["index.html<br/>入口頁"]
         DR["dose-response.html"]
-        HW["hardware.html"]
+        HW["hardware.html<br/>（重寫中）"]
         IDX --> DR
         IDX --> HW
     end
 
     subgraph BE["backend/ — FastAPI (Render)"]
         RT1["/api/dose_response<br/>analyze · predict"]
-        RT2["/api/hardware_gy302<br/>upload · latest"]
         subgraph PIPE["dose_response 分析流程"]
             direction LR
             IO["io"] --> NRM["normalize"] --> TS["timeseries"] --> DRS["doseresponse"]
@@ -36,8 +34,6 @@ flowchart LR
 
     FILE --> DR
     DR -->|HTTPS| RT1
-    HW -->|"HTTPS 每 2s 輪詢"| RT2
-    ESP -->|"HTTPS 每 3s 上傳"| RT2
 ```
 
 ## 專案結構
@@ -46,21 +42,19 @@ flowchart LR
 frontend/                     純靜態網頁，無框架、無 build step
 ├── index.html                入口頁：兩張卡片連到兩個功能
 ├── dose-response.html        劑量反應分析頁
-├── hardware.html             光感測即時資料頁
+├── hardware.html             硬體資料頁（重寫中）
 ├── css/style.css
-└── js/                       config / dose_response / hardware_gy302 / backend_status
+└── js/                       config / dose_response / hardware / backend_status
 
 backend/                      FastAPI
 ├── app/
 │   ├── main.py               掛載各功能 router
 │   ├── config.py             環境變數與 CORS 設定
-│   ├── dose_response/        劑量反應分析（本專案的主要運算）
-│   └── hardware_gy302/       ESP32 光感測資料收發
+│   └── dose_response/        劑量反應分析（本專案的主要運算）
 ├── tests/                    pytest（目前 73 項）
 └── requirements.txt
 
 scripts/                      安裝與啟動腳本（.sh 與 .ps1 兩版）
-firmware/gy302_esp32/         ESP32 + BH1750 的 Arduino sketch
 docs/dose_response_model_spec.md   劑量反應模型的實作規格書
 ```
 
@@ -125,8 +119,6 @@ pytest
 | `GET` | `/health` | 健康檢查，前端頁尾的連線指示燈在打這支 |
 | `POST` | `/api/dose_response/analyze` | 上傳 reader 匯出檔（multipart），回傳每株菌的擬合結果 |
 | `POST` | `/api/dose_response/predict` | 由螢光值反推 AHL 濃度 |
-| `POST` | `/api/hardware_gy302/upload` | ESP32 上傳一筆 lux 讀值 |
-| `GET` | `/api/hardware_gy302/latest` | 取得最新一筆 lux 讀值 |
 
 完整的請求/回應 schema 可以在後端啟動後開 `/docs` 互動式查看。
 
@@ -172,17 +164,9 @@ router.py        只做 HTTP 轉接，不含任何運算
 
 `io.py` 的 `load_reader_export()` 是唯一知道 SpectraMax ASCII 匯出格式長什麼樣的地方（adapter pattern）。下游全部只吃 well / time_h / RFU / OD600 的整齊表，所以要支援另一台儀器，只需要新增一個對應的 `load_*_export()`，其餘模組都不用動。
 
-## 硬體（ESP32 + GY-302）
+## 硬體
 
-[`firmware/gy302_esp32/gy302_esp32.ino`](firmware/gy302_esp32/gy302_esp32.ino) 透過 I2C 讀 BH1750 的照度，本地依門檻控制 LED（暗處亮燈），同時每 3 秒用 HTTPS POST 把 lux 傳到後端。
-
-燒錄前需要：
-
-1. Arduino IDE 裝好 ESP32 board package
-2. 程式庫管理員安裝 **BH1750**（Christopher Laws）與 **ArduinoJson**（Benoit Blanchon）
-3. 在 sketch 開頭填入 `WIFI_SSID` 與 `WIFI_PASSWORD`（需為 2.4GHz 網路）
-
-後端只保存「最新一筆」讀值在記憶體裡，沒有資料庫也沒有歷史紀錄 — 重啟後端就會清空，第二台裝置上傳會覆蓋掉前一筆。網頁上折線圖的歷史點是前端自己累積的（最多 30 點），重新整理頁面就會歸零。
+重寫中。原本的 ESP32 + GY-302 光感測版本（韌體、後端 `/api/hardware_gy302`）已移除，新的硬體與分析邏輯會放在 `backend/app/hardware/`，完成後再補上這一節。
 
 ## 如何擴充
 
@@ -195,8 +179,6 @@ router.py        只做 HTTP 轉接，不含任何運算
 **後端**（`backend/requirements.txt`）：FastAPI、uvicorn、pydantic、python-multipart、python-dotenv、numpy、scipy、pandas、lmfit、pyyaml；測試用 pytest、httpx。
 
 **前端**：只有 [Chart.js](https://www.chartjs.org/) 4.4.1，從 cdnjs 以 `<script>` 載入，沒有 vendored 進 repo，也沒有 npm 工具鏈。
-
-**韌體**：BH1750、ArduinoJson，以及 ESP32 board package 內建的 WiFi / HTTPClient / WiFiClientSecure。
 
 ## 部署
 

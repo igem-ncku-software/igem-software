@@ -4,11 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, ESP32 light-sensor monitoring). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
+LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, and a hardware sensor feature that is being rewritten). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
 
 - `frontend/` — static HTML/CSS/vanilla JS, no framework, no bundler. Deployed as-is to GitHub Pages.
 - `backend/` — FastAPI app. Deployed to Render at `https://igem-ncku-software.onrender.com`.
-- `firmware/` — Arduino sketch for the ESP32 + GY-302 sensor node that POSTs to the backend.
 - `docs/` — `dose_response_model_spec.md`, the written spec the dose-response backend implements.
 - `scripts/` — install and run scripts, `.sh` and `.ps1` versions of each.
 
@@ -46,7 +45,7 @@ pytest
 
 Because `main.py` lives inside the `app` package, it must be run as `app.main:app` — running `python main.py` or `uvicorn main:app` directly will fail.
 
-`backend/tests/` covers the dose-response modules (73 tests as of the last run: `test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. There are no tests for `app/hardware_gy302/`.
+`backend/tests/` covers the dose-response modules (73 tests as of the last run: `test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`.
 
 ### Frontend
 
@@ -62,7 +61,7 @@ No build step. Serve the folder with any static server (e.g. `python -m http.ser
 
 Each feature lives in its own folder under `backend/app/`, containing at minimum a `router.py` that defines an `APIRouter` with its own path prefix. The router is then imported and mounted in `backend/app/main.py` via `app.include_router(...)`. There is no shared base class or plugin registry — wiring a new feature in means adding the import + `include_router` line by hand. Follow this same pattern for new features rather than adding routes directly to `main.py`.
 
-`app/hardware/` is an empty leftover directory from a removed feature — nothing imports it. `app/hardware_gy302/` replaced it.
+`app/hardware/` is currently empty and nothing imports it. The hardware feature is being rewritten there for different hardware with new analysis logic. The previous ESP32 + GY-302 version (`app/hardware_gy302/`, `/api/hardware_gy302`, and `firmware/gy302_esp32/`) was deleted and survives only in git history.
 
 #### `app/dose_response/` — prefix `/api/dose_response`
 
@@ -92,10 +91,6 @@ Conventions worth preserving:
 
 Single source of truth for the plate map (row → AHL concentration, column → strain), blank/positive well roles, and tunable thresholds. `config.py` loads it, and `io.py` / `normalize.py` / `timeseries.py` / `doseresponse.py` each read their defaults from it at import time. **Changing plate layout or a threshold should mean editing this YAML, not a literal in a module.** Note the strain key `DH5α` is spelled with the Unicode alpha to match the data's own `strain` values.
 
-#### `app/hardware_gy302/` — prefix `/api/hardware_gy302`
-
-Minimal: `POST /upload` (ESP32 pushes a lux reading) and `GET /latest` (frontend polls it). State is a single in-memory `LatestReading`, not persisted — restarting the server loses it, and a second uploading device overwrites it. No history or database.
-
 ### Config
 
 `app/config.py` loads `backend/.env` via `python-dotenv` (silently no-ops if absent, e.g. on Render where env vars are injected by the platform) and centralizes `CORS_ORIGINS` (comma-separated). Default allowed origins cover the GitHub Pages URL plus common local dev ports (5500, 8000). Any new local frontend port needs to be added here or to `.env`.
@@ -105,21 +100,17 @@ Minimal: `POST /upload` (ESP32 pushes a lux reading) and `GET /latest` (frontend
 ```
 index.html            entry page: two linked cards, no feature API calls
 dose-response.html    the analysis UI
-hardware.html         the live sensor UI
+hardware.html         the hardware UI (being rewritten)
 ```
 
-Each feature page loads only the script it needs, so the GY-302 2-second polling loop only runs on the page that shows it. Scripts never call each other and share no state; the single coupling point is that they all read the global `BACKEND_BASE_URL`.
+Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. Scripts never call each other and share no state; the single coupling point is that they all read the global `BACKEND_BASE_URL`.
 
 - `js/config.js` — defines `BACKEND_BASE_URL`, branching on hostname (`localhost` / `127.0.0.1` → `http://127.0.0.1:8000`, else Render). Because there's no build step there's no way to inject this at build time, so it's a runtime check kept in one file. **Must be loaded before every other script.**
 - `js/dose_response.js` (dose-response.html) — submits the chosen file to `POST /api/dose_response/analyze`, renders the summary table plus a per-strain Chart.js scatter + fit curve + EC50 line, and builds a per-strain "predict concentration" widget that calls `POST /api/dose_response/predict`. Keeps a `strainCharts` map so old Chart instances are `destroy()`ed before a re-analysis. Filters out the `x=0` point in charts only (a log axis can't plot it); the table still shows every strain in full. Draws no curve and offers no predict widget when `responsive` is false.
-- `js/hardware_gy302.js` (hardware.html) — polls `GET /api/hardware_gy302/latest` every 2s. The backend keeps no history, so the line chart's history is a client-side rolling window (30 points) that resets on reload. Marks the sensor offline if the reading's timestamp is more than 10s old.
-- `js/backend_status.js` (all three pages) — polls `GET /health` every 12s for the footer badge. Distinct from the GY-302 badge: this one reports the backend, that one reports the ESP32.
+- `js/hardware.js` (hardware.html) — pending a rewrite. The user will write the new version and overwrite it, along with `hardware.html`. Until then it still holds the old GY-302 polling code, which requests the deleted `/api/hardware_gy302/latest` and gets 404s.
+- `js/backend_status.js` (all three pages) — polls `GET /health` every 12s for the footer badge. It reports whether the backend is up, not whether any hardware is.
 
 CSS is one file, `css/style.css`, with a `:root` variable palette matching the team wiki. JS-generated elements are styled by class name (`.status-message.success` / `.error`, `.result-block`, `.chart-note`, `.predict-form`), so renaming a class means changing both files.
-
-### Firmware
-
-`firmware/gy302_esp32/gy302_esp32.ino` — reads the BH1750 over I2C, drives an LED against a local lux threshold, and HTTPS-POSTs `{"lux": <float>}` to `/api/hardware_gy302/upload` every 3s. Wi-Fi credentials are blank placeholders at the top of the sketch. The HTTP timeout is deliberately long (20s) because Render's free tier cold-starts slowly.
 
 ### Deployment
 

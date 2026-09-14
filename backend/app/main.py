@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.dose_response.router import router as dose_response_router
-from app.hardware_gy302.router import router as gy302_data_router
 
 
 app = FastAPI(
     title="LasReader API",
-    description="Backend API for LasReader: AHL dose-response analysis and ESP32 sensor data.",
+    description="Backend API for LasReader: AHL dose-response analysis and hardware sensor data.",
     version="1.2.0",
 )
 
@@ -21,9 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ESP32 + GY-302 (BH1750) 環境光照感測數值 API
-app.include_router(gy302_data_router)
 
 # AHL dose-response 分析 API
 app.include_router(dose_response_router)
@@ -38,8 +34,6 @@ def root() -> dict:
         "health": "/health",
         "dose_response_analyze": "POST /api/dose_response/analyze",
         "dose_response_predict": "POST /api/dose_response/predict",
-        "hardware_gy302_upload": "POST /api/hardware_gy302/upload",
-        "hardware_gy302_latest": "GET /api/hardware_gy302/latest",
     }
 
 
