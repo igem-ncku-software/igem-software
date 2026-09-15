@@ -35,6 +35,8 @@ secrets.json
 *.swp
 *.swo
 *~
+# Claude Code 本機預覽設定（只是開發時啟動靜態伺服器用，不屬於專案）
+.claude/launch.json
 
 # ===== 作業系統 =====
 .DS_Store
