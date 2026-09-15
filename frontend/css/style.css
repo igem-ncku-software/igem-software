@@ -295,6 +295,177 @@ canvas { max-width: 100%; }
 
 @media (prefers-reduced-motion: reduce) { .nav-card { transition: none; } }
 
+/* Hardware pages (CAPTURE-Screen) -----------------------------------
+   Same materials as above: glass frames the page, opaque surfaces sit
+   under every number. No new colours - meaning is carried by the ones
+   already in :root: accent = OK or actionable, gold = caution,
+   error = unusable, muted = neutral. */
+
+input[type="text"], select {
+  width: 100%; padding: 11px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); background: var(--solid);
+}
+select:focus { outline: 3px solid var(--gold); outline-offset: 2px; border-color: var(--text-dim); }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Sub-navigation: five entries on the left, the instrument badge on the right. */
+.hw-subnav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; }
+.hw-subnav-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.hw-subnav-links a {
+  display: inline-block; padding: 7px 16px; border-radius: 999px;
+  color: var(--text-dim); background: var(--glass-chip);
+  backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
+  border: 1px solid rgba(255,255,255,.8);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 6px rgba(61,50,41,.08);
+  font-size: .9rem; font-weight: 600; text-decoration: none;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.hw-subnav-links a:hover { color: var(--text); background: rgba(255,253,247,.88); }
+.hw-subnav-links a[aria-current="page"] { color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.hw-subnav-links a:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+.ruo-notice { color: var(--text-dim); font-weight: 600; }
+
+.text-link { color: var(--accent); font-weight: 700; text-decoration: none; }
+.text-link:hover { text-decoration: underline; }
+.text-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.link-row { margin: 16px 0 0; }
+
+.button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
+.button-row .text-link, .button-row .check-field { margin-top: 14px; }
+
+/* A button that is off because a step is missing always says why. */
+.blocked-reason { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+button.is-blocked:disabled { cursor: not-allowed; }
+
+.status-message.warn {
+  padding: 10px 14px;
+  border: 1px solid var(--border); border-left: 4px solid var(--gold); border-radius: 8px;
+  background: var(--solid-soft); color: var(--gold-ink);
+}
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 16px; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.check-field { display: flex; align-items: center; gap: 8px; }
+.check-field input, td input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.table-heading { margin: 26px 0 12px; }
+.table-spaced { margin-top: 16px; }
+.plan-meta { margin: 8px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.6; }
+.cell-note { color: var(--muted); font-size: .8rem; }
+
+.fingerprint {
+  padding: 1px 7px; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); background: var(--solid-soft);
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: .88em;
+}
+
+.sensor-stats { flex-wrap: wrap; }
+.sensor-stat { min-width: 200px; }
+.sensor-stat-sub { display: block; margin-top: 4px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.sensor-stat-value.is-large { font-size: clamp(1.9rem, 4vw, 2.6rem); }
+.sensor-stat-value.is-message { font-size: 1.15rem; line-height: 1.4; }
+.sensor-stat-value.is-error { color: var(--error); }
+.sensor-stat-value.is-mono { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+
+/* QC flags and curve states. */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+td .chip-row { margin-top: 0; }
+.flag-chip {
+  display: inline-block; padding: 2px 10px;
+  border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-dim); background: var(--solid);
+  font-size: .75rem; font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+}
+.flag-chip.ok { color: var(--accent); border-color: var(--accent); }
+.flag-chip.warn { color: var(--gold-ink); border-color: var(--gold); }
+.flag-chip.error { color: var(--error); border-color: var(--error); }
+
+.curve-chip {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text-dim); background: var(--solid);
+  font-size: .82rem; text-align: right;
+}
+.curve-chip strong { color: var(--text); font-size: .95rem; }
+.curve-chip-label { color: var(--gold-ink); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.curve-summary-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text); font-size: 1.05rem; }
+
+/* Calibration run: the next tube stays pinned while the list scrolls. */
+.next-tube {
+  position: sticky; top: 12px; z-index: 5;
+  margin-top: 18px; padding: 18px 22px 16px;
+  border: 1px solid var(--border); border-left: 6px solid var(--accent); border-radius: 12px;
+  background: var(--solid);
+  box-shadow: 0 6px 18px rgba(61,50,41,.09);
+}
+.next-tube.is-reread { border-left-color: var(--gold); }
+.next-tube.is-done { border-left-color: var(--muted); }
+.next-tube-label { margin: 0; color: var(--gold-ink); font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.next-tube-value {
+  margin: 4px 0 0; color: var(--text);
+  font-family: var(--heading-font); font-weight: 700; font-size: clamp(1.4rem, 3.6vw, 2.1rem); line-height: 1.2;
+}
+.next-tube .status-message { margin-top: 10px; }
+.progress { height: 10px; margin-top: 14px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.progress-text { margin: 6px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+
+/* Tables. */
+.kv-table { min-width: 0; }
+.kv-table th { width: 34%; color: var(--text-dim); font-size: .85rem; letter-spacing: 0; text-transform: none; }
+.channel-table { min-width: 640px; }
+.channel-table th[scope="row"] { letter-spacing: 0; text-transform: none; }
+tr.is-target td { color: var(--text); font-weight: 700; }
+tr.is-target td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+tr.is-excluded td:not(.group-cell) { color: var(--muted); }
+tr.group-start td { border-top: 1px solid var(--border); }
+td.group-cell { vertical-align: top; color: var(--text); background: var(--solid-soft); }
+.action-cell { white-space: nowrap; }
+.table-button { width: auto; min-height: 34px; margin: 0 6px 0 0; padding: 5px 12px; font-size: .85rem; }
+.table-input { min-width: 200px; padding: 6px 10px; }
+.table-input.is-missing { border-color: var(--error); }
+tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(--solid-soft); }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px 20px; }
+.detail-value { display: block; margin-top: 2px; color: var(--text); font-variant-numeric: tabular-nums; }
+.detail-heading { margin: 16px 0 6px; color: var(--text); font-size: .88rem; font-weight: 700; }
+.excluded-list { margin: 0; padding-left: 20px; }
+
+.empty-state { margin-top: 12px; padding: 20px 22px; border: 1px dashed var(--border); border-radius: 12px; background: var(--solid-soft); }
+.empty-state p { margin: 0 0 10px; }
+
+.provenance {
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+  margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: .84rem;
+}
+.provenance b { color: var(--muted); font-weight: 700; }
+
+.mock-panel { border: 1px dashed var(--gold); }
+.mock-panel summary { margin: 0; cursor: pointer; }
+.mock-panel summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .section-heading { flex-wrap: wrap; }
+  .curve-chip { align-items: flex-start; text-align: left; }
+  .next-tube { top: 6px; padding: 14px 16px; }
+  .table-button { width: auto; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .hw-subnav-links a { background: #fffdf7; }
+}
+
+@media print {
+  .hw-subnav, .mock-panel, .next-tube button, .table-button { display: none; }
+  .next-tube { position: static; box-shadow: none; }
+}
+
 /* Without backdrop-filter the panels would be washed-out boxes. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .site-header, .card, .backend-status-badge, button, button.btn-secondary { background: #fffdf7; }

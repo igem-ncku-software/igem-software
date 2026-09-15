@@ -3,7 +3,7 @@
 成大 iGEM（NCKU-Tainan 2026 · Capture）的濕實驗資料工具，前後端分離的網頁應用。
 
 - **AHL 劑量反應分析** — 上傳 plate reader 原始匯出檔，自動跑完整條分析流程，算出每株菌的 EC50、Hill 係數、95% 信賴區間、R²、LOD/LOQ，並判斷該菌株對 AHL 到底有沒有反應。
-- **硬體資料（重寫中）** — 原本的 GY-302 光感測版本已移除，新的硬體與分析邏輯正在重新開發。
+- **CAPTURE-Screen 硬體介面** — 隊上自製的 AS7341 螢光讀取儀：儀器狀態、依清單逐管跑校正、4PL 擬合存檔、量測未知樣品並經校正曲線反推濃度。前端已完成，目前全部接 mock 資料，後端尚未實作。
 
 前端是純靜態網頁（部署在 GitHub Pages），後端是 FastAPI（部署在 Render），兩邊只透過 HTTP/CORS 溝通，沒有共用的建置流程。
 
@@ -18,9 +18,11 @@ flowchart LR
     subgraph FE["frontend/ — 靜態網頁 (GitHub Pages)"]
         IDX["index.html<br/>入口頁"]
         DR["dose-response.html"]
-        HW["hardware.html<br/>（重寫中）"]
+        HW["hardware*.html<br/>CAPTURE-Screen 五頁"]
+        MOCK["js/hardware_api.js<br/>（目前接 hardware_mock.js）"]
         IDX --> DR
         IDX --> HW
+        HW --> MOCK
     end
 
     subgraph BE["backend/ — FastAPI (Render)"]
@@ -42,9 +44,14 @@ flowchart LR
 frontend/                     純靜態網頁，無框架、無 build step
 ├── index.html                入口頁：兩張卡片連到兩個功能
 ├── dose-response.html        劑量反應分析頁
-├── hardware.html             硬體資料頁（重寫中）
+├── hardware.html             CAPTURE-Screen：儀器狀態（硬體區首頁）
+├── hardware-measure.html     CAPTURE-Screen：量測未知樣品
+├── hardware-calibration.html CAPTURE-Screen：校正 run（依 slot 逐管量測）
+├── hardware-calibration-fit.html  CAPTURE-Screen：4PL 擬合、排除、存檔
+├── hardware-curves.html      CAPTURE-Screen：曲線列表
 ├── css/style.css
-└── js/                       config / dose_response / hardware / backend_status
+└── js/                       config / dose_response / backend_status
+                              hardware_mock → hardware_api → hardware_common → 各頁 script
 
 backend/                      FastAPI
 ├── app/
@@ -166,13 +173,29 @@ router.py        只做 HTTP 轉接，不含任何運算
 
 ## 硬體
 
-重寫中。原本的 ESP32 + GY-302 光感測版本（韌體、後端 `/api/hardware_gy302`）已移除，新的硬體與分析邏輯會放在 `backend/app/hardware/`，完成後再補上這一節。
+CAPTURE-Screen 是隊上自製的螢光讀取儀，用 AS7341 光譜感測器讀 sfGFP 螢光。**目前只有前端，所有資料都來自 mock**；後端（`backend/app/hardware/`）尚未實作。原本的 ESP32 + GY-302 版本已移除，只留在 git 歷史裡。
+
+| 頁面 | 用途 |
+|---|---|
+| `hardware.html` | 連線狀態、組態與 fingerprint、active 曲線摘要、Dark read / Blank read 自我檢查 |
+| `hardware-calibration.html` | 建立校正清單，依 slot 順序逐管量測（只有一支 cuvette，「下一管」固定顯示在頂端） |
+| `hardware-calibration-fit.html` | 4PL 擬合、排除個別管（必須附理由）、存檔並設為 active |
+| `hardware-measure.html` | 量測樣品，經 active 曲線反推濃度與 95% CI |
+| `hardware-curves.html` | 所有曲線，標示 active / available / stale |
+
+前端分三層，接真後端時只需要換掉 API 層：
+
+- `js/hardware_api.js` — 頁面唯一呼叫的介面，也用 JSDoc 定義前後端的資料契約（`Measurement`、`CalibrationPlan`、`CalibrationCurve`、`InverseEstimate` 等），**欄位名稱就是後端要照著實作的格式**。目前每個函式都轉呼叫 mock 並加 300–800 ms 假延遲。
+- `js/hardware_mock.js` — 模擬儀器與後端：以 4PL 真值模型加 3% 比例噪音與 8 counts 加成噪音產生讀值，並實作加權 4PL 擬合、LOD/LOQ、反推與 CI。狀態存在瀏覽器的 localStorage。
+- `js/hardware_mock_panel.js` — 每個硬體頁面底部的「Mock controls」，用來觸發極低 / 極高訊號、組態變更、離線等邊界狀況。接上後端時與 `hardware_mock.js` 一起移除。
+
+兩條不能破的規則：反推結果不是 `ok` 時**不顯示任何數字濃度**（範圍外絕不外插）；頁面上**不得出現診斷、檢測病原菌或定量 AHL 等宣稱**，只保留頁尾的 RUO 標示。
 
 ## 如何擴充
 
 **新增一個後端功能**：在 `backend/app/` 底下開一個資料夾，裡面放自己的 `router.py`（定義一個帶專屬 path prefix 的 `APIRouter`），運算邏輯放同層的其他模組，最後在 `app/main.py` 加一行 `include_router()`。沒有共用基底類別或外掛註冊機制，就是手動接上去。請不要把路由直接寫進 `main.py`。
 
-**新增一個前端頁面**：在 `frontend/` 加一個 `.html`，載入 `js/config.js`（一定要排最前面，它定義 `BACKEND_BASE_URL`）再載入該頁自己的 script，然後從 `index.html` 連過去。每支 script 只負責自己的頁面、彼此不互相呼叫，唯一的共用點就是 `BACKEND_BASE_URL`。部署不用改設定 — GitHub Actions 是把整個 `frontend/` 原樣上傳。
+**新增一個前端頁面**：在 `frontend/` 加一個 `.html`，載入 `js/config.js`（一定要排最前面，它定義 `BACKEND_BASE_URL`）再載入該頁自己的 script，然後從 `index.html` 連過去。每支 script 只負責自己的頁面、彼此不互相呼叫，唯一的共用點就是 `BACKEND_BASE_URL`。例外是 CAPTURE-Screen 的五個硬體頁面：它們共用 `hardware_api.js` 與 `hardware_common.js`（見上方〈硬體〉一節）。部署不用改設定 — GitHub Actions 是把整個 `frontend/` 原樣上傳。
 
 ## 相依套件
 

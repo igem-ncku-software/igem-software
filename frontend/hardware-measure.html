@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Measure · CAPTURE-Screen · LasReader</title>
+  <meta name="description" content="Read a sample on the CAPTURE-Screen fluorescence reader and convert its sfGFP signal through the active calibration curve." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="assets/images/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="back-link" href="index.html">&larr; Back to overview</a>
+      <div class="site-header-row">
+        <div class="site-header-text">
+          <p class="eyebrow">iGEM NCKU-Tainan 2026 · CAPTURE-Screen</p>
+          <h1>Measure</h1>
+          <p class="subtitle">Read a sample and convert its sfGFP signal through the active calibration curve</p>
+        </div>
+        <img class="site-logo" src="assets/images/logo-wordmark.png"
+             alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
+      </div>
+    </header>
+
+    <nav class="hw-subnav" id="hardware-subnav" data-page="measure" aria-label="Hardware sections"></nav>
+
+    <main>
+      <section class="card">
+        <div class="section-heading">
+          <p class="section-label">Sample</p>
+          <!-- The curve every reading on this page is converted through. -->
+          <div class="curve-chip" id="measure-curve" aria-live="polite">Loading curve...</div>
+        </div>
+
+        <form id="measure-form">
+          <div class="form-grid">
+            <div class="field">
+              <label for="measure-sample-id">Sample ID</label>
+              <input type="text" id="measure-sample-id" value="S-001" autocomplete="off" required />
+            </div>
+            <div class="field">
+              <label for="measure-sample-type">Sample type</label>
+              <select id="measure-sample-type">
+                <option value="unknown" selected>Unknown</option>
+                <option value="blank">Blank</option>
+                <option value="standard">Standard</option>
+              </select>
+            </div>
+            <div class="field" id="measure-known-field" hidden>
+              <label for="measure-known-concentration">Known concentration (nM)</label>
+              <input type="number" id="measure-known-concentration" min="0" step="any" />
+            </div>
+          </div>
+
+          <button type="submit" id="measure-read-button">Read</button>
+        </form>
+
+        <p class="status-message" id="measure-status" aria-live="polite"></p>
+
+        <div class="result-block" id="measure-result" hidden>
+          <div class="sensor-stats">
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">sfGFP signal · F4 515 nm</span>
+              <span class="sensor-stat-value is-large" id="measure-signal">--</span>
+              <span class="sensor-stat-sub" id="measure-signal-sub"></span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">Estimated concentration</span>
+              <span class="sensor-stat-value is-large" id="measure-concentration">--</span>
+              <span class="sensor-stat-sub" id="measure-concentration-sub"></span>
+            </div>
+          </div>
+
+          <div id="measure-flags"></div>
+
+          <h3 class="subsection-heading table-heading">Spectral channels</h3>
+          <p class="chart-note">
+            Dark-subtracted counts per AS7341 channel. F4 (515 nm) carries the sfGFP emission;
+            F3 (480 nm) is excitation leakage and does not change with concentration.
+          </p>
+          <!-- No height attribute on the canvas: Chart.js ignores aspectRatio when
+               the canvas carries one. See js/dose_response.js. -->
+          <div class="chart-plate">
+            <canvas id="measure-channel-chart"></canvas>
+          </div>
+
+          <div class="provenance" id="measure-provenance"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p class="ruo-notice">Research use only. 本裝置讀取相對螢光，不作為診斷用途。</p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+    </footer>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/hardware_mock.js"></script>
+  <script src="js/hardware_api.js"></script>
+  <script src="js/hardware_common.js"></script>
+  <script src="js/hardware_measure.js"></script>
+  <script src="js/hardware_mock_panel.js"></script>
+  <script src="js/backend_status.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, and a hardware sensor feature that is being rewritten). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
+LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, and the CAPTURE-Screen fluorescence-reader UI, whose frontend exists but runs on mock data because its backend is not written yet). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
 
 - `frontend/` — static HTML/CSS/vanilla JS, no framework, no bundler. Deployed as-is to GitHub Pages.
 - `backend/` — FastAPI app. Deployed to Render at `https://igem-ncku-software.onrender.com`.
@@ -95,20 +95,33 @@ Single source of truth for the plate map (row → AHL concentration, column → 
 
 `app/config.py` loads `backend/.env` via `python-dotenv` (silently no-ops if absent, e.g. on Render where env vars are injected by the platform) and centralizes `CORS_ORIGINS` (comma-separated). Default allowed origins cover the GitHub Pages URL plus common local dev ports (5500, 8000). Any new local frontend port needs to be added here or to `.env`.
 
-### Frontend: three static pages, one script per feature
+### Frontend: flat static pages, one script per page
 
 ```
-index.html            entry page: two linked cards, no feature API calls
-dose-response.html    the analysis UI
-hardware.html         the hardware UI (being rewritten)
+index.html                     entry page: two linked cards, no feature API calls
+dose-response.html             the analysis UI
+hardware.html                  CAPTURE-Screen: instrument status (hardware section home)
+hardware-measure.html          CAPTURE-Screen: read a sample, convert through the active curve
+hardware-calibration.html      CAPTURE-Screen: create a plan, read standards in slot order
+hardware-calibration-fit.html  CAPTURE-Screen: 4PL fit, exclusions with reasons, save/activate
+hardware-curves.html           CAPTURE-Screen: all saved curves, active/available/stale
 ```
 
-Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. Scripts never call each other and share no state; the single coupling point is that they all read the global `BACKEND_BASE_URL`.
+Pages are flat files rather than folders (`hardware-measure.html`, not `hardware/measure/`) to match the existing layout and keep relative asset paths one level deep.
+
+Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The dose-response page shares nothing but the global `BACKEND_BASE_URL`. The five hardware pages are the exception: they share a three-layer stack, loaded in this order after `config.js`:
+
+- `js/hardware_mock.js` — **the entire hardware backend is currently simulated here.** A 4PL truth model with proportional + additive noise generates every reading. Raw channels, scatter, and QC flags all derive from that one simulation; nothing is a hand-picked random number. It also implements plan/curve storage (localStorage, so state survives across the five pages), a weighted Levenberg–Marquardt 4PL fit, LOD/LOQ, and inversion with a delta-method 95% CI. Pages must never call it directly.
+- `js/hardware_api.js` — `HardwareApi`, the only interface pages use, plus JSDoc typedefs for the data contract (`HardwareConfig`, `Measurement`, `CalibrationPlan`, `CalibrationCurve`, `InverseEstimate`). Each function is a mock call with a 300–800 ms delay; swapping in `fetch()` here is meant to require no page changes. **Field names in the typedefs are a contract with the future backend — don't rename them.**
+- `js/hardware_common.js` — subnav + device badge, number formatting rules (concentration 1 dp and µM above 1000 nM, fluorescence integer, percent 1 dp, local time), flag chips, `setBlocked()` for disabled-with-reason buttons.
+- `js/hardware_mock_panel.js` — a collapsible "Mock controls" card on every hardware page, used to force edge cases (very low/high signal, gain change → stale config, offline, dropped dark frame). It talks to `HardwareMock` directly because a real backend has no such switches; remove it together with `hardware_mock.js` when the backend exists.
+
+Hardware rules worth preserving: no numeric concentration unless `InverseEstimate.status === "ok"` (never extrapolate outside `range_nM`); excluded tubes stay on the plot and in the data with a reason; disabled buttons always show why; no 4PL parameters in page code. The claims boundary is strict: the pages must not contain diagnostic claims, pathogen-detection wording, or "quantify AHL" — the only exception is the required RUO footer line.
 
 - `js/config.js` — defines `BACKEND_BASE_URL`, branching on hostname (`localhost` / `127.0.0.1` → `http://127.0.0.1:8000`, else Render). Because there's no build step there's no way to inject this at build time, so it's a runtime check kept in one file. **Must be loaded before every other script.**
 - `js/dose_response.js` (dose-response.html) — submits the chosen file to `POST /api/dose_response/analyze`, renders the summary table plus a per-strain Chart.js scatter + fit curve + EC50 line, and builds a per-strain "predict concentration" widget that calls `POST /api/dose_response/predict`. Keeps a `strainCharts` map so old Chart instances are `destroy()`ed before a re-analysis. Filters out the `x=0` point in charts only (a log axis can't plot it); the table still shows every strain in full. Draws no curve and offers no predict widget when `responsive` is false.
-- `js/hardware.js` (hardware.html) — pending a rewrite. The user will write the new version and overwrite it, along with `hardware.html`. Until then it still holds the old GY-302 polling code, which requests the deleted `/api/hardware_gy302/latest` and gets 404s.
-- `js/backend_status.js` (all three pages) — polls `GET /health` every 12s for the footer badge. It reports whether the backend is up, not whether any hardware is.
+- `js/hardware.js`, `js/hardware_measure.js`, `js/hardware_calibration.js`, `js/hardware_fit.js`, `js/hardware_curves.js` — one per hardware page, in that page order.
+- `js/backend_status.js` (every page) — polls `GET /health` every 12s for the footer badge. It reports whether the backend is up, not whether any hardware is.
 
 CSS is one file, `css/style.css`, with a `:root` variable palette matching the team wiki. JS-generated elements are styled by class name (`.status-message.success` / `.error`, `.result-block`, `.chart-note`, `.predict-form`), so renaming a class means changing both files.
 
