@@ -28,6 +28,8 @@ htmlcov/
 *.key
 *.pem
 secrets.json
+# 韌體的 Wi-Fi 認證；範本是 firmware/as7341/secrets.h.example
+secrets.h
 
 # ===== IDE / 編輯器 =====
 .vscode/

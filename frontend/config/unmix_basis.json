@@ -1,0 +1,7 @@
+{
+  "version": "placeholder-0",
+  "note": "尚未標定。待取得 sfGFP 標準品後以實測光譜取代。",
+  "method": "single_channel",
+  "signal_channel": "F4",
+  "scatter_channel": "F3"
+}
