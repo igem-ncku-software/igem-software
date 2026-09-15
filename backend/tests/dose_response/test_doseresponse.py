@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from app.dose_response.models import hill
-from app.dose_response.doseresponse import fit_hill, flatness_test, lod_loq, predict_concentration
+from app.dose_response.doseresponse import fit_hill, fit_mask, flatness_test, lod_loq, predict_concentration
 
 CONCENTRATIONS = np.array([0.0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5])
 
@@ -66,6 +66,23 @@ def test_fit_hill_accepts_optional_replicate_weights_without_error():
 
     assert fit.converged
     assert fit.ec50_M == pytest.approx(1e-7, rel=0.2)
+
+
+def test_fit_hill_leaves_out_concentrations_without_a_plateau():
+    """A NaN plateau (every reading of that condition OD-gated, spec §5.1) must
+    neither abort the fit nor seed bottom's initial guess."""
+    conc = np.array([0.0, 1e-9, 1e-8, 3e-8, 1e-7, 1e-6, 1e-5])
+    plateaus = hill(conc, 200.0, 8000.0, 1e-7, 1.5) + np.random.default_rng(1).normal(0, 50, conc.shape)
+    plateaus[0] = np.nan
+    plateaus[-1] = np.nan
+
+    fit = fit_hill(conc, plateaus)
+    flat = flatness_test(fit, plateaus[fit_mask(conc, plateaus)])
+
+    assert fit.converged
+    assert len(fit.lmfit_result.residual) == 5
+    assert fit.ec50_M == pytest.approx(1e-7, rel=0.2)
+    assert flat.responsive
 
 
 def test_fit_hill_does_not_converge_with_too_few_positive_concentrations():

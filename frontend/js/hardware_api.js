@@ -1,19 +1,17 @@
 // =========================================================
 // CAPTURE-Screen 的 API 層：hardware 頁面跟裝置 / 儲存之間唯一的介面。
 //
-// 依 js/config.js 的 DEVICE_MODE 選擇裝置的實作，對外的函式簽章不變：
-//   mock  getDeviceStatus / runDarkRead / readSample 走 js/hardware_mock.js
-//   live  同上三個走 js/hardware_device.js（真實裝置），再由
-//         js/hardware_processing.js 轉成 Measurement
-// plan / curve / fit / invert 兩種模式都走 js/hardware_local.js（瀏覽器端的
-// 暫代後端）。之後後端完成，把這些函式換成 fetch(`${BACKEND_BASE_URL}/api/hardware/...`)
-// 即可，頁面不用改。
+// 裝置：CAPTURE-Screen 自己連上後端（firmware/as7341），頁面只跟後端說話：
+//   GET  /api/hardware/status  裝置在不在線、組態
+//   POST /api/hardware/read    量一次，拿回裝置的原始讀值，再由
+//                              js/hardware_processing.js 轉成 Measurement
+// plan / curve / fit / invert：js/hardware_local.js（瀏覽器端的暫代儲存）。
+// 之後後端有了儲存，把那幾個函式換成 fetch 即可，頁面不用改。
 //
-// 進出都做一次 structuredClone，模擬資料經過 HTTP 序列化：頁面改到回傳的
-// 物件，不會偷偷改到儲存端的內部狀態。
+// 進出儲存端都做一次 structuredClone：頁面改到回傳的物件，不會偷偷改到
+// 儲存端的內部狀態。
 //
-// 載入順序：config → hardware_processing → hardware_local → hardware_mock →
-//           hardware_device → 這支
+// 載入順序：config → hardware_processing → hardware_local → 這支
 // =========================================================
 
 // ---- 資料契約（前後端共用，欄位名稱不要改） -------------------------
@@ -102,16 +100,45 @@
 
 // ---- 傳輸層 -----------------------------------------------------------
 
-const HARDWARE_MOCK_DELAY_MS = [300, 800];
+const HARDWARE_API_URL = `${BACKEND_BASE_URL}/api/hardware`;
 const HARDWARE_BASIS_URL = "config/unmix_basis.json";
-const HARDWARE_USE_DEVICE = DEVICE_MODE === "live";
+// 量測本身約 1 秒、後端最多等裝置 10 秒；睡著的 Render 後端被叫醒還要再幾十秒。
+const HARDWARE_REQUEST_TIMEOUT_MS = 60000;
 
-// 瀏覽器端的呼叫（mock 裝置與暫代後端）加上假延遲，讓 loading 狀態真的會出現。
+// 錯誤一律轉成可以直接顯示的訊息，頁面顯示 err.message 即可。
+async function hardwareRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HARDWARE_REQUEST_TIMEOUT_MS);
+  let res;
+  let body;
+  try {
+    res = await fetch(`${HARDWARE_API_URL}${path}`, { ...options, cache: "no-store", signal: controller.signal });
+    body = await res.json().catch(() => null);
+  } catch (err) {
+    throw new Error(`Backend not reachable at ${BACKEND_BASE_URL}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Backend returned HTTP ${res.status}`);
+  if (!body || typeof body !== "object") {
+    console.error(`Unexpected response from ${path}:`, body);
+    throw new Error("Unexpected response from backend");
+  }
+  return body;
+}
+
 async function hardwareLocalCall(handler, ...args) {
-  const [min, max] = HARDWARE_MOCK_DELAY_MS;
-  const payload = structuredClone(args);
-  await new Promise((resolve) => setTimeout(resolve, min + Math.random() * (max - min)));
-  return structuredClone(handler(...payload));
+  return structuredClone(handler(...structuredClone(args)));
+}
+
+function hardwareReading(body) {
+  const problem = HardwareProcessing.validateDeviceReading(body);
+  if (problem) {
+    console.error(`Unexpected reading from device (${problem}):`, body);
+    throw new Error("Unexpected response from device");
+  }
+  return body;
 }
 
 let hardwareBasisPromise = null;
@@ -142,17 +169,38 @@ async function hardwareCurrentFingerprint() {
 // ---- 對頁面公開的函式 -----------------------------------------------
 
 const HardwareApi = {
-  /** @returns {Promise<{online: boolean, last_seen: string, config: HardwareConfig}>} */
+  /**
+   * 裝置不在線時丟出錯誤（訊息可直接顯示），頁面一律當作連不上處理。
+   * @returns {Promise<{online: true, last_seen: string, config: HardwareConfig,
+   *   device_id: string, state: "IDLE" | "LIVE" | "MEASURING", wifi_rssi: number, uptime_ms: number}>}
+   */
   async getDeviceStatus() {
-    if (!HARDWARE_USE_DEVICE) return hardwareLocalCall(HardwareMock.deviceStatus);
-    const body = await HardwareDevice.status();
-    return { online: true, last_seen: new Date().toISOString(), config: HardwareProcessing.toHardwareConfig(body) };
+    const body = await hardwareRequest("/status");
+    if (!body.online) {
+      throw new Error(body.last_seen
+        ? `CAPTURE-Screen is offline (last seen ${new Date(body.last_seen).toLocaleString()}).`
+        : "CAPTURE-Screen has not connected to the backend. Power it on where it can reach its Wi-Fi.");
+    }
+    const problem = HardwareProcessing.validateDeviceStatus(body.device);
+    if (problem) {
+      console.error(`Unexpected device status (${problem}):`, body);
+      throw new Error("Unexpected response from device");
+    }
+    const { device } = body;
+    return {
+      online: true,
+      last_seen: body.last_seen,
+      config: HardwareProcessing.toHardwareConfig(device),
+      device_id: device.device_id,
+      state: device.state,
+      wifi_rssi: device.wifi_rssi,
+      uptime_ms: device.uptime_ms,
+    };
   },
 
   /** @returns {Promise<Measurement>} */
   async runDarkRead() {
-    if (!HARDWARE_USE_DEVICE) return hardwareLocalCall(HardwareMock.darkRead);
-    const reading = await HardwareDevice.read();
+    const reading = hardwareReading(await hardwareRequest("/read", { method: "POST" }));
     return HardwareProcessing.toDarkCheckMeasurement(reading, `DARK-${Date.now()}`, new Date().toISOString());
   },
 
@@ -161,13 +209,12 @@ const HardwareApi = {
    * @returns {Promise<Measurement>}
    */
   async readSample(input) {
-    // 先載入基底：基底有問題就不要讓裝置白白亮一次 LED。
-    const basis = await loadUnmixBasis();
-    if (!HARDWARE_USE_DEVICE) return hardwareLocalCall(HardwareMock.readSample, input, basis);
-
+    // 先檢查輸入、載入基底：有問題就不要讓裝置白白亮一次 LED。
     const inputError = HardwareProcessing.validateSampleInput(input);
     if (inputError) throw new Error(inputError);
-    const reading = await HardwareDevice.read();
+    const basis = await loadUnmixBasis();
+
+    const reading = hardwareReading(await hardwareRequest("/read", { method: "POST" }));
     const fingerprint = HardwareProcessing.toHardwareConfig(reading).fingerprint;
     const m = HardwareProcessing.toMeasurement(reading, structuredClone(input), {
       basis,
@@ -226,13 +273,4 @@ const HardwareApi = {
 
   /** @returns {Promise<UnmixBasis>} */
   getUnmixBasis: () => loadUnmixBasis(),
-
-  /**
-   * 裝置若還在即時串流（LIVE），先把它停掉。mock 模式沒有串流，直接回 false。
-   * @returns {Promise<boolean>} 是否真的停了一個串流
-   */
-  async ensureLiveStopped() {
-    if (!HARDWARE_USE_DEVICE) return false;
-    return HardwareDevice.stopLiveIfStreaming();
-  },
 };

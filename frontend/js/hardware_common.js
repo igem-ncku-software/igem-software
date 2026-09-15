@@ -1,7 +1,7 @@
 // =========================================================
 // hardware 五個頁面共用：子導覽列 + 右上角儀器連線小標、數字格式、
-// QC flag chips、AS7341 通道對照、停用按鈕的原因說明。
-// 目標元素：#hardware-subnav（data-page 標示目前頁面）
+// QC flag chips、AS7341 通道對照、停用按鈕的原因說明、解混基底附註。
+// 目標元素：#hardware-subnav（data-page 標示目前頁面）、[data-basis-note]
 // 依賴 js/hardware_api.js 的 HardwareApi，必須排在它後面、各頁面 script 前面載入。
 // =========================================================
 
@@ -15,7 +15,12 @@ const HARDWARE_PAGES = [
 
 const DEVICE_STATUS_POLL_INTERVAL_MS = 12000;
 
-// AS7341 的通道順序與中心波長。軸標籤用波長數字；Clear 沒有單一波長。
+// Measurement 的 fluorescence / scatter / raw 的單位：
+// (light − dark) / (gain × integration_time_ms)，見 js/hardware_processing.js。
+const HARDWARE_FLUORESCENCE_UNIT = "basic counts";
+
+// AS7341 的通道順序與中心波長。key 是資料契約（Measurement.raw）的名稱，
+// 軸標籤跟首頁即時監看一致：波長數字，Clear 與 NIR 用縮寫。
 const HARDWARE_CHANNELS = [
   { key: "F1", axis: "415" },
   { key: "F2", axis: "445" },
@@ -25,8 +30,8 @@ const HARDWARE_CHANNELS = [
   { key: "F6", axis: "590" },
   { key: "F7", axis: "630" },
   { key: "F8", axis: "680" },
-  { key: "Clear", axis: "Clear" },
-  { key: "NIR", axis: "910" },
+  { key: "Clear", axis: "Clr" },
+  { key: "NIR", axis: "NIR" },
 ];
 
 // chip 顏色：error 代表這筆讀值不能用，warn 代表能用但要注意。
@@ -45,7 +50,7 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-// ---- 顯示規則：濃度 1 位小數（>1000 nM 改 µM）、螢光整數、百分比 1 位小數 ----
+// ---- 顯示規則：濃度 1 位小數（>1000 nM 改 µM）、螢光 4 位有效數字、百分比 1 位小數 ----
 
 function formatConcentration(nM) {
   if (nM === null || nM === undefined || !Number.isFinite(nM)) return "--";
@@ -57,9 +62,20 @@ function formatConcentrationInterval(interval) {
   return `${formatConcentration(interval[0])} – ${formatConcentration(interval[1])}`;
 }
 
+// basic counts 的量級從 0.001 到上千都有（真實裝置正規化後大約 0.05–5），
+// 固定小數位會把小值顯示成 0，所以取 4 位有效數字；≥ 1000 才取整數。
 function formatFluorescence(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "--";
-  return String(Math.round(value) || 0); // `|| 0`：避免 Math.round(-0.3) 顯示成 "-0"
+  if (value === 0) return "0";
+  if (Math.abs(value) >= 1000) return String(Math.round(value));
+  return String(Number(value.toPrecision(4)));
+}
+
+// 殘差這類有正負號的螢光值。
+function formatSignedFluorescence(value) {
+  if (!Number.isFinite(value)) return "--";
+  const text = formatFluorescence(value);
+  return value > 0 && text !== "0" ? `+${text}` : text;
 }
 
 function formatPercent(fraction) {
@@ -164,7 +180,7 @@ function renderChannelTable(raw) {
   const head = hwEl("tr");
   const body = hwEl("tr");
   head.appendChild(Object.assign(hwEl("th", null, "Channel (nm)"), { scope: "row" }));
-  body.appendChild(Object.assign(hwEl("th", null, "Counts"), { scope: "row" }));
+  body.appendChild(Object.assign(hwEl("th", null, "Basic counts"), { scope: "row" }));
   for (const { key, axis } of HARDWARE_CHANNELS) {
     head.appendChild(Object.assign(hwEl("th", null, axis), { scope: "col" }));
     body.appendChild(hwEl("td", null, formatFluorescence(raw[key])));
@@ -182,11 +198,48 @@ function hardwareQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+// ---- 解混基底附註 ---------------------------------------------------
+// 基底版本以 "placeholder" 開頭表示尚未以 sfGFP 標準品標定：凡是顯示
+// fluorescence 的地方都要附註。頁面上放一個帶 data-basis-note 的元素，
+// 這裡負責填字；動態產生的畫面用 hwBasisNote() 建元素再呼叫 fillBasisNotes()。
+
+let hardwareBasisNotePromise = null;
+
+function hardwareBasisNoteText() {
+  if (!hardwareBasisNotePromise) {
+    hardwareBasisNotePromise = HardwareApi.getUnmixBasis()
+      .then((basis) => (String(basis.version).startsWith("placeholder")
+        ? `解混基底尚未標定 · Unmixing basis not yet calibrated (${basis.version}); the signal is the F4 channel alone.`
+        : ""))
+      .catch((err) => {
+        hardwareBasisNotePromise = null;
+        return `Unmixing basis unavailable: ${err.message}`;
+      });
+  }
+  return hardwareBasisNotePromise;
+}
+
+function hwBasisNote(className = "sensor-stat-sub") {
+  const el = hwEl("span", className);
+  el.dataset.basisNote = "";
+  el.hidden = true;
+  return el;
+}
+
+async function fillBasisNotes(root = document) {
+  const text = await hardwareBasisNoteText();
+  for (const el of root.querySelectorAll("[data-basis-note]")) {
+    el.textContent = text;
+    el.hidden = !text;
+  }
+}
+
 // ---- 瀏覽器端的小記憶（只是方便，不是資料） ---------------------------
 
-const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.lastPlanId";
+// v2：舊的 key 指向已移除的模擬裝置產生的 plan 與暗讀，由 hardware_local.js 清掉。
+const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v2.lastPlanId";
 // 資料契約目前沒有「上次暗讀時間」，先由前端記住；後端補上欄位後改讀 API。
-const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.lastDarkReadUtc";
+const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v2.lastDarkReadUtc";
 
 function hardwareRemember(key, value) {
   try {
@@ -233,10 +286,12 @@ async function refreshDeviceBadge() {
   if (!badge) return;
   try {
     const status = await HardwareApi.getDeviceStatus();
-    badge.textContent = status.online ? `Device online · ${status.config.fingerprint}` : "Device offline";
-    badge.classList.toggle("offline", !status.online);
+    badge.textContent = `Device online · ${status.config.fingerprint}`;
+    badge.title = "";
+    badge.classList.remove("offline");
   } catch (err) {
-    badge.textContent = "Device unreachable";
+    badge.textContent = "Device offline";
+    badge.title = err.message;
     badge.classList.add("offline");
   }
 }
@@ -245,4 +300,5 @@ document.addEventListener("DOMContentLoaded", () => {
   renderHardwareSubnav();
   refreshDeviceBadge();
   setInterval(refreshDeviceBadge, DEVICE_STATUS_POLL_INTERVAL_MS);
+  fillBasisNotes();
 });

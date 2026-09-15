@@ -51,6 +51,21 @@ def test_no_missing_values_when_both_blocks_cover_the_same_wells_and_times():
     assert raw[["RFU", "OD600"]].isna().sum().sum() == 0
 
 
+def test_parses_a_utf16_export_exactly_like_the_utf8_one(tmp_path):
+    utf16 = tmp_path / "export_utf16.txt"
+    utf16.write_bytes(FIXTURE.read_text(encoding="utf-8").encode("utf-16"))
+
+    pd.testing.assert_frame_equal(load_reader_export(utf16), load_reader_export(FIXTURE))
+
+
+def test_non_numeric_cell_error_names_the_well_and_time(tmp_path):
+    export = tmp_path / "overflow.txt"
+    export.write_text(FIXTURE.read_text(encoding="utf-8").replace("A\t3.840\t", "A\tOVRFLW\t", 1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"well A1 at 0 h"):
+        load_reader_export(export)
+
+
 # --- load_plate_map(): design v.1 layout (spec §1) ---
 
 

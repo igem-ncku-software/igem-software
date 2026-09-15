@@ -47,7 +47,8 @@ class StrainAnalysis(BaseModel):
     p_value: float
     lod_nM: float | None
     loq_nM: float | None
-    plateau_points: list[tuple[float, float]]  # (concentration_nM, plateau), every tested concentration incl. 0
+    # (concentration_nM, plateau), every tested concentration incl. 0; plateau is None when OD gating removed the whole condition
+    plateau_points: list[tuple[float, float | None]]
     fit_curve: list[tuple[float, float]] | None  # (concentration_nM, predicted F); None when not responsive
 
 
@@ -64,7 +65,8 @@ async def analyze(file: UploadFile = File(...)):
     contents = await file.read()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir) / (file.filename or "upload.txt")
+        # Never build the path from the client's filename: "../x" or an absolute name escapes tmp_dir.
+        tmp_path = Path(tmp_dir) / "upload.txt"
         tmp_path.write_bytes(contents)
         try:
             results = run_pipeline(tmp_path)

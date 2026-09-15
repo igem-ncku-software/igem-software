@@ -51,6 +51,39 @@ def test_analyze_includes_chart_data_for_plotting():
     assert curve_concs == sorted(curve_concs)  # ascending, ready to plot as a line
 
 
+def test_analyze_never_uses_the_client_filename_as_a_path():
+    with open(FIXTURE, "rb") as f:
+        response = client.post(
+            "/api/dose_response/analyze",
+            files={"file": ("/no-such-directory/../../escape.txt", f, "text/plain")},
+        )
+
+    assert response.status_code == 200
+
+
+def test_analyze_survives_a_dose_whose_every_reading_is_od_gated():
+    """Growth fully inhibited at 10 µM: OD_corr stays below od_min, so gating
+    (spec §5.1) removes every F in that row and its plateau has no value."""
+    in_od_block = False
+    patched = []
+    for line in FIXTURE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Plate:"):
+            in_od_block = "OD600" in line
+        if in_od_block and line.startswith("F\t"):
+            line = "F\t" + "\t".join(["0.000"] * 9) + "\t\t\t"
+        patched.append(line)
+
+    response = client.post(
+        "/api/dose_response/analyze",
+        files={"file": ("gated.txt", "\n".join(patched).encode("utf-8"), "text/plain")},
+    )
+
+    assert response.status_code == 200
+    top10 = response.json()["strains"]["TOP10"]
+    missing = [conc_nM for conc_nM, plateau in top10["plateau_points"] if plateau is None]
+    assert missing == [pytest.approx(10000.0)]
+
+
 def test_analyze_rejects_a_file_with_no_recognizable_wells():
     response = client.post(
         "/api/dose_response/analyze",

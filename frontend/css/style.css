@@ -244,8 +244,8 @@ canvas { max-width: 100%; }
   display: block; margin-top: 4px;
   font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem;
   color: var(--text);
-  /* The reading refreshes every 2s; fixed-width digits stop the number
-     from changing width as the value changes. */
+  /* Live readings refresh several times a second; fixed-width digits stop
+     the number from changing width as the value changes. */
   font-variant-numeric: tabular-nums;
 }
 
@@ -309,9 +309,8 @@ canvas { max-width: 100%; }
 .live-switch input:checked + .live-switch-track span { transform: translateX(18px); }
 .live-switch input:focus-visible + .live-switch-track { outline: 3px solid var(--gold); outline-offset: 2px; }
 .live-switch:has(input:disabled) { cursor: not-allowed; opacity: .55; }
-.live-meta { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
-.live-empty { display: grid; min-height: 180px; margin-top: 8px; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); background: var(--solid-soft); text-align: center; }
-.live-chart-plate { margin: 8px 0 0; }
+.live-empty { display: grid; min-height: 180px; margin-top: 16px; padding: 16px; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); background: var(--solid-soft); text-align: center; }
+.live-chart-note { margin: 18px 0 6px; }
 
 @media (max-width: 720px) {
   .live-heading-row, .live-controls { align-items: flex-start; }
@@ -474,10 +473,6 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 }
 .provenance b { color: var(--muted); font-weight: 700; }
 
-.mock-panel { border: 1px dashed var(--gold); }
-.mock-panel summary { margin: 0; cursor: pointer; }
-.mock-panel summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-
 @media (max-width: 640px) {
   .section-heading { flex-wrap: wrap; }
   .curve-chip { align-items: flex-start; text-align: left; }
@@ -490,7 +485,7 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 }
 
 @media print {
-  .hw-subnav, .mock-panel, .next-tube button, .table-button { display: none; }
+  .hw-subnav, .next-tube button, .table-button { display: none; }
   .next-tube { position: static; box-shadow: none; }
 }
 

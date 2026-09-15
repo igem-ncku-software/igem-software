@@ -3,9 +3,9 @@
 // （Levenberg–Marquardt）、LOD/LOQ、濃度反推與 95% CI（delta method），以及
 // 需要儲存狀態才能判斷的 QC flag。
 //
-// 不論 DEVICE_MODE 是 mock 還是 live 都用這支：裝置只負責讀值，儲存與擬合
-// 目前沒有後端可以做（backend/app/hardware/ 尚未實作），所以先放在瀏覽器的
-// localStorage（讀寫失敗時退回記憶體）。之後後端完成，這支整個由 HTTP 取代。
+// 裝置只負責讀值（經由後端的 POST /api/hardware/read）；plan 與 curve 的儲存和
+// 擬合後端還沒有，所以先放在瀏覽器的 localStorage（讀寫失敗時退回記憶體）。
+// 之後後端有了儲存，這支整個由 HTTP 取代。
 //
 // 只收 mode 為 "measurement" 的讀值轉成的 Measurement；即時串流的資料不會
 // 也不可以進到這裡。
@@ -15,9 +15,22 @@
 
 // 反推範圍的上限：4PL 到達 95% span 之後太平，反推誤差會爆掉。
 const LOCAL_RANGE_SPAN_FRACTION = 0.95;
-const LOCAL_STORE_KEY = "lasreader.hardware.local.v1";
-// 舊版（mock 與儲存還沒拆開時）的 key，reset 時一併清掉。
-const LOCAL_LEGACY_STORE_KEYS = ["lasreader.hardware.mock.v1"];
+const LOCAL_STORE_KEY = "lasreader.hardware.local.v2";
+// v2 以前的資料全部來自已移除的模擬裝置：載入時清掉，模擬的 plan、曲線與暗讀紀錄
+// 才不會混進真實量測。
+const LOCAL_LEGACY_KEYS = [
+  "lasreader.hardware.local.v1",
+  "lasreader.hardware.mock.v1",
+  "lasreader.hardware.mockDevice.v1",
+  "lasreader.hardware.lastPlanId",
+  "lasreader.hardware.lastDarkReadUtc",
+];
+
+try {
+  for (const key of LOCAL_LEGACY_KEYS) localStorage.removeItem(key);
+} catch (err) {
+  // localStorage 不能用，也就沒有舊資料要清。
+}
 
 // ---- 狀態儲存 --------------------------------------------------------
 
@@ -263,7 +276,7 @@ function localActiveCurve(store) {
   return Object.values(store.curves).find((c) => c.is_active) ?? null;
 }
 
-// ---- 對 hardware_api.js / hardware_mock.js 公開 -----------------------
+// ---- 對 hardware_api.js 公開 -----------------------------------------
 
 const HardwareLocal = {
   // HIGH_SCATTER 需要「同組態最近一次 blank」當基準。
@@ -522,15 +535,5 @@ const HardwareLocal = {
       status: result.status,
       curve_id: active.curve_id,
     };
-  },
-
-  reset() {
-    localMemoryStore = null;
-    try {
-      localStorage.removeItem(LOCAL_STORE_KEY);
-      for (const key of LOCAL_LEGACY_STORE_KEYS) localStorage.removeItem(key);
-    } catch (err) {
-      // 沒有 localStorage 就只清記憶體。
-    }
   },
 };

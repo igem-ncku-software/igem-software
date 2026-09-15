@@ -1,5 +1,5 @@
 // =========================================================
-// 對接 hardware-measure.html：量一管樣品，顯示 sfGFP 訊號、反推濃度、
+// 對接 hardware-measure.html：量一管樣品，顯示 sfGFP 訊號、推得的 AHL 濃度、
 // QC flags、十通道長條圖與組態 provenance。
 // 目標元素：
 //   #measure-curve（右上角目前使用的曲線）
@@ -59,13 +59,17 @@ function renderCurveChip(curve, config) {
   );
 }
 
+// 裝置連不上時仍然要顯示曲線本身，只是沒辦法判斷它是否 stale。
 async function refreshCurveChip() {
-  try {
-    const [curve, status] = await Promise.all([HardwareApi.getActiveCurve(), HardwareApi.getDeviceStatus()]);
-    renderCurveChip(curve, status.config);
-  } catch (err) {
-    document.getElementById("measure-curve").textContent = `Curve unavailable: ${err.message}`;
+  const [curveResult, statusResult] = await Promise.allSettled([
+    HardwareApi.getActiveCurve(),
+    HardwareApi.getDeviceStatus(),
+  ]);
+  if (curveResult.status === "rejected") {
+    document.getElementById("measure-curve").textContent = `Curve unavailable: ${curveResult.reason.message}`;
+    return;
   }
+  renderCurveChip(curveResult.value, statusResult.status === "fulfilled" ? statusResult.value.config : null);
 }
 
 function renderEstimate(estimate, curve, measurement) {
@@ -73,11 +77,12 @@ function renderEstimate(estimate, curve, measurement) {
   const sub = document.getElementById("measure-concentration-sub");
   value.classList.remove("is-message");
   sub.innerHTML = "";
+  document.getElementById("measure-known-sub")?.remove();
 
   switch (estimate.status) {
     case "ok":
       value.textContent = formatConcentration(estimate.concentration_nM);
-      sub.textContent = `95% CI ${formatConcentrationInterval(estimate.ci95_nM)}`;
+      sub.textContent = `95% CI ${formatConcentrationInterval(estimate.ci95_nM)} · curve ${estimate.curve_id}`;
       break;
     case "below_lod":
       // range_nM.min = max(LOD, lowest standard)，通常就等於 LOD。
@@ -91,12 +96,12 @@ function renderEstimate(estimate, curve, measurement) {
       sub.textContent = "Above the calibrated range. No point estimate; dilute and read again.";
       break;
     case "no_curve":
-      value.textContent = "No calibration curve yet";
+      value.textContent = "No active curve";
       value.classList.add("is-message");
       sub.appendChild(hwLink("hardware-calibration.html", "Run a calibration →"));
       break;
     case "config_mismatch":
-      value.textContent = "Instrument configuration changed. This curve does not apply.";
+      value.textContent = "Instrument config changed, curve not applicable";
       value.classList.add("is-message");
       sub.appendChild(hwLink("hardware-calibration.html", "Rebuild the curve →"));
       break;
@@ -106,6 +111,7 @@ function renderEstimate(estimate, curve, measurement) {
 
   if (measurement.sample_type === "standard") {
     const known = hwEl("span", "sensor-stat-sub", `Known: ${formatConcentration(measurement.known_concentration_nM)}`);
+    known.id = "measure-known-sub";
     sub.after(known);
   }
 }
@@ -132,7 +138,7 @@ function renderChannelChart(raw) {
     data: {
       labels: HARDWARE_CHANNELS.map((channel) => channel.axis),
       datasets: [{
-        label: "Counts",
+        label: "Basic counts",
         data: HARDWARE_CHANNELS.map(({ key }) => raw[key]),
         backgroundColor: colors,
         borderRadius: 4,
@@ -152,13 +158,14 @@ function renderChannelChart(raw) {
         y: {
           beginAtZero: true,
           grace: "12%", // 留空間給長條上方的標註文字
-          title: { display: true, text: "Counts (dark-subtracted)", color: ink },
+          title: { display: true, text: "Basic counts (dark-subtracted)", color: ink },
           grid: { color: rule },
           ticks: { color: muted },
         },
       },
       plugins: {
         legend: { display: false },
+        tooltip: { callbacks: { label: (context) => `${formatFluorescence(context.parsed.y)} ${HARDWARE_FLUORESCENCE_UNIT}` } },
         channelAnnotations: {
           annotations: {
             F4: { text: "sfGFP 510 nm", color: accent },
@@ -187,6 +194,7 @@ function renderProvenance(m, config) {
     item("Gain", `${config.gain}×`);
     item("ATIME / ASTEP", `${config.atime} / ${config.astep}`);
     item("Build", config.build_id);
+    item("Firmware", config.firmware_version);
   } else {
     item("Config details", "unavailable (the instrument config changed after this read)");
   }
@@ -206,6 +214,7 @@ async function readMeasureSample(event) {
   const sampleType = document.getElementById("measure-sample-type").value;
   const statusEl = document.getElementById("measure-status");
   const button = document.getElementById("measure-read-button");
+  if (button.disabled) return;
 
   const sampleId = idInput.value.trim();
   if (!sampleId) {
@@ -215,8 +224,9 @@ async function readMeasureSample(event) {
 
   const input = { sample_id: sampleId, sample_type: sampleType };
   if (sampleType === "standard") {
-    const known = Number(document.getElementById("measure-known-concentration").value);
-    if (document.getElementById("measure-known-concentration").value === "" || !(known >= 0)) {
+    const knownInput = document.getElementById("measure-known-concentration");
+    const known = Number(knownInput.value);
+    if (knownInput.value === "" || !(known >= 0)) {
       setHardwareStatus(statusEl, "A standard needs its known concentration (nM).", "error");
       return;
     }
@@ -240,9 +250,10 @@ async function readMeasureSample(event) {
     renderCurveChip(curve, status.config);
 
     document.getElementById("measure-result").hidden = false;
-    document.getElementById("measure-signal").textContent = formatFluorescence(m.fluorescence);
+    document.getElementById("measure-signal").textContent =
+      `${formatFluorescence(m.fluorescence)} ± ${formatFluorescence(m.fluorescence_sd)}`;
     document.getElementById("measure-signal-sub").textContent =
-      `± ${formatFluorescence(m.fluorescence_sd)} counts (SD) · scatter ${formatFluorescence(m.scatter)}`;
+      `${HARDWARE_FLUORESCENCE_UNIT} (± read-noise SD from the dark frames) · scatter ${formatFluorescence(m.scatter)}`;
     renderEstimate(estimate, matchingCurve, m);
 
     const flags = document.getElementById("measure-flags");

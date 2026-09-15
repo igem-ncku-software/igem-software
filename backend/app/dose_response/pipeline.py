@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from app.dose_response.config import ExperimentConfig, load_config
-from app.dose_response.doseresponse import fit_hill, flatness_test, lod_loq
+from app.dose_response.doseresponse import fit_hill, fit_mask, flatness_test, lod_loq
 from app.dose_response.io import load_plate_map, load_reader_export, to_tidy
 from app.dose_response.models import hill
 from app.dose_response.normalize import blank_subtract, normalize_fluorescence
@@ -71,7 +71,7 @@ def run_pipeline(export_path: str | Path, config: ExperimentConfig | None = None
         positive_mask = conc_arr > 0
 
         fit = fit_hill(conc_arr, plateau_arr)
-        flat = flatness_test(fit, plateau_arr[positive_mask])
+        flat = flatness_test(fit, plateau_arr[fit_mask(conc_arr, plateau_arr)])
         lod = lod_loq(normalized, strain)
 
         ec50_nM = fit.ec50_M * 1e9 if flat.responsive else None

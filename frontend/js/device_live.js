@@ -1,26 +1,30 @@
 // =========================================================
-// 對接 index.html 的 CAPTURE-Screen 卡片：透過 FastAPI 即時監看。
+// 首頁的 CAPTURE-Screen 即時光譜。
 // 目標元素：
-//   #device-card-description / #live-toggle / #live-toggle-reason
-//   #live-dot / #live-dot-label / #live-rate
-//   #live-chart-plate / #live-chart / #live-empty
+//   #live-toggle / #live-dot / #live-dot-label / #live-device
+//   #live-f4 / #live-f3 / #live-rate / #live-saturation / #live-full-scale
+//   #live-empty / #live-charts / #live-chart / #live-trend
 // 依賴 js/config.js（BACKEND_BASE_URL）與 Chart.js。
 //
+// 頁面一打開就連 WS /api/hardware/live，隨時知道裝置在不在線；打開 Live 開關
+// 才送 live_start。後端統計所有開著 Live 的瀏覽器，裝置的 LED 只在有人在看時
+// 亮（一直亮會加熱、漂白樣品），所以開關預設關閉。
+//
 // 規則：
-//   - Live 開關預設關閉，打開才建立 WebSocket 並送 live_start
-//   - 即時資料（mode "live"）只畫在圖上，不寫進任何儲存、不進 plan、不擬合
-//   - 關閉、離線、重連中都清空圖表，不顯示假資料或最後一筆快取
-//   - 離開頁面時送 live_stop 並關閉連線（裝置斷線時也會自己回 IDLE、關 LED）
+//   - 即時資料只畫圖，不寫進任何儲存、不進 plan、不擬合
+//   - 裝置離線或連線中斷就清空圖表，不把最後一筆留著當成現在的數值
+//   - 斷線自動重連（睡著的 Render 後端要幾十秒才醒），不用重新整理頁面
 // =========================================================
 
-const LIVE_MAX_RECONNECTS = 5;
-const LIVE_RECONNECT_BASE_MS = 1000;
-const LIVE_RATE_WINDOW = 10; // 用最近 10 筆的 seq 與 t_ms 算更新率
-const HARDWARE_STATUS_URL = `${BACKEND_BASE_URL}/api/hardware/status`;
-
-function hardwareLiveUrl() {
-  return `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/hardware/live`;
-}
+const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/hardware/live`;
+const LIVE_RECONNECT_MIN_MS = 1000;
+const LIVE_RECONNECT_MAX_MS = 15000;
+const LIVE_RATE_WINDOW = 10; // 用最近 10 幀的 seq 與 t_ms 算更新率
+const LIVE_TREND_WINDOW_MS = 60000;
+// 裝置每 5 秒回報一次；這麼久完全沒消息就不再相信它在線（後端可能還沒發現連線斷了）。
+const LIVE_PRESENCE_STALE_MS = 20000;
+const LIVE_PRESENCE_CHECK_MS = 5000;
+const LIVE_ADC_MAX_COUNTS = 65535;
 
 // 首頁不載入 hardware_common.js，軸標籤在這裡自己定義一份。
 const LIVE_CHANNELS = [
@@ -37,53 +41,117 @@ const LIVE_CHANNELS = [
 ];
 
 let liveSocket = null;
-let liveWanted = false;       // 使用者開著 Live
-let liveStreaming = false;    // 裝置已確認進入 LIVE（收到 state LIVE 或第一筆資料）
-let liveReconnects = 0;
+let liveReconnectMs = LIVE_RECONNECT_MIN_MS;
 let liveReconnectTimer = null;
-let liveChart = null;
-let liveBuildId = null;
-const liveSamples = [];
-
-function liveCssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+let liveWanted = false;     // 使用者開著 Live
+let liveOnline = false;     // 後端最近一次說裝置在線
+let liveDevice = null;      // 裝置最近一次回報的 status
+let liveLastSeen = null;
+let liveLastPresenceMs = 0;
+let liveStreaming = false;  // 開著 Live 之後已經收到至少一幀
+let liveSpectrumChart = null;
+let liveTrendChart = null;
+const liveSamples = [];     // {seq, t}
+const liveTrend = [];       // {t, f4, f3}
 
 function liveEl(id) {
   return document.getElementById(id);
 }
 
-// state: "streaming" 綠 / "reconnecting" 黃 / "off" 灰
-function setLiveDot(state, label) {
-  liveEl("live-dot").className = `live-dot is-${state}`;
-  liveEl("live-dot-label").textContent = label;
+function liveCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function setLiveDescription(text) {
-  liveEl("device-card-description").textContent = text;
+function liveAgo(iso) {
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-function clearLiveView(message) {
-  if (liveChart) {
-    liveChart.destroy();
-    liveChart = null;
+// ADC 在 min(65535, (ATIME+1)(ASTEP+1)) 飽和，跟 hardware_processing.js 同一條規則。
+function liveFullScale(config) {
+  return Math.min(LIVE_ADC_MAX_COUNTS, (config.atime + 1) * (config.astep + 1));
+}
+
+// ---- 狀態文字 --------------------------------------------------------
+
+function renderLiveState() {
+  const connected = liveSocket?.readyState === WebSocket.OPEN;
+
+  let dot = "off";
+  let label = "Off";
+  if (!connected) {
+    dot = "reconnecting";
+    label = "Connecting...";
+  } else if (!liveOnline) {
+    label = "Device offline";
+  } else if (liveWanted && liveDevice?.state === "MEASURING") {
+    dot = "reconnecting";
+    label = "Paused: measuring";
+  } else if (liveWanted) {
+    dot = liveStreaming ? "streaming" : "reconnecting";
+    label = liveStreaming ? "Streaming" : "Starting...";
   }
+  liveEl("live-dot").className = `live-dot is-${dot}`;
+  liveEl("live-dot-label").textContent = label;
+
+  const description = liveEl("live-device");
+  if (!connected) {
+    description.textContent = "Connecting to the backend. A sleeping backend can take up to a minute to wake.";
+  } else if (liveOnline && liveDevice) {
+    description.textContent =
+      `CAPTURE-Screen online · ${liveDevice.build_id} · firmware ${liveDevice.firmware_version} · Wi-Fi ${liveDevice.wifi_rssi} dBm`;
+  } else if (liveDevice && liveLastSeen) {
+    description.textContent = `CAPTURE-Screen offline · last seen ${liveAgo(liveLastSeen)}`;
+  } else {
+    description.textContent = "CAPTURE-Screen has not connected yet. Power it on where it can reach its Wi-Fi.";
+  }
+}
+
+function liveIdleMessage() {
+  if (!liveOnline) return "CAPTURE-Screen is offline. The spectrum appears here once it connects.";
+  if (liveWanted) return "Waiting for the first frame...";
+  return "Turn on Live to stream the spectrum. The reader's LED is on only while someone is watching.";
+}
+
+function clearLiveData(message) {
+  liveStreaming = false;
   liveSamples.length = 0;
-  liveEl("live-chart-plate").hidden = true;
+  liveTrend.length = 0;
+  liveSpectrumChart?.destroy();
+  liveTrendChart?.destroy();
+  liveSpectrumChart = null;
+  liveTrendChart = null;
+
+  liveEl("live-charts").hidden = true;
+  liveEl("live-saturation").hidden = true;
+  for (const id of ["live-f4", "live-f3", "live-rate"]) liveEl(id).textContent = "--";
   const empty = liveEl("live-empty");
   empty.textContent = message;
   empty.hidden = false;
-  liveEl("live-rate").textContent = "-- Hz";
 }
 
-function ensureLiveChart() {
-  if (liveChart) return liveChart;
+// ---- 圖表 ------------------------------------------------------------
+
+function ensureLiveCharts() {
+  if (liveSpectrumChart) return;
   const accent = liveCssVar("--accent");
   const gold = liveCssVar("--gold");
   const muted = liveCssVar("--muted");
+  const ink = liveCssVar("--text");
   const rule = liveCssVar("--border");
+  const ticks = { color: muted, font: { size: 10 } };
+  const countsAxis = {
+    beginAtZero: true,
+    title: { display: true, text: "Raw counts", color: ink },
+    grid: { color: rule },
+    ticks: { ...ticks, maxTicksLimit: 5 },
+  };
 
-  liveChart = new Chart(liveEl("live-chart"), {
+  liveSpectrumChart = new Chart(liveEl("live-chart"), {
     type: "bar",
     data: {
       labels: LIVE_CHANNELS.map((ch) => ch.label),
@@ -99,178 +167,187 @@ function ensureLiveChart() {
       aspectRatio: 2.4,
       animation: false,
       scales: {
-        x: { grid: { display: false }, ticks: { color: muted, font: { size: 10 } } },
-        y: { beginAtZero: true, grid: { color: rule }, ticks: { color: muted, font: { size: 10 }, maxTicksLimit: 4 } },
+        x: { title: { display: true, text: "Channel (nm)", color: ink }, grid: { display: false }, ticks },
+        y: countsAxis,
       },
       plugins: { legend: { display: false } },
     },
   });
-  return liveChart;
+
+  liveTrendChart = new Chart(liveEl("live-trend"), {
+    type: "line",
+    data: {
+      datasets: [
+        { label: "F4 515 nm (sfGFP)", data: [], borderColor: accent, backgroundColor: accent, borderWidth: 2, pointRadius: 0 },
+        { label: "F3 480 nm (leakage)", data: [], borderColor: gold, backgroundColor: gold, borderWidth: 2, pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true,
+      aspectRatio: 3,
+      animation: false,
+      scales: {
+        x: {
+          type: "linear",
+          min: -LIVE_TREND_WINDOW_MS / 1000,
+          max: 0,
+          title: { display: true, text: "Seconds before the latest frame", color: ink },
+          grid: { color: rule },
+          ticks,
+        },
+        y: countsAxis,
+      },
+      plugins: { legend: { labels: { color: ink, boxHeight: 2 } } },
+    },
+  });
 }
 
-function renderLiveFrame(message) {
-  const raw = message.raw;
+function renderSaturation(raw) {
+  const el = liveEl("live-saturation");
+  if (!liveDevice) {
+    el.hidden = true;
+    return;
+  }
+  const limit = liveFullScale(liveDevice.config);
+  const saturated = LIVE_CHANNELS.filter(({ key }) => raw[key] >= limit).map((ch) => ch.label);
+  el.hidden = saturated.length === 0;
+  el.textContent = `Saturated at ${limit} counts: ${saturated.join(", ")}. These channels show the ADC ceiling, not the sample.`;
+}
+
+// ---- 訊息 ------------------------------------------------------------
+
+function onLivePresence(message) {
+  liveOnline = message.online === true;
+  if (message.device) liveDevice = message.device;
+  if (message.last_seen) liveLastSeen = message.last_seen;
+  liveLastPresenceMs = Date.now();
+
+  if (liveDevice) liveEl("live-full-scale").textContent = String(liveFullScale(liveDevice.config));
+  if (!liveOnline || !liveStreaming) clearLiveData(liveIdleMessage());
+  renderLiveState();
+}
+
+function onLiveFrame(message) {
+  const { raw } = message;
   const valid = raw && LIVE_CHANNELS.every(({ key }) => Number.isFinite(raw[key]))
     && Number.isFinite(message.seq) && Number.isFinite(message.t_ms);
   if (!valid) {
-    console.error("Unexpected response from device (live frame):", message);
+    console.error("Unexpected live frame:", message);
     return;
   }
+  if (!liveWanted) return;
 
-  if (!liveStreaming) {
-    liveStreaming = true;
-    refreshLiveDescription();
+  // 裝置重開機後 t_ms 從 0 重新算，舊樣本放在同一條時間軸上沒有意義。
+  const newest = liveTrend[liveTrend.length - 1];
+  if (newest && message.t_ms <= newest.t) {
+    liveTrend.length = 0;
+    liveSamples.length = 0;
   }
-  liveReconnects = 0;
-  setLiveDot("streaming", "Streaming");
 
-  const chart = ensureLiveChart();
-  chart.data.datasets[0].data = LIVE_CHANNELS.map(({ key }) => raw[key]);
-  chart.update();
+  ensureLiveCharts();
+  liveStreaming = true;
   liveEl("live-empty").hidden = true;
-  liveEl("live-chart-plate").hidden = false;
+  liveEl("live-charts").hidden = false;
+  liveEl("live-f4").textContent = String(raw.F4);
+  liveEl("live-f3").textContent = String(raw.F3);
 
-  // 更新率 = seq 差 / 裝置時間差：用裝置自己的 t_ms，網路抖動不影響，掉包也不會算少。
+  liveSpectrumChart.data.datasets[0].data = LIVE_CHANNELS.map(({ key }) => raw[key]);
+  liveSpectrumChart.update();
+
+  liveTrend.push({ t: message.t_ms, f4: raw.F4, f3: raw.F3 });
+  while (message.t_ms - liveTrend[0].t > LIVE_TREND_WINDOW_MS) liveTrend.shift();
+  const [f4Series, f3Series] = liveTrendChart.data.datasets;
+  f4Series.data = liveTrend.map((p) => ({ x: (p.t - message.t_ms) / 1000, y: p.f4 }));
+  f3Series.data = liveTrend.map((p) => ({ x: (p.t - message.t_ms) / 1000, y: p.f3 }));
+  liveTrendChart.update();
+
+  // 更新率 = seq 差 / 裝置時間差：用裝置自己的時鐘，網路抖動不影響。
   liveSamples.push({ seq: message.seq, t: message.t_ms });
   if (liveSamples.length > LIVE_RATE_WINDOW) liveSamples.shift();
   const first = liveSamples[0];
   const last = liveSamples[liveSamples.length - 1];
-  if (liveSamples.length >= 2 && last.t > first.t && last.seq > first.seq) {
-    liveEl("live-rate").textContent = `${(((last.seq - first.seq) * 1000) / (last.t - first.t)).toFixed(1)} Hz`;
+  if (last.t > first.t && last.seq > first.seq) {
+    liveEl("live-rate").textContent = (((last.seq - first.seq) * 1000) / (last.t - first.t)).toFixed(1);
   }
+
+  renderSaturation(raw);
+  renderLiveState();
 }
 
-async function refreshLiveDescription() {
-  try {
-    const response = await fetch(HARDWARE_STATUS_URL, { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const status = await response.json();
-    if (!status.online || !status.device?.build_id) throw new Error("Unexpected response");
-    liveBuildId = status.device.build_id;
-    const source = status.source === "mock" ? "Simulation ready" : "Device connected";
-    setLiveDescription(`${source} · ${liveBuildId}`);
-    return true;
-  } catch (err) {
-    if (!liveStreaming) setLiveDescription("Live backend unavailable");
-    return false;
-  }
-}
+// ---- 連線 ------------------------------------------------------------
 
 function openLiveSocket() {
-  let socket;
-  try {
-    socket = new WebSocket(hardwareLiveUrl());
-  } catch (err) {
-    scheduleLiveReconnect();
-    return;
-  }
+  clearTimeout(liveReconnectTimer);
+  const socket = new WebSocket(LIVE_URL);
   liveSocket = socket;
+  renderLiveState();
 
   socket.onopen = () => {
     if (socket !== liveSocket) return;
-    socket.send(JSON.stringify({ cmd: "live_start" }));
+    liveReconnectMs = LIVE_RECONNECT_MIN_MS;
+    if (liveWanted) socket.send(JSON.stringify({ cmd: "live_start" }));
+    renderLiveState();
   };
 
   socket.onmessage = (event) => {
-    if (socket !== liveSocket || !liveWanted) return;
+    if (socket !== liveSocket) return;
     let message;
     try {
       message = JSON.parse(event.data);
     } catch (err) {
-      console.error("Unexpected response from device (live):", event.data);
+      console.error("Unexpected message from the live backend:", event.data);
       return;
     }
-
-    if (message.mode === "live") {
-      renderLiveFrame(message);
-    } else if (message.mode === "state") {
-      if (message.state === "LIVE") {
-        liveStreaming = true;
-      } else if (liveStreaming) {
-        // 串流中裝置轉離 LIVE：通常是有人送了 POST /read。裝置不會自動恢復 LIVE。
-        stopLive("Live stream stopped by the device (a measurement started).");
-      }
-    } else if (message.error === "busy") {
-      stopLive("Device is busy, try again");
-    } else if (message.error === "device_unreachable") {
-      stopLive("CAPTURE-Screen device is unavailable.");
-    }
+    if (message.mode === "presence") onLivePresence(message);
+    else if (message.mode === "live") onLiveFrame(message);
+    else if (message.mode === "error") console.error("The live backend rejected a command:", message);
   };
 
   socket.onclose = () => {
     if (socket !== liveSocket) return;
     liveSocket = null;
-    if (liveWanted) scheduleLiveReconnect();
+    liveOnline = false;
+    clearLiveData(`Lost the connection to the backend. Retrying in ${Math.round(liveReconnectMs / 1000)} s...`);
+    liveReconnectTimer = setTimeout(openLiveSocket, liveReconnectMs);
+    liveReconnectMs = Math.min(liveReconnectMs * 2, LIVE_RECONNECT_MAX_MS);
+    renderLiveState();
   };
 }
 
-function scheduleLiveReconnect() {
-  liveStreaming = false;
-  clearLiveView("Connection lost. Reconnecting...");
-
-  if (liveReconnects >= LIVE_MAX_RECONNECTS) {
-    liveWanted = false;
-    liveEl("live-toggle").checked = false;
-    setLiveDot("off", "Offline");
-    setLiveDescription("Live backend unavailable");
-    clearLiveView(`Could not connect to ${hardwareLiveUrl()}`);
-    return;
+function setLiveWanted(wanted) {
+  liveWanted = wanted;
+  if (liveSocket?.readyState === WebSocket.OPEN) {
+    liveSocket.send(JSON.stringify({ cmd: wanted ? "live_start" : "live_stop" }));
   }
-
-  liveReconnects += 1;
-  setLiveDot("reconnecting", `Reconnecting (${liveReconnects}/${LIVE_MAX_RECONNECTS})`);
-  liveReconnectTimer = setTimeout(openLiveSocket, LIVE_RECONNECT_BASE_MS * liveReconnects);
+  clearLiveData(liveIdleMessage());
+  renderLiveState();
 }
 
-function startLive() {
-  liveWanted = true;
-  liveStreaming = false;
-  liveReconnects = 0;
-  setLiveDot("reconnecting", "Connecting...");
-  clearLiveView("Waiting for data...");
-  openLiveSocket();
-}
-
-function stopLive(message) {
-  liveWanted = false;
-  liveStreaming = false;
-  clearTimeout(liveReconnectTimer);
-  const socket = liveSocket;
-  liveSocket = null;
-  if (socket) {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ cmd: "live_stop" }));
-    socket.close();
+function checkLivePresence() {
+  if (liveOnline && Date.now() - liveLastPresenceMs > LIVE_PRESENCE_STALE_MS) {
+    liveOnline = false;
+    clearLiveData(liveIdleMessage());
   }
-  liveEl("live-toggle").checked = false;
-  setLiveDot("off", "Off");
-  clearLiveView(message || "Live view is off.");
+  renderLiveState(); // 也順便更新「last seen … ago」
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
+document.addEventListener("DOMContentLoaded", () => {
   const toggle = liveEl("live-toggle");
-  const reason = liveEl("live-toggle-reason");
+  toggle.addEventListener("change", () => setLiveWanted(toggle.checked));
 
-  setLiveDot("off", "Off");
-  clearLiveView("Live view is off.");
+  clearLiveData(liveIdleMessage());
+  openLiveSocket();
+  setInterval(checkLivePresence, LIVE_PRESENCE_CHECK_MS);
 
-  const available = await refreshLiveDescription();
-  if (!available) {
-    toggle.disabled = true;
-    reason.textContent = "Start the FastAPI backend, then reload this page.";
-    reason.hidden = false;
-    return;
-  }
-
-  toggle.disabled = false;
-  reason.hidden = true;
-
-  toggle.addEventListener("change", () => {
-    if (toggle.checked) startLive();
-    else stopLive();
-  });
-
-  // 離開首頁（包括點進 /hardware 任一子頁）時停止串流。
+  // 離開頁面就關掉連線：後端少算一個觀看者，沒人看時會自己叫裝置關 LED。
   window.addEventListener("pagehide", () => {
-    if (liveWanted) stopLive();
+    clearTimeout(liveReconnectTimer);
+    const socket = liveSocket;
+    liveSocket = null;
+    socket?.close();
+  });
+  // 從上一頁／下一頁快取回來時頁面狀態還在，只要重新連線。
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && !liveSocket) openLiveSocket();
   });
 });

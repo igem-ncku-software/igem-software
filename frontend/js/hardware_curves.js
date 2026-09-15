@@ -21,20 +21,26 @@ function curveStatus(curve) {
 
 async function loadCurves(message) {
   const statusEl = document.getElementById("curves-status");
-  try {
-    const [curves, status] = await Promise.all([HardwareApi.listCurves(), HardwareApi.getDeviceStatus()]);
-    curvesList = curves;
-    curvesFingerprint = status.config.fingerprint;
-    renderCurves();
-    if (message) setHardwareStatus(statusEl, message, "success");
-    else {
-      statusEl.textContent = "";
-      statusEl.append("Instrument config is now ", hwFingerprint(curvesFingerprint), ".");
-      statusEl.className = "status-message";
-    }
-  } catch (err) {
-    console.error("Failed to load curves:", err);
-    setHardwareStatus(statusEl, `Could not load curves: ${err.message}`, "error");
+  // 曲線存在瀏覽器端：裝置連不上時照樣列出，只是無法判斷 stale。
+  const [curvesResult, statusResult] = await Promise.allSettled([HardwareApi.listCurves(), HardwareApi.getDeviceStatus()]);
+  if (curvesResult.status === "rejected") {
+    console.error("Failed to load curves:", curvesResult.reason);
+    setHardwareStatus(statusEl, `Could not load curves: ${curvesResult.reason.message}`, "error");
+    return;
+  }
+
+  curvesList = curvesResult.value;
+  curvesFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  renderCurves();
+  if (message) {
+    setHardwareStatus(statusEl, message, "success");
+  } else if (curvesFingerprint === null) {
+    setHardwareStatus(statusEl,
+      `Instrument unreachable (${statusResult.reason.message}), so it can't be checked which curves match its config.`, "warn");
+  } else {
+    statusEl.textContent = "";
+    statusEl.append("Instrument config is now ", hwFingerprint(curvesFingerprint), ".");
+    statusEl.className = "status-message";
   }
 }
 
@@ -115,15 +121,17 @@ function renderCurveDetails(curve) {
     grid.appendChild(box);
   };
   item("Model", curve.model);
-  item("Top", `${formatFluorescence(curve.params.top)} counts`);
-  item("Bottom", `${formatFluorescence(curve.params.bottom)} counts`);
+  item("Top", `${formatFluorescence(curve.params.top)} ${HARDWARE_FLUORESCENCE_UNIT}`);
+  item("Bottom", `${formatFluorescence(curve.params.bottom)} ${HARDWARE_FLUORESCENCE_UNIT}`);
   item("EC50", formatConcentration(curve.params.ec50_nM));
   item("Hill slope", curve.params.hill.toFixed(2));
   item("LOD", formatConcentration(curve.lod_nM));
   item("LOQ", formatConcentration(curve.loq_nM));
-  item("RMSE", `${formatFluorescence(curve.rmse)} counts`);
+  item("RMSE", `${formatFluorescence(curve.rmse)} ${HARDWARE_FLUORESCENCE_UNIT}`);
   item("Usable range", formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max]));
   cell.appendChild(grid);
+  cell.appendChild(hwBasisNote("cell-note"));
+  fillBasisNotes(cell);
 
   cell.appendChild(hwEl("p", "detail-heading", `Excluded tubes (${curve.excluded.length})`));
   if (curve.excluded.length === 0) {

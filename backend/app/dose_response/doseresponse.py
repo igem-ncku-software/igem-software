@@ -69,6 +69,19 @@ def _hill_log10x(log10_A: np.ndarray, bottom: float, top: float, log10_ec50: flo
     return hill(A, bottom, top, ec50, n)
 
 
+def fit_mask(conc_M: np.ndarray, plateaus: np.ndarray) -> np.ndarray:
+    """The points fit_hill() regresses on: positive concentrations with a finite plateau.
+
+    A plateau is NaN when OD gating (spec §5.1) removed every reading of a
+    condition, e.g. growth inhibited at the top dose. That point carries no
+    information and would abort the lmfit fit, so it is left out just like
+    [A]=0. flatness_test() must be given this same subset.
+    """
+    conc_M = np.asarray(conc_M, dtype=float)
+    plateaus = np.asarray(plateaus, dtype=float)
+    return (conc_M > 0) & np.isfinite(plateaus)
+
+
 def fit_hill(
     conc_M: np.ndarray,
     plateau: np.ndarray,
@@ -77,12 +90,13 @@ def fit_hill(
     """Fit the Hill dose-response equation to plateau vs [AHL] (spec §5.3).
 
     conc_M==0 is excluded from the fit itself (can't take log10(0)) but its
-    plateau is used as bottom's initial guess, per spec §5.3.
+    plateau is used as bottom's initial guess, per spec §5.3. Conditions
+    without a plateau (NaN) are excluded too - see fit_mask().
     """
     conc_M = np.asarray(conc_M, dtype=float)
     plateau_arr = np.asarray(plateau, dtype=float)
 
-    mask = conc_M > 0
+    mask = fit_mask(conc_M, plateau_arr)
     x_log = np.log10(conc_M[mask])
     y = plateau_arr[mask]
 
@@ -98,7 +112,8 @@ def fit_hill(
             lmfit_result=None,
         )
 
-    bottom0 = float(plateau_arr[conc_M == 0].mean()) if (conc_M == 0).any() else float(y.min())
+    zero_plateaus = plateau_arr[(conc_M == 0) & np.isfinite(plateau_arr)]
+    bottom0 = float(zero_plateaus.mean()) if zero_plateaus.size else float(y.min())
 
     model = Model(_hill_log10x)
     params = model.make_params(bottom=bottom0, top=float(y.max()), log10_ec50=float(np.median(x_log)), n=1.0)

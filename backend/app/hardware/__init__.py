@@ -1,1 +1,1 @@
-"""CAPTURE-Screen status and live-stream backend."""
+"""CAPTURE-Screen: the relay between the device's own connection and the browser pages."""

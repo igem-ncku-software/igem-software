@@ -37,7 +37,9 @@ def root() -> dict:
         "dose_response_analyze": "POST /api/dose_response/analyze",
         "dose_response_predict": "POST /api/dose_response/predict",
         "hardware_status": "GET /api/hardware/status",
+        "hardware_read": "POST /api/hardware/read",
         "hardware_live": "WS /api/hardware/live",
+        "hardware_device": "WS /api/hardware/device",
     }
 
 

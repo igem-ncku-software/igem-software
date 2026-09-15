@@ -1,12 +1,9 @@
 // =========================================================
-// CAPTURE-Screen 資料處理：裝置原始讀值（POST /read 的回應）-> Measurement。
+// CAPTURE-Screen 資料處理：裝置原始讀值（POST /api/hardware/read 的回應）-> Measurement。
 //
 // 全部是純函式：不碰 DOM、不發請求、不讀 localStorage、不讀時鐘（時間由
 // 呼叫端傳入）。之後要原封不動移植到 backend/app/hardware/，所以這裡的
 // 規則——尤其是 configFingerprint() 的串接格式——前後端必須完全一致。
-//
-// 真實裝置（live）與模擬裝置（mock）都走這一條：mock 產生的是跟韌體
-// 格式相同的讀值，再交給這裡處理，兩種模式的單位與 flag 規則才會一致。
 //
 // 單位：Measurement 的 fluorescence / scatter / raw 都是
 //   basic counts = (light − dark) / (gain × integration_time_ms)

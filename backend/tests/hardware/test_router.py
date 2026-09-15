@@ -1,63 +1,147 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app.config import settings
+from app.hardware.router import device_hub
 from app.main import app
-
+from tests.hardware.payloads import LIVE, STATUS, measurement
 
 client = TestClient(app)
 
 
-def test_hardware_status_in_mock_mode(monkeypatch):
-    monkeypatch.setattr(settings, "HARDWARE_MODE", "mock")
+@pytest.fixture(scope="module", autouse=True)
+def _shared_portal():
+    # Tests below hold the device socket and a browser socket (or an HTTP call) at once. Without
+    # entering the client, each connection runs on its own anyio portal and event loop.
+    with client:
+        yield
 
-    response = client.get("/api/hardware/status")
+
+@pytest.fixture(autouse=True)
+def _fresh_hub():
+    device_hub.reset()
+    yield
+    device_hub.reset()
+
+
+def wait_until_online():
+    for _ in range(200):
+        if client.get("/api/hardware/status").json()["online"]:
+            return
+        time.sleep(0.01)
+    raise AssertionError("the device never came online")
+
+
+def read_while_device_replies(device, reply):
+    """POST /read from a worker thread while this thread plays the device."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(client.post, "/api/hardware/read")
+        command = device.receive_json()
+        assert command["cmd"] == "read"
+        device.send_json(reply(command["request_id"]))
+        return pending.result(timeout=5)
+
+
+# --- GET /status ---
+
+
+def test_status_before_any_device_connects():
+    assert client.get("/api/hardware/status").json() == {"online": False, "last_seen": None, "device": None}
+
+
+def test_status_reflects_the_connected_device():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+        body = client.get("/api/hardware/status").json()
+
+    assert body["device"]["build_id"] == "P1-PROTO-01"
+    assert body["device"]["config"]["gain"] == 16
+    assert body["last_seen"] is not None
+
+
+def test_status_goes_offline_when_the_device_disconnects():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+
+    body = client.get("/api/hardware/status").json()
+    assert body["online"] is False
+    assert body["device"]["device_id"] == "capture-screen-p1"
+
+
+def test_device_handshake_echoes_the_arduino_subprotocol():
+    with client.websocket_connect("/api/hardware/device", subprotocols=["arduino"]) as device:
+        assert device.accepted_subprotocol == "arduino"
+
+
+# --- POST /read ---
+
+
+def test_read_round_trips_through_the_device_connection():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+        response = read_while_device_replies(device, measurement)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["online"] is True
-    assert body["source"] == "mock"
-    assert body["device"]["state"] == "IDLE"
-    assert body["device"]["config"]["gain"] == 16
+    assert body["mode"] == "measurement"
+    assert body["light"]["F4"] == 900
+    assert "request_id" not in body
 
 
-def test_hardware_live_mock_start_frame_and_stop(monkeypatch):
-    monkeypatch.setattr(settings, "HARDWARE_MODE", "mock")
-    monkeypatch.setattr(settings, "HARDWARE_LIVE_INTERVAL_MS", 50)
-
-    with client.websocket_connect("/api/hardware/live") as websocket:
-        assert websocket.receive_json() == {"mode": "state", "state": "IDLE"}
-
-        websocket.send_json({"cmd": "live_start"})
-        assert websocket.receive_json() == {"mode": "state", "state": "LIVE"}
-        frame = websocket.receive_json()
-        assert frame["mode"] == "live"
-        assert frame["seq"] == 1
-        assert set(frame["raw"]) == {
-            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "CLR", "NIR"
-        }
-
-        websocket.send_json({"cmd": "live_stop"})
-        assert websocket.receive_json() == {"mode": "state", "state": "IDLE"}
+def test_read_without_a_device_is_503():
+    assert client.post("/api/hardware/read").status_code == 503
 
 
-def test_hardware_live_rejects_unknown_command(monkeypatch):
-    monkeypatch.setattr(settings, "HARDWARE_MODE", "mock")
+def test_read_on_a_busy_device_is_409():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+        response = read_while_device_replies(
+            device, lambda request_id: {"mode": "error", "request_id": request_id, "error": "busy"}
+        )
 
-    with client.websocket_connect("/api/hardware/live") as websocket:
-        websocket.receive_json()
-        websocket.send_json({"cmd": "erase"})
-        assert websocket.receive_json() == {"error": "unknown_cmd"}
+    assert response.status_code == 409
 
 
-def test_hardware_live_rejects_untrusted_browser_origin(monkeypatch):
-    monkeypatch.setattr(settings, "HARDWARE_MODE", "mock")
+# --- WS /live ---
 
+
+def test_watching_switches_the_stream_and_relays_frames():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+
+        with client.websocket_connect("/api/hardware/live") as browser:
+            assert browser.receive_json()["online"] is True
+
+            browser.send_json({"cmd": "live_start"})
+            assert device.receive_json() == {"cmd": "live_start"}
+            assert browser.receive_json() == {"mode": "watching", "watching": True}
+
+            device.send_json(LIVE)
+            assert browser.receive_json() == LIVE
+
+            browser.send_json({"cmd": "live_stop"})
+            assert device.receive_json() == {"cmd": "live_stop"}
+            assert browser.receive_json() == {"mode": "watching", "watching": False}
+
+
+def test_live_rejects_unknown_commands():
+    with client.websocket_connect("/api/hardware/live") as browser:
+        browser.receive_json()
+        browser.send_json({"cmd": "erase"})
+        assert browser.receive_json() == {"mode": "error", "error": "unknown_cmd"}
+
+
+def test_live_rejects_an_untrusted_browser_origin():
     with pytest.raises(WebSocketDisconnect) as error:
-        with client.websocket_connect(
-            "/api/hardware/live", headers={"origin": "https://untrusted.example"}
-        ):
+        with client.websocket_connect("/api/hardware/live", headers={"origin": "https://untrusted.example"}):
             pass
 
     assert error.value.code == 1008

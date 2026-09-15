@@ -6,6 +6,7 @@ the SpectraMax ASCII export's line-by-line syntax. Everything downstream
 future second instrument only needs its own load_*_export() parser.
 """
 
+import codecs
 import re
 from pathlib import Path
 
@@ -31,6 +32,25 @@ _PLATE_LABEL_TO_MEASUREMENT = {
 _CONFIG = load_config()
 
 
+def _read_export_text(path: str | Path) -> str:
+    """Decode a text export saved as UTF-16 (Windows "Unicode"), UTF-8, or ANSI.
+
+    Windows instrument software often writes UTF-16 with a BOM, which fails
+    on the very first byte when read as UTF-8. The BOM decides; a BOM-less
+    file that isn't valid UTF-8 is read as latin-1, which never fails and
+    keeps the ASCII numbers and labels intact.
+    """
+    data = Path(path).read_bytes()
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return data.decode("utf-16")
+    if data.startswith(codecs.BOM_UTF8):
+        return data.decode("utf-8-sig")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("latin-1")
+
+
 def load_reader_export(path: str | Path) -> pd.DataFrame:
     """Parse one SpectraMax M2/M2e ASCII export (§4.2).
 
@@ -42,7 +62,7 @@ def load_reader_export(path: str | Path) -> pd.DataFrame:
     Returns one row per populated well x time_h, columns: well, time_h, and
     one column per measurement type found in the file (e.g. RFU, OD600).
     """
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    lines = _read_export_text(path).splitlines()
 
     long_rows: list[tuple[str, float, str, float]] = []
     measurement: str | None = None
@@ -81,7 +101,14 @@ def load_reader_export(path: str | Path) -> pd.DataFrame:
             if not raw_value:
                 continue
             well = f"{row_letter}{col_idx}"
-            long_rows.append((well, time_h, measurement, float(raw_value)))
+            try:
+                value = float(raw_value)
+            except ValueError:
+                raise ValueError(
+                    f"{measurement} well {well} at {time_h:g} h is not a number ({raw_value!r}). "
+                    "Re-read or blank out saturated/out-of-range wells before uploading."
+                ) from None
+            long_rows.append((well, time_h, measurement, value))
 
     long_df = pd.DataFrame(long_rows, columns=["well", "time_h", "measurement", "value"])
     wide = long_df.pivot(index=["well", "time_h"], columns="measurement", values="value")

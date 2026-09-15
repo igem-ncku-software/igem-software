@@ -7,52 +7,70 @@
 //       470 nm 激發 LED，GPIO 2 經 2N7000 低側開關
 //       按鈕 GPIO 13（INPUT_PULLUP）
 //
-// 架構：軟體發問、裝置回答。裝置只負責「讀」，不做任何運算——
-// 暗值扣除、正規化、解混全部在軟體端（frontend/js/hardware_processing.js）。
+// 通電、連上 Wi-Fi 之後，裝置自己連出去後端的 WebSocket
+//   wss://<BACKEND_HOST>/api/hardware/device
+// 並一直保持連線（斷了會自動重連）。後端在 Render 上，連不進家用或實驗室的
+// 路由器，所以一定是裝置主動連出去；網頁上的即時光譜、量測、校正都走這一條。
 //
-//   GET  /health   存活檢查
-//   GET  /status   身分、狀態、感測器設定
-//   POST /read     三段式量測：dark_1 → light → dark_2
-//   WS   /live     連續串流（LED 常亮），送 {"cmd":"live_start"} / {"cmd":"live_stop"}
+// 裝置只負責「讀」，不做任何運算——暗值扣除、正規化、解混都在網頁端
+// （frontend/js/hardware_processing.js）。
 //
-// 狀態機：IDLE / LIVE / MEASURING，LIVE 與 MEASURING 絕不同時進行
-// （LIVE 的 LED 常亮會污染 MEASURING 的暗讀）。
+// 裝置 → 後端
+//   {"mode":"status", ...}       連上時、狀態改變時，之後每 5 秒一次
+//   {"mode":"live", ...}         有人開著即時光譜時，每 200 ms 一幀
+//   {"mode":"measurement", ...}  收到 read 後的三段式量測 dark_1 → light → dark_2
+//   {"mode":"error", ...}        指令無法執行（busy）
+// 後端 → 裝置
+//   {"cmd":"live_start"} / {"cmd":"live_stop"}   有沒有人在看即時光譜
+//   {"cmd":"read","request_id":"..."}             量一次
 //
-// 執行緒：HTTP / WebSocket 的 handler 跑在 AsyncTCP 的 task 裡，不能在那裡
-// 阻塞或碰 I2C。handler 只登記請求，所有感測器、LED、OLED 操作都在 loop()
-// 裡做；兩邊共用的旗標由 ctrlMutex 保護。
+// 狀態機：IDLE / LIVE / MEASURING。LED 只在有人看即時光譜或量測的那一刻亮：
+// 一直亮著會加熱、漂白 cuvette 裡的樣品。量測會暫停串流（LED 常亮會污染暗讀），
+// 量完只要還有人在看就自動恢復。與後端斷線時一律關 LED。
 //
-// Wi-Fi 認證放在 secrets.h（不進版控），請從 secrets.h.example 複製一份。
+// 全部工作都在 loop() 裡：WebSocketsClient 的事件回呼也是從 ws.loop() 裡呼叫，
+// 不會跟 loop() 同時執行，所以不需要 mutex。回呼只登記指令，量測在 loop() 做。
+//
+// secrets.h（不進版控，從 secrets.h.example 複製）放 Wi-Fi 認證；要接本機後端時
+// 也在那裡覆寫 BACKEND_HOST / BACKEND_PORT / BACKEND_USE_TLS。
+// 目前這條連線沒有身份驗證：知道網址的人都能冒充裝置。
 //
 // 需要的函式庫：DFRobot_AS7341、Adafruit SSD1306、Adafruit GFX、ArduinoJson 7、
-// ESP32Async 的 AsyncTCP 與 ESPAsyncWebServer（原本 me-no-dev 的版本不支援
-// ESP32 Arduino core 3.x）。
+// WebSockets（Markus Sattler / Links2004，Library Manager 搜尋 "WebSockets"）。
 // =========================================================
 
 #include <Wire.h>
 #include <WiFi.h>
-#include <ESPmDNS.h>
-#include <mutex>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <DFRobot_AS7341.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <WebSocketsClient.h>
 
 #include "secrets.h"
 
-// --- 1. 裝置常數：所有 JSON 回應原樣回傳 ---
+// --- 0. 後端位置：預設是 Render 上的正式後端，secrets.h 可以覆寫 ---
+#ifndef BACKEND_HOST
+#define BACKEND_HOST "igem-ncku-software.onrender.com"
+#endif
+#ifndef BACKEND_PORT
+#define BACKEND_PORT 443
+#endif
+#ifndef BACKEND_USE_TLS
+#define BACKEND_USE_TLS 1
+#endif
+#define BACKEND_PATH "/api/hardware/device"
+
+// --- 1. 裝置常數：原樣放進每一則 status / measurement ---
 #define DEVICE_ID        "capture-screen-p1"
 #define BUILD_ID         "P1-PROTO-01"
-#define FIRMWARE_VERSION "0.2.0"
+#define FIRMWARE_VERSION "0.3.0"
 #define LED_CURRENT_MA   5.553f   // 以三用電表量測，韌體無法自行讀取
-#define MDNS_HOSTNAME    "capture-screen"
 
 // --- 2. 感測器設定：一定要明確設定，不能用函式庫預設值 ---
-// gain / atime / astep 會進入軟體端的正規化與 config fingerprint，
-// 改這裡的值，/status 與 /read 回傳的值會跟著變。
-const uint8_t  AS7341_AGAIN = 16;   // 16×，回報給軟體端的倍率
+// gain / atime / astep 會進入網頁端的正規化與 config fingerprint，
+// 改這裡的值，status 與 measurement 回報的值會跟著變。
+const uint8_t  AS7341_AGAIN = 16;   // 16×，回報給網頁端的倍率
 // DFRobot 的 setAGAIN() 收的是暫存器索引不是倍率：
 // 0..10 對應 0.5×, 1×, 2×, 4×, 8×, 16×, 32×, 64×, 128×, 256×, 512×。
 // 改 AS7341_AGAIN 時這個索引要一起改。
@@ -67,11 +85,15 @@ const int I2C_SDA    = 21;
 const int I2C_SCL    = 22;
 
 // --- 4. 時序 ---
-const unsigned long DARK_SETTLE_MS   = 50;   // LED 關閉後等待
-const unsigned long LIGHT_SETTLE_MS  = 100;  // LED 開啟後等待穩定
-const unsigned long LIVE_INTERVAL_MS = 200;  // LIVE 推送間隔
-const unsigned long DEBOUNCE_MS      = 50;
-const unsigned long WS_CLEANUP_MS    = 1000;
+const unsigned long DARK_SETTLE_MS      = 50;     // LED 關閉後等待
+const unsigned long LIGHT_SETTLE_MS     = 100;    // LED 開啟後等待穩定
+const unsigned long LIVE_INTERVAL_MS    = 200;    // 即時串流一幀的間隔
+const unsigned long STATUS_INTERVAL_MS  = 5000;   // 狀態心跳；後端 15 秒沒收到就當離線
+const unsigned long RECONNECT_MS        = 5000;
+const unsigned long WS_PING_INTERVAL_MS = 15000;  // 偵測「斷了卻沒收到通知」的連線
+const unsigned long WS_PONG_TIMEOUT_MS  = 5000;
+const uint8_t       WS_MISSED_PONGS     = 2;
+const unsigned long DEBOUNCE_MS         = 50;
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -79,27 +101,21 @@ const unsigned long WS_CLEANUP_MS    = 1000;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 DFRobot_AS7341 as7341;
+WebSocketsClient ws;
 
-AsyncWebServer server(80);
-AsyncWebSocket ws("/live");
-
-// --- 5. 狀態機 ---
+// --- 5. 狀態 ---
 enum DeviceState { STATE_IDLE, STATE_LIVE, STATE_MEASURING };
 
-// 以下變數 handler（AsyncTCP task）與 loop() 都會碰，一律在 ctrlMutex 內讀寫。
-std::mutex ctrlMutex;
 DeviceState state = STATE_IDLE;
-bool readReserved = false;           // POST /read 已被接受，還沒量完
-bool readReady = false;              // request 已 pause，loop 可以開始量
-AsyncWebServerRequestPtr pendingRead; // 暫停中的 POST /read，量完由 loop 回應
-bool liveStartRequested = false;
-bool liveStopRequested = false;
-uint32_t liveOwnerId = 0;            // 送出 live_start 的 WebSocket client
+bool backendConnected = false;
+bool liveWanted = false;        // 後端說有人開著即時光譜
+bool readPending = false;       // 收到 read，還沒量
+char readRequestId[40] = "";
 
-// 只有 loop() 會碰。
 uint32_t liveSeq = 0;
+unsigned long liveStartedMs = 0;
 unsigned long lastLiveFrameMs = 0;
-unsigned long lastWsCleanupMs = 0;
+unsigned long lastStatusMs = 0;
 
 struct SpectralFrame {
   uint16_t f1, f2, f3, f4, f5, f6, f7, f8, clr, nir;
@@ -123,11 +139,6 @@ const char* stateName(DeviceState s) {
   }
 }
 
-DeviceState currentState() {
-  std::lock_guard<std::mutex> lock(ctrlMutex);
-  return state;
-}
-
 // =========================================================
 // 感測器
 // =========================================================
@@ -136,7 +147,6 @@ DeviceState currentState() {
 // 第一段給 F1–F4 與 Clear / NIR；第二段給 F5–F8，它另外附的 Clear / NIR
 // 記在 mode2，量測序列會把它回傳為 clear_nir_mode2。
 void readTenChannels(SpectralFrame &frame, ClearNir &mode2) {
-  // 1. 讀取模式一：F1 ~ F4, Clear, NIR
   as7341.startMeasure(as7341.eF1F4ClearNIR);
   DFRobot_AS7341::sModeOneData_t data1 = as7341.readSpectralDataOne();
   frame.f1 = data1.ADF1;
@@ -146,7 +156,6 @@ void readTenChannels(SpectralFrame &frame, ClearNir &mode2) {
   frame.clr = data1.ADCLEAR;
   frame.nir = data1.ADNIR;
 
-  // 2. 讀取模式二：F5 ~ F8
   as7341.startMeasure(as7341.eF5F8ClearNIR);
   DFRobot_AS7341::sModeTwoData_t data2 = as7341.readSpectralDataTwo();
   frame.f5 = data2.ADF5;
@@ -157,7 +166,6 @@ void readTenChannels(SpectralFrame &frame, ClearNir &mode2) {
   mode2.nir = data2.ADNIR;
 }
 
-// 三段式量測。delay() 會讓出 CPU，量測期間 HTTP 仍能回 409。
 void runMeasurementSequence(MeasurementResult &result) {
   ClearNir unused;
   unsigned long start = millis();
@@ -177,7 +185,7 @@ void runMeasurementSequence(MeasurementResult &result) {
   result.readTimeMs = millis() - start;
 }
 
-// Serial Plotter 格式（沿用原本的輸出）。
+// Serial Plotter 格式（沿用原本的輸出），USB 接電腦時方便除錯。
 void printFrameSerial(const SpectralFrame &f) {
   Serial.print("F1:"); Serial.print(f.f1); Serial.print(",");
   Serial.print("F2:"); Serial.print(f.f2); Serial.print(",");
@@ -226,24 +234,40 @@ void showMessage(const char* line1, const char* line2) {
   display.display();
 }
 
-// 待機畫面：IP 與 mDNS 主機名稱。
+// 待機畫面：Wi-Fi 與後端連線狀態，裝置沒出現在網頁上時先看這裡。
 void showIdleScreen() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println("CAPTURE-Screen");
-  display.println("State: IDLE");
-  display.print("IP: ");
-  display.println(WiFi.localIP());
-  display.println(MDNS_HOSTNAME ".local");
+  if (WiFi.status() == WL_CONNECTED) {
+    display.print("IP ");
+    display.println(WiFi.localIP());
+  } else {
+    display.println("Wi-Fi: reconnecting");
+  }
+  display.println(backendConnected ? "Backend: online" : "Backend: connecting");
+  display.print("State: ");
+  display.println(stateName(state));
   display.println();
-  display.println("Press button to read");
+  display.println("Button: local read");
   display.display();
 }
 
+// 連線狀態改變時才重畫待機畫面，按鈕量測的結果才不會一下就被蓋掉。
+void refreshIdleScreen() {
+  static bool shownWifi = false;
+  static bool shownBackend = false;
+  bool wifiNow = WiFi.status() == WL_CONNECTED;
+  if (state != STATE_IDLE || (wifiNow == shownWifi && backendConnected == shownBackend)) return;
+  shownWifi = wifiNow;
+  shownBackend = backendConnected;
+  showIdleScreen();
+}
+
 // =========================================================
-// JSON
+// 對後端的訊息
 // =========================================================
 
 void addIdentity(JsonDocument &doc) {
@@ -253,7 +277,7 @@ void addIdentity(JsonDocument &doc) {
 }
 
 void addConfig(JsonObject config) {
-  // 固定 3 位小數：float 直接序列化會變成 5.5529999…，軟體端算 fingerprint 會對不上。
+  // 固定 3 位小數：float 直接序列化會變成 5.5529999…，網頁端算 fingerprint 會對不上。
   config["led_current_mA"] = serialized(String(LED_CURRENT_MA, 3));
   config["gain"] = AS7341_AGAIN;
   config["atime"] = AS7341_ATIME;
@@ -273,256 +297,156 @@ void addFrame(JsonObject obj, const SpectralFrame &f) {
   obj["NIR"] = f.nir;
 }
 
-String stateMessage(DeviceState s) {
-  JsonDocument doc;
-  doc["mode"] = "state";
-  doc["state"] = stateName(s);
+void sendJson(JsonDocument &doc) {
+  if (!backendConnected) return;
   String out;
   serializeJson(doc, out);
-  return out;
+  ws.sendTXT(out);
 }
 
-String busyMessage() {
+void sendStatus() {
+  lastStatusMs = millis();
   JsonDocument doc;
-  doc["error"] = "busy";
-  doc["state"] = "MEASURING";
-  String out;
-  serializeJson(doc, out);
-  return out;
-}
-
-// =========================================================
-// HTTP / WebSocket handler（跑在 AsyncTCP task，不可阻塞、不可碰 I2C）
-// =========================================================
-
-void handleStatus(AsyncWebServerRequest *request) {
-  JsonDocument doc;
+  doc["mode"] = "status";
   addIdentity(doc);
-  doc["state"] = stateName(currentState());
+  doc["state"] = stateName(state);
   doc["uptime_ms"] = millis();
   doc["wifi_rssi"] = WiFi.RSSI();
   addConfig(doc["config"].to<JsonObject>());
-
-  String body;
-  serializeJson(doc, body);
-  request->send(200, "application/json", body);
+  sendJson(doc);
 }
 
-// 請求主體可以帶 {"note": "..."}，裝置不需要它，所以不讀。
-void handleRead(AsyncWebServerRequest *request) {
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    if (state == STATE_MEASURING || readReserved) {
-      request->send(409, "application/json", busyMessage());
-      return;
+void sendError(const char *requestId, const char *error) {
+  JsonDocument doc;
+  doc["mode"] = "error";
+  doc["request_id"] = requestId;
+  doc["error"] = error;
+  sendJson(doc);
+}
+
+void setState(DeviceState next) {
+  if (state == next) return;
+  state = next;
+  sendStatus();
+  if (state == STATE_IDLE) showIdleScreen();
+}
+
+// =========================================================
+// 後端的指令（在 ws.loop() 裡被呼叫：只登記，不量測）
+// =========================================================
+
+void handleCommand(uint8_t *payload, size_t length) {
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, length)) return;
+  const char *cmd = doc["cmd"] | "";
+
+  if (strcmp(cmd, "live_start") == 0) {
+    liveWanted = true;
+  } else if (strcmp(cmd, "live_stop") == 0) {
+    liveWanted = false;
+  } else if (strcmp(cmd, "read") == 0) {
+    const char *requestId = doc["request_id"] | "";
+    if (readPending) {
+      sendError(requestId, "busy");
+    } else {
+      strlcpy(readRequestId, requestId, sizeof(readRequestId));
+      readPending = true;
     }
-    readReserved = true;
   }
-
-  // 量測要 ~500 ms，不能在這裡做：先暫停 request，交給 loop() 量完再回應。
-  AsyncWebServerRequestPtr paused = request->pause();
-  std::lock_guard<std::mutex> lock(ctrlMutex);
-  pendingRead = paused;
-  readReady = true;
 }
 
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-               void *arg, uint8_t *data, size_t len) {
+void onBackendEvent(WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
-    case WS_EVT_CONNECT:
-      client->text(stateMessage(currentState()));
+    case WStype_CONNECTED:
+      backendConnected = true;
+      sendStatus();
       break;
-
-    case WS_EVT_DISCONNECT: {
-      // 瀏覽器分頁關掉也會走到這裡：LED 不能因此一直亮著。
-      std::lock_guard<std::mutex> lock(ctrlMutex);
-      if (client->id() == liveOwnerId) liveStopRequested = true;
+    case WStype_DISCONNECTED:
+      backendConnected = false;
+      liveWanted = false;   // 沒有後端就沒有人在看：LED 不能因此一直亮著
+      readPending = false;  // 後端已經放棄這次讀取
       break;
-    }
-
-    case WS_EVT_DATA: {
-      AwsFrameInfo *info = (AwsFrameInfo *)arg;
-      if (!(info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT)) return;
-
-      JsonDocument doc;
-      if (deserializeJson(doc, data, len)) {
-        client->text("{\"error\":\"bad_json\"}");
-        return;
-      }
-      const char *cmd = doc["cmd"] | "";
-
-      if (strcmp(cmd, "live_start") == 0) {
-        bool busy = false;
-        {
-          std::lock_guard<std::mutex> lock(ctrlMutex);
-          if (state == STATE_MEASURING || readReserved) {
-            busy = true;
-          } else {
-            liveStartRequested = true;
-            liveStopRequested = false;
-            liveOwnerId = client->id();
-          }
-        }
-        if (busy) client->text(busyMessage());
-      } else if (strcmp(cmd, "live_stop") == 0) {
-        std::lock_guard<std::mutex> lock(ctrlMutex);
-        liveStopRequested = true;
-        liveStartRequested = false;
-      } else {
-        client->text("{\"error\":\"unknown_cmd\"}");
-      }
+    case WStype_TEXT:
+      handleCommand(payload, length);
       break;
-    }
-
     default:
       break;
   }
 }
 
-void setupServer() {
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Private-Network", "true");
-
-  server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", "{\"ok\":true}");
-  });
-  server.on("/status", HTTP_GET, handleStatus);
-  server.on("/read", HTTP_POST, handleRead);
-
-  ws.onEvent(onWsEvent);
-  server.addHandler(&ws);
-
-  // CORS preflight：任何路徑的 OPTIONS 都回 204（標頭由 DefaultHeaders 附上）。
-  server.onNotFound([](AsyncWebServerRequest *request) {
-    if (request->method() == HTTP_OPTIONS) {
-      request->send(204);
-    } else {
-      request->send(404, "application/json", "{\"error\":\"not_found\"}");
-    }
-  });
-
-  server.begin();
-}
-
 // =========================================================
-// loop() 端的狀態轉移
+// loop() 端的工作
 // =========================================================
 
-void handleLiveRequests() {
-  bool noClients = ws.count() == 0;
-  bool started = false;
-  bool stopped = false;
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    if (liveStopRequested) {
-      liveStopRequested = false;
-      liveStartRequested = false;
-      if (state == STATE_LIVE) {
-        state = STATE_IDLE;
-        stopped = true;
-      }
-    } else if (liveStartRequested) {
-      liveStartRequested = false;
-      if (state == STATE_IDLE) {
-        state = STATE_LIVE;
-        started = true;
-      }
-    }
-    // 保險：所有 client 都斷了還在 LIVE，一樣收掉。
-    if (state == STATE_LIVE && noClients && !started) {
-      state = STATE_IDLE;
-      stopped = true;
-    }
-  }
-
-  if (started) {
-    digitalWrite(LED_PIN, HIGH);
-    lastLiveFrameMs = 0;
-    ws.textAll(stateMessage(STATE_LIVE));
-  }
-  if (stopped) {
-    digitalWrite(LED_PIN, LOW);
-    ws.textAll(stateMessage(STATE_IDLE));
-    showIdleScreen();
-  }
-}
-
-void handleReadRequest() {
-  AsyncWebServerRequestPtr requestPtr;
-  bool wasLive = false;
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    if (!readReady) return;
-    requestPtr = pendingRead;
-    pendingRead.reset();
-    readReady = false;
-    wasLive = state == STATE_LIVE;
-    state = STATE_MEASURING;
-    liveStartRequested = false;
-  }
-
-  // LIVE 中收到 /read：先停串流（LED 關），量完回 IDLE，不自動恢復 LIVE。
-  if (wasLive) digitalWrite(LED_PIN, LOW);
-  ws.textAll(stateMessage(STATE_MEASURING));
-  showMessage("Measuring...", "dark / light / dark");
+// 量一次。requestId 為 nullptr 表示按鈕觸發，結果只顯示在 OLED。
+void measure(const char *requestId) {
+  digitalWrite(LED_PIN, LOW);
+  setState(STATE_MEASURING);
+  showMessage("Measuring...", requestId ? "requested online" : "(button)");
 
   MeasurementResult result;
   runMeasurementSequence(result);
+
+  if (requestId) {
+    JsonDocument doc;
+    doc["mode"] = "measurement";
+    doc["request_id"] = requestId;
+    addIdentity(doc);
+    doc["uptime_ms"] = millis();
+    doc["read_time_ms"] = result.readTimeMs;
+    addConfig(doc["config"].to<JsonObject>());
+    addFrame(doc["dark_1"].to<JsonObject>(), result.dark1);
+    addFrame(doc["light"].to<JsonObject>(), result.light);
+    addFrame(doc["dark_2"].to<JsonObject>(), result.dark2);
+    JsonObject mode2 = doc["clear_nir_mode2"].to<JsonObject>();
+    mode2["CLR"] = result.clearNirMode2.clr;
+    mode2["NIR"] = result.clearNirMode2.nir;
+    sendJson(doc);
+  }
+
+  printFrameSerial(result.light);
+  setState(STATE_IDLE);  // 還有人在看的話，下一輪 syncLive() 會恢復串流
+  if (!requestId) showFrame(result.light);
+}
+
+// 串流開不開只看兩件事：有沒有人在看、現在是不是在量測。
+void syncLive() {
+  bool shouldStream = backendConnected && liveWanted && state != STATE_MEASURING;
+  if (shouldStream && state == STATE_IDLE) {
+    digitalWrite(LED_PIN, HIGH);
+    liveStartedMs = millis();
+    lastLiveFrameMs = 0;
+    setState(STATE_LIVE);
+  } else if (!shouldStream && state == STATE_LIVE) {
+    digitalWrite(LED_PIN, LOW);
+    setState(STATE_IDLE);
+  }
+}
+
+void streamLiveFrame() {
+  unsigned long now = millis();
+  if (now - liveStartedMs < LIGHT_SETTLE_MS || now - lastLiveFrameMs < LIVE_INTERVAL_MS) return;
+  lastLiveFrameMs = now;
+
+  SpectralFrame frame;
+  ClearNir unused;
+  readTenChannels(frame, unused);
 
   JsonDocument doc;
-  doc["mode"] = "measurement";
-  addIdentity(doc);
-  doc["uptime_ms"] = millis();
-  doc["read_time_ms"] = result.readTimeMs;
-  addConfig(doc["config"].to<JsonObject>());
-  addFrame(doc["dark_1"].to<JsonObject>(), result.dark1);
-  addFrame(doc["light"].to<JsonObject>(), result.light);
-  addFrame(doc["dark_2"].to<JsonObject>(), result.dark2);
-  JsonObject mode2 = doc["clear_nir_mode2"].to<JsonObject>();
-  mode2["CLR"] = result.clearNirMode2.clr;
-  mode2["NIR"] = result.clearNirMode2.nir;
+  doc["mode"] = "live";
+  doc["seq"] = ++liveSeq;
+  doc["t_ms"] = now;
+  addFrame(doc["raw"].to<JsonObject>(), frame);
+  sendJson(doc);
 
-  String body;
-  serializeJson(doc, body);
-
-  // 先回 IDLE 再回應：client 收到結果後立刻再送 /read 不該拿到 409。
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    state = STATE_IDLE;
-    readReserved = false;
-  }
-
-  // client 在量測途中斷線時 lock() 會拿到空指標，結果直接丟掉。
-  if (auto request = requestPtr.lock()) {
-    request->send(200, "application/json", body);
-  }
-
-  printFrameSerial(result.light);
-  ws.textAll(stateMessage(STATE_IDLE));
-  showIdleScreen();
+  printFrameSerial(frame);
+  showFrame(frame);
 }
 
-// 按鈕短按：只在 IDLE 時執行一次本機量測，結果只顯示在 OLED。
+// 按鈕短按：在裝置上量一次，結果只顯示在 OLED，不送出去。
 void onButtonPress() {
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    if (state != STATE_IDLE || readReserved) return;
-    state = STATE_MEASURING;
-  }
-
-  showMessage("Measuring...", "(button)");
-  MeasurementResult result;
-  runMeasurementSequence(result);
-
-  {
-    std::lock_guard<std::mutex> lock(ctrlMutex);
-    state = STATE_IDLE;
-  }
-
-  printFrameSerial(result.light);
-  showFrame(result.light);
+  if (state == STATE_MEASURING || readPending) return;
+  measure(nullptr);
 }
 
 // 非阻塞防彈跳：按下的邊緣觸發一次。
@@ -542,59 +466,17 @@ void handleButton() {
   }
 }
 
-void streamLiveFrame() {
-  lastLiveFrameMs = millis();
-
-  SpectralFrame frame;
-  ClearNir unused;
-  readTenChannels(frame, unused);
-
-  // 讀這一幀的期間可能收到 live_stop 或 /read：狀態已經不是 LIVE 就不推送。
-  if (currentState() != STATE_LIVE) return;
-
-  JsonDocument doc;
-  doc["mode"] = "live";
-  doc["seq"] = ++liveSeq;
-  doc["t_ms"] = lastLiveFrameMs;
-  addFrame(doc["raw"].to<JsonObject>(), frame);
-
-  String out;
-  serializeJson(doc, out);
-  ws.textAll(out);
-
-  printFrameSerial(frame);
-  showFrame(frame);
-}
-
 // =========================================================
 
 void setup() {
-  // 開機安全：最早就把激發 LED 關掉，Wi-Fi 連線期間不能亮。
+  // 開機安全：最早就把激發 LED 關掉。
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   Wire.begin(I2C_SDA, I2C_SCL);
-
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  showMessage("Connecting Wi-Fi...", nullptr);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false); // 省電模式會讓 WebSocket 推送延遲、更新率掉下來
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-  }
-
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("Wi-Fi Connected!");
-  display.print("IP: ");
-  display.println(WiFi.localIP());
-  display.display();
-  delay(1500);
 
   while (as7341.begin() != 0) {
     showMessage("AS7341 not found", "Check I2C wiring");
@@ -605,29 +487,43 @@ void setup() {
   as7341.setAstep(AS7341_ASTEP);
   as7341.setAGAIN(AS7341_AGAIN_REGISTER);
 
-  if (MDNS.begin(MDNS_HOSTNAME)) {
-    MDNS.addService("http", "tcp", 80);
-  } else {
-    Serial.println("mDNS start failed; use the IP address instead");
+  showMessage("Connecting Wi-Fi...", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);  // 省電模式會讓串流延遲、更新率掉下來
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
   }
 
-  setupServer();
+  // TLS 沒有釘憑證：library 在 ESP32 上沒給 CA 時略過驗證。若握手失敗，改用
+  // ws.beginSslWithCA() 帶入 Render 憑證鏈的根憑證。
+#if BACKEND_USE_TLS
+  ws.beginSSL(BACKEND_HOST, BACKEND_PORT, BACKEND_PATH);
+#else
+  ws.begin(BACKEND_HOST, BACKEND_PORT, BACKEND_PATH);
+#endif
+  ws.onEvent(onBackendEvent);
+  ws.setReconnectInterval(RECONNECT_MS);
+  ws.enableHeartbeat(WS_PING_INTERVAL_MS, WS_PONG_TIMEOUT_MS, WS_MISSED_PONGS);
+
   showIdleScreen();
 }
 
 void loop() {
-  handleLiveRequests();
-  handleReadRequest();
+  ws.loop();
   handleButton();
 
-  if (currentState() == STATE_LIVE && millis() - lastLiveFrameMs >= LIVE_INTERVAL_MS) {
-    streamLiveFrame();
+  if (readPending) {
+    readPending = false;
+    measure(readRequestId);
   }
 
-  if (millis() - lastWsCleanupMs >= WS_CLEANUP_MS) {
-    lastWsCleanupMs = millis();
-    ws.cleanupClients();
-  }
+  syncLive();
+  if (state == STATE_LIVE) streamLiveFrame();
 
+  if (backendConnected && millis() - lastStatusMs >= STATUS_INTERVAL_MS) sendStatus();
+
+  refreshIdleScreen();
   delay(1);
 }

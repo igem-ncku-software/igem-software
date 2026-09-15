@@ -87,8 +87,9 @@ function renderStrainChart(strain, result) {
 
   // Chart.js 的對數 x 軸畫不出 x=0，跟舊版 4PL 圖表一樣把 0 nM（負對照）那個點濾掉，
   // 摘要表格裡還是看得到每株菌的完整結果，只有這張圖不畫。
+  // plateau 為 null 表示該濃度的讀值全被 OD gating 排除，沒有點可畫。
   const scatterPoints = result.plateau_points
-    .filter(([x]) => x > 0)
+    .filter(([x, y]) => x > 0 && Number.isFinite(y))
     .map(([x, y]) => ({ x, y }));
   const curvePoints = result.fit_curve.map(([x, y]) => ({ x, y }));
 

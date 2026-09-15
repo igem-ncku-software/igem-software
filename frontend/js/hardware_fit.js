@@ -69,10 +69,9 @@ function fitSd(values) {
   return Math.sqrt(values.reduce((acc, v) => acc + (v - m) ** 2, 0) / (values.length - 1));
 }
 
+// 殘差：跟螢光值同一套有效數字規則（basic counts 常小於 1，取整數會變 0）。
 function formatSignedCounts(value) {
-  if (!Number.isFinite(value)) return "--";
-  const rounded = Math.round(value) || 0;
-  return rounded > 0 ? `+${rounded}` : String(rounded);
+  return formatSignedFluorescence(value);
 }
 
 // 依濃度分組（blank 當 0），組內依 slot 排序。
@@ -291,7 +290,7 @@ function renderFitChart() {
           ticks: { color: muted },
         },
         y: {
-          title: { display: true, text: "sfGFP signal · F4 515 nm (counts)", color: ink },
+          title: { display: true, text: `sfGFP signal · F4 515 nm (${HARDWARE_FLUORESCENCE_UNIT})`, color: ink },
           grid: { color: rule },
           ticks: { color: muted },
         },
@@ -315,11 +314,11 @@ function renderFitMetrics() {
   set("fit-ec50", formatConcentration(curve.params.ec50_nM));
   set("fit-ec50-sub", `Usable range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])}`);
   set("fit-hill", curve.params.hill.toFixed(2));
-  set("fit-hill-sub", `Top ${formatFluorescence(curve.params.top)} · bottom ${formatFluorescence(curve.params.bottom)} counts`);
+  set("fit-hill-sub", `Top ${formatFluorescence(curve.params.top)} · bottom ${formatFluorescence(curve.params.bottom)} ${HARDWARE_FLUORESCENCE_UNIT}`);
   set("fit-lod", formatConcentration(curve.lod_nM));
   set("fit-lod-sub", `LOQ ${formatConcentration(curve.loq_nM)}`);
   set("fit-rmse", formatFluorescence(curve.rmse));
-  set("fit-rmse-sub", "counts");
+  set("fit-rmse-sub", HARDWARE_FLUORESCENCE_UNIT);
 }
 
 function renderFitTable() {
@@ -436,7 +435,7 @@ async function runFit() {
     fitState = "fitted";
     fitHasFittedOnce = true;
     setHardwareStatus(statusEl,
-      `Fitted: EC50 ${formatConcentration(fitCurveResult.params.ec50_nM)}, Hill ${fitCurveResult.params.hill.toFixed(2)}, RMSE ${formatFluorescence(fitCurveResult.rmse)} counts.`,
+      `Fitted: EC50 ${formatConcentration(fitCurveResult.params.ec50_nM)}, Hill ${fitCurveResult.params.hill.toFixed(2)}, RMSE ${formatFluorescence(fitCurveResult.rmse)} ${HARDWARE_FLUORESCENCE_UNIT}.`,
       "success");
   } catch (err) {
     console.error("Fit failed:", err);

@@ -16,7 +16,7 @@
 // =========================================================
 
 let plan = null;
-let planDeviceFingerprint = null;
+let planDeviceFingerprint = null; // null = 裝置連不上，無法確認組態
 let rereadSlot = null; // 使用者按了 Re-read 的 slot；null 表示量「下一管」
 let planReading = false;
 
@@ -91,6 +91,7 @@ async function createPlan(event) {
   setHardwareStatus(statusEl, "Creating plan...", null);
 
   try {
+    // plan 綁定裝置目前的組態，所以建立時裝置必須連得上（API 層會先問裝置）。
     const created = await HardwareApi.createCalibrationPlan({
       concentrations_nM: parseConcentrationList(document.getElementById("plan-concentrations").value),
       replicates: Number(document.getElementById("plan-replicates").value),
@@ -114,21 +115,28 @@ async function createPlan(event) {
 async function openPlan(planId, alreadyLoaded) {
   document.getElementById("plan-create-card").hidden = true;
   const runCard = document.getElementById("plan-run-card");
-  try {
-    const [loaded, status] = await Promise.all([
-      alreadyLoaded ? Promise.resolve(alreadyLoaded) : HardwareApi.getCalibrationPlan(planId),
-      HardwareApi.getDeviceStatus(),
-    ]);
-    plan = loaded;
-    planDeviceFingerprint = status.config.fingerprint;
-    hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
-    runCard.hidden = false;
-    renderPlan();
-    document.getElementById("plan-read-button").focus();
-  } catch (err) {
-    console.error("Failed to load plan:", err);
-    showCreateForm(`Could not load plan ${planId}: ${err.message}`);
+
+  // plan 存在瀏覽器端：裝置連不上時照樣打開，只是無法確認組態。
+  const [planResult, statusResult] = await Promise.allSettled([
+    alreadyLoaded ? Promise.resolve(alreadyLoaded) : HardwareApi.getCalibrationPlan(planId),
+    HardwareApi.getDeviceStatus(),
+  ]);
+
+  if (planResult.status === "rejected") {
+    console.error("Failed to load plan:", planResult.reason);
+    showCreateForm(`Could not load plan ${planId}: ${planResult.reason.message}`);
+    return;
   }
+
+  plan = planResult.value;
+  planDeviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
+  runCard.hidden = false;
+  renderPlan();
+  if (statusResult.status === "rejected") {
+    setHardwareStatus(document.getElementById("plan-read-status"), `Read unavailable: ${statusResult.reason.message}`, "error");
+  }
+  document.getElementById("plan-read-button").focus();
 }
 
 function renderPlan() {
@@ -151,7 +159,10 @@ function renderPlan() {
 
   const configWarning = document.getElementById("plan-config-warning");
   configWarning.hidden = planDeviceFingerprint === plan.config_fingerprint;
-  if (!configWarning.hidden) {
+  if (planDeviceFingerprint === null) {
+    setHardwareStatus(configWarning,
+      "The instrument is unreachable, so its config can't be checked against this plan.", "warn");
+  } else if (!configWarning.hidden) {
     setHardwareStatus(configWarning,
       `The instrument now runs config ${planDeviceFingerprint}, not this plan's ${plan.config_fingerprint}. New readings will be flagged STALE_CONFIG and cannot be fitted.`,
       "error");
@@ -261,7 +272,7 @@ async function readPlanTarget() {
     const recorded = plan.items.find((it) => it.slot === item.slot).measurement;
     const flagText = recorded.flags.length ? ` Flags: ${recorded.flags.join(", ")}.` : "";
     setHardwareStatus(statusEl,
-      `Recorded tube ${item.slot} (${item.label}): ${formatFluorescence(recorded.fluorescence)} counts.${flagText}`,
+      `Recorded tube ${item.slot} (${item.label}): ${formatFluorescence(recorded.fluorescence)} ${HARDWARE_FLUORESCENCE_UNIT}.${flagText}`,
       recorded.flags.length ? "warn" : "success");
   } catch (err) {
     console.error("Plan reading failed:", err);

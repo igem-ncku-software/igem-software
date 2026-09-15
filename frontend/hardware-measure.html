@@ -45,8 +45,8 @@
               <label for="measure-sample-type">Sample type</label>
               <select id="measure-sample-type">
                 <option value="unknown" selected>Unknown</option>
-                <option value="blank">Blank</option>
                 <option value="standard">Standard</option>
+                <option value="blank">Blank</option>
               </select>
             </div>
             <div class="field" id="measure-known-field" hidden>
@@ -66,9 +66,10 @@
               <span class="sensor-stat-label">sfGFP signal · F4 515 nm</span>
               <span class="sensor-stat-value is-large" id="measure-signal">--</span>
               <span class="sensor-stat-sub" id="measure-signal-sub"></span>
+              <span class="sensor-stat-sub" data-basis-note hidden></span>
             </div>
             <div class="sensor-stat">
-              <span class="sensor-stat-label">Estimated concentration</span>
+              <span class="sensor-stat-label">Inferred AHL</span>
               <span class="sensor-stat-value is-large" id="measure-concentration">--</span>
               <span class="sensor-stat-sub" id="measure-concentration-sub"></span>
             </div>
@@ -78,8 +79,8 @@
 
           <h3 class="subsection-heading table-heading">Spectral channels</h3>
           <p class="chart-note">
-            Dark-subtracted counts per AS7341 channel. F4 (515 nm) carries the sfGFP emission;
-            F3 (480 nm) is excitation leakage and does not change with concentration.
+            Dark-subtracted, normalized basic counts per AS7341 channel. F4 (515 nm) carries the sfGFP
+            emission; F3 (480 nm) is excitation leakage and does not change with concentration.
           </p>
           <!-- No height attribute on the canvas: Chart.js ignores aspectRatio when
                the canvas carries one. See js/dose_response.js. -->
@@ -101,12 +102,9 @@
   <script src="js/config.js"></script>
   <script src="js/hardware_processing.js"></script>
   <script src="js/hardware_local.js"></script>
-  <script src="js/hardware_mock.js"></script>
-  <script src="js/hardware_device.js"></script>
   <script src="js/hardware_api.js"></script>
   <script src="js/hardware_common.js"></script>
   <script src="js/hardware_measure.js"></script>
-  <script src="js/hardware_mock_panel.js"></script>
   <script src="js/backend_status.js"></script>
 </body>
 </html>
