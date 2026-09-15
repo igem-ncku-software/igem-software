@@ -3,12 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.dose_response.router import router as dose_response_router
+from app.hardware.router import router as hardware_router
 
 
 app = FastAPI(
     title="LasReader API",
     description="Backend API for LasReader: AHL dose-response analysis and hardware sensor data.",
-    version="1.2.0",
+    version="1.3.0",
 )
 
 # CORS 來源清單統一從 app/config.py 讀取（可由 .env 覆寫）
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # AHL dose-response 分析 API
 app.include_router(dose_response_router)
+app.include_router(hardware_router)
 
 
 @app.get("/")
@@ -34,6 +36,8 @@ def root() -> dict:
         "health": "/health",
         "dose_response_analyze": "POST /api/dose_response/analyze",
         "dose_response_predict": "POST /api/dose_response/predict",
+        "hardware_status": "GET /api/hardware/status",
+        "hardware_live": "WS /api/hardware/live",
     }
 
 

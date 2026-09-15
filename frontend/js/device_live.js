@@ -1,11 +1,10 @@
 // =========================================================
-// 對接 index.html 的 CAPTURE-Screen 卡片：即時監看（WebSocket /live）。
+// 對接 index.html 的 CAPTURE-Screen 卡片：透過 FastAPI 即時監看。
 // 目標元素：
 //   #device-card-description / #live-toggle / #live-toggle-reason
 //   #live-dot / #live-dot-label / #live-rate
 //   #live-chart-plate / #live-chart / #live-empty
-// 依賴 js/config.js（DEVICE_MODE / DEVICE_BASE_URL）、js/hardware_processing.js、
-// js/hardware_device.js，以及 Chart.js。
+// 依賴 js/config.js（BACKEND_BASE_URL）與 Chart.js。
 //
 // 規則：
 //   - Live 開關預設關閉，打開才建立 WebSocket 並送 live_start
@@ -17,6 +16,11 @@
 const LIVE_MAX_RECONNECTS = 5;
 const LIVE_RECONNECT_BASE_MS = 1000;
 const LIVE_RATE_WINDOW = 10; // 用最近 10 筆的 seq 與 t_ms 算更新率
+const HARDWARE_STATUS_URL = `${BACKEND_BASE_URL}/api/hardware/status`;
+
+function hardwareLiveUrl() {
+  return `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/hardware/live`;
+}
 
 // 首頁不載入 hardware_common.js，軸標籤在這裡自己定義一份。
 const LIVE_CHANNELS = [
@@ -138,18 +142,24 @@ function renderLiveFrame(message) {
 
 async function refreshLiveDescription() {
   try {
-    const status = await HardwareDevice.status();
-    liveBuildId = status.build_id;
-    setLiveDescription(`Connected · ${liveBuildId}`);
+    const response = await fetch(HARDWARE_STATUS_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const status = await response.json();
+    if (!status.online || !status.device?.build_id) throw new Error("Unexpected response");
+    liveBuildId = status.device.build_id;
+    const source = status.source === "mock" ? "Simulation ready" : "Device connected";
+    setLiveDescription(`${source} · ${liveBuildId}`);
+    return true;
   } catch (err) {
-    if (!liveStreaming) setLiveDescription("Device offline");
+    if (!liveStreaming) setLiveDescription("Live backend unavailable");
+    return false;
   }
 }
 
 function openLiveSocket() {
   let socket;
   try {
-    socket = new WebSocket(HardwareDevice.liveUrl());
+    socket = new WebSocket(hardwareLiveUrl());
   } catch (err) {
     scheduleLiveReconnect();
     return;
@@ -182,6 +192,8 @@ function openLiveSocket() {
       }
     } else if (message.error === "busy") {
       stopLive("Device is busy, try again");
+    } else if (message.error === "device_unreachable") {
+      stopLive("CAPTURE-Screen device is unavailable.");
     }
   };
 
@@ -200,8 +212,8 @@ function scheduleLiveReconnect() {
     liveWanted = false;
     liveEl("live-toggle").checked = false;
     setLiveDot("off", "Offline");
-    setLiveDescription("Device offline");
-    clearLiveView(`Device not reachable at ${DEVICE_BASE_URL}`);
+    setLiveDescription("Live backend unavailable");
+    clearLiveView(`Could not connect to ${hardwareLiveUrl()}`);
     return;
   }
 
@@ -234,25 +246,23 @@ function stopLive(message) {
   clearLiveView(message || "Live view is off.");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const toggle = liveEl("live-toggle");
   const reason = liveEl("live-toggle-reason");
 
   setLiveDot("off", "Off");
   clearLiveView("Live view is off.");
 
-  if (DEVICE_MODE !== "live") {
-    setLiveDescription("Runs on simulated data");
+  const available = await refreshLiveDescription();
+  if (!available) {
     toggle.disabled = true;
-    reason.textContent = window.location.protocol === "https:"
-      ? "Live view needs the frontend served over http on the device's network (HTTPS pages can't reach it)."
-      : "Live view needs DEVICE_MODE_SETTING = \"live\" in js/config.js.";
+    reason.textContent = "Start the FastAPI backend, then reload this page.";
     reason.hidden = false;
     return;
   }
 
-  setLiveDescription(`Checking ${DEVICE_BASE_URL}...`);
-  refreshLiveDescription();
+  toggle.disabled = false;
+  reason.hidden = true;
 
   toggle.addEventListener("change", () => {
     if (toggle.checked) startLive();

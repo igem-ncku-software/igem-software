@@ -3,7 +3,7 @@
 成大 iGEM（NCKU-Tainan 2026 · Capture）的濕實驗資料工具，前後端分離的網頁應用。
 
 - **AHL 劑量反應分析** — 上傳 plate reader 原始匯出檔，自動跑完整條分析流程，算出每株菌的 EC50、Hill 係數、95% 信賴區間、R²、LOD/LOQ，並判斷該菌株對 AHL 到底有沒有反應。
-- **CAPTURE-Screen 硬體介面** — 隊上自製的 AS7341 螢光讀取儀：儀器狀態、依清單逐管跑校正、4PL 擬合存檔、量測未知樣品並經校正曲線反推濃度。前端已完成，目前全部接 mock 資料，後端尚未實作。
+- **CAPTURE-Screen 硬體介面** — 隊上自製的 AS7341 螢光讀取儀：首頁可透過 FastAPI WebSocket 即時顯示十個光譜通道；儀器狀態、逐管校正、4PL 擬合與量測流程目前仍以瀏覽器端 mock／localStorage 執行。
 
 前端是純靜態網頁（部署在 GitHub Pages），後端是 FastAPI（部署在 Render），兩邊只透過 HTTP/CORS 溝通，沒有共用的建置流程。
 
@@ -20,13 +20,16 @@ flowchart LR
         DR["dose-response.html"]
         HW["hardware*.html<br/>CAPTURE-Screen 五頁"]
         MOCK["js/hardware_api.js<br/>（目前接 hardware_mock.js）"]
+        LIVE["index.html<br/>即時光譜"]
         IDX --> DR
         IDX --> HW
+        IDX --> LIVE
         HW --> MOCK
     end
 
     subgraph BE["backend/ — FastAPI (Render)"]
         RT1["/api/dose_response<br/>analyze · predict"]
+        RT2["/api/hardware<br/>status · live WebSocket"]
         subgraph PIPE["dose_response 分析流程"]
             direction LR
             IO["io"] --> NRM["normalize"] --> TS["timeseries"] --> DRS["doseresponse"]
@@ -36,13 +39,14 @@ flowchart LR
 
     FILE --> DR
     DR -->|HTTPS| RT1
+    LIVE -->|HTTPS / WSS| RT2
 ```
 
 ## 專案結構
 
 ```
 frontend/                     純靜態網頁，無框架、無 build step
-├── index.html                入口頁：兩張卡片連到兩個功能
+├── index.html                入口頁：功能卡片與即時 AS7341 光譜
 ├── dose-response.html        劑量反應分析頁
 ├── hardware.html             CAPTURE-Screen：儀器狀態（硬體區首頁）
 ├── hardware-measure.html     CAPTURE-Screen：量測未知樣品
@@ -57,8 +61,9 @@ backend/                      FastAPI
 ├── app/
 │   ├── main.py               掛載各功能 router
 │   ├── config.py             環境變數與 CORS 設定
+│   ├── hardware/             CAPTURE-Screen 狀態與即時 WebSocket
 │   └── dose_response/        劑量反應分析（本專案的主要運算）
-├── tests/                    pytest（目前 73 項）
+├── tests/                    pytest
 └── requirements.txt
 
 scripts/                      安裝與啟動腳本（.sh 與 .ps1 兩版）
@@ -173,7 +178,11 @@ router.py        只做 HTTP 轉接，不含任何運算
 
 ## 硬體
 
-CAPTURE-Screen 是隊上自製的螢光讀取儀，用 AS7341 光譜感測器讀 sfGFP 螢光。**目前只有前端，所有資料都來自 mock**；後端（`backend/app/hardware/`）尚未實作。原本的 ESP32 + GY-302 版本已移除，只留在 git 歷史裡。
+CAPTURE-Screen 是隊上自製的螢光讀取儀，用 AS7341 光譜感測器讀 sfGFP 螢光。首頁的即時光譜已由 `backend/app/hardware/` 提供 `GET /api/hardware/status` 與 `WS /api/hardware/live`。後端預設使用 mock 串流，因此沒開硬體也能測試；設為 `HARDWARE_MODE=device` 時則代理同一區網內 ESP32 的 `/status` 與 `/live`。
+
+雲端 Render 無法主動連入實驗室區網裡的 `capture-screen.local`。真實裝置模式需要在同一區網的電腦上啟動後端，或另行建立安全的裝置上行／網路通道。
+
+五個硬體工作流程頁面的 plan、curve、fit、invert 目前仍由 `hardware_local.js` 存在瀏覽器 localStorage，尚未移到後端資料庫；這與首頁的即時串流是兩個獨立範圍。
 
 | 頁面 | 用途 |
 |---|---|
@@ -185,9 +194,24 @@ CAPTURE-Screen 是隊上自製的螢光讀取儀，用 AS7341 光譜感測器讀
 
 前端分三層，接真後端時只需要換掉 API 層：
 
-- `js/hardware_api.js` — 頁面唯一呼叫的介面，也用 JSDoc 定義前後端的資料契約（`Measurement`、`CalibrationPlan`、`CalibrationCurve`、`InverseEstimate` 等），**欄位名稱就是後端要照著實作的格式**。目前每個函式都轉呼叫 mock 並加 300–800 ms 假延遲。
+- `js/device_live.js` — 首頁透過後端狀態 API 與 WebSocket 顯示十個 AS7341 raw channels，不儲存即時 frame。
+- `js/hardware_api.js` — 五個工作流程頁面唯一呼叫的介面，也用 JSDoc 定義未來儲存後端的資料契約（`Measurement`、`CalibrationPlan`、`CalibrationCurve`、`InverseEstimate` 等）。
 - `js/hardware_mock.js` — 模擬儀器與後端：以 4PL 真值模型加 3% 比例噪音與 8 counts 加成噪音產生讀值，並實作加權 4PL 擬合、LOD/LOQ、反推與 CI。狀態存在瀏覽器的 localStorage。
 - `js/hardware_mock_panel.js` — 每個硬體頁面底部的「Mock controls」，用來觸發極低 / 極高訊號、組態變更、離線等邊界狀況。接上後端時與 `hardware_mock.js` 一起移除。
+
+### 即時串流後端設定
+
+設定寫在 `backend/.env`；可從 `.env.example` 複製：
+
+```dotenv
+# 沒有硬體也能測試
+HARDWARE_MODE=mock
+HARDWARE_DEVICE_BASE_URL=http://capture-screen.local
+```
+
+接真實 ESP32 時，把 `HARDWARE_MODE` 改為 `device`；後端必須和裝置在同一區網。
+
+瀏覽器連線後先收到 `{"mode":"state","state":"IDLE"}`。送出 `{"cmd":"live_start"}` 後，後端持續推送與韌體相同格式的 `mode: "live"` frame；送出 `live_stop` 即停止。
 
 兩條不能破的規則：反推結果不是 `ok` 時**不顯示任何數字濃度**（範圍外絕不外插）；頁面上**不得出現診斷、檢測病原菌或定量 AHL 等宣稱**，只保留頁尾的 RUO 標示。
 

@@ -4,6 +4,7 @@ python-multipart
 uvicorn
 pytest
 httpx
+websockets
 python-dotenv
 numpy
 scipy

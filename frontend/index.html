@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LasReader · iGEM NCKU-Tainan 2026</title>
   <meta name="description" content="LasReader: dose-response fitting, concentration back-calculation, and live sensor monitoring for the iGEM NCKU-Tainan 2026 AHL biosensor." />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" type="image/png" href="assets/images/favicon.png" />
   <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
@@ -45,6 +46,38 @@
           <span class="nav-card-cue">Open instrument &rarr;</span>
         </a>
       </nav>
+
+      <section class="card live-card" aria-labelledby="live-heading">
+        <div class="section-heading live-heading-row">
+          <div>
+            <p class="section-label">Live sensor</p>
+            <h2 id="live-heading">AS7341 spectrum</h2>
+          </div>
+          <div class="live-controls">
+            <span class="live-state" aria-live="polite">
+              <span id="live-dot" class="live-dot is-off" aria-hidden="true"></span>
+              <span id="live-dot-label">Off</span>
+            </span>
+            <label class="live-switch" for="live-toggle">
+              <input id="live-toggle" type="checkbox" disabled />
+              <span class="live-switch-track" aria-hidden="true"><span></span></span>
+              <span>Live</span>
+            </label>
+          </div>
+        </div>
+
+        <p id="device-card-description" class="section-description">Checking live backend...</p>
+        <p id="live-toggle-reason" class="status-message error" hidden></p>
+
+        <div class="live-meta">
+          <span>Channels: 415–680 nm, Clear, NIR</span>
+          <span id="live-rate">-- Hz</span>
+        </div>
+        <div id="live-empty" class="live-empty">Live view is off.</div>
+        <div id="live-chart-plate" class="chart-plate live-chart-plate" hidden>
+          <canvas id="live-chart" aria-label="Live AS7341 raw channel counts"></canvas>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -53,6 +86,7 @@
   </div>
 
   <script src="js/config.js"></script>
+  <script src="js/device_live.js"></script>
   <script src="js/backend_status.js"></script>
 </body>
 </html>

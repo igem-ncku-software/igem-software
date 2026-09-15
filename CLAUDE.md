@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, and the CAPTURE-Screen fluorescence-reader UI, whose frontend exists but runs on mock data because its backend is not written yet). The two halves deploy independently and only talk to each other over HTTP/CORS — there is no shared build step, monorepo tooling, or shared types.
+LasReader (iGEM NCKU-Tainan 2026): a frontend/backend-split web app for the team's wet-lab data tools (AHL dose-response analysis of plate-reader exports, and the CAPTURE-Screen fluorescence-reader UI). CAPTURE-Screen live spectra use the FastAPI hardware WebSocket; calibration-plan and curve persistence still run in the browser. The two halves deploy independently and talk over HTTP/CORS and WebSocket — there is no shared build step, monorepo tooling, or shared types.
 
 - `frontend/` — static HTML/CSS/vanilla JS, no framework, no bundler. Deployed as-is to GitHub Pages.
 - `backend/` — FastAPI app. Deployed to Render at `https://igem-ncku-software.onrender.com`.
@@ -61,7 +61,7 @@ No build step. Serve the folder with any static server (e.g. `python -m http.ser
 
 Each feature lives in its own folder under `backend/app/`, containing at minimum a `router.py` that defines an `APIRouter` with its own path prefix. The router is then imported and mounted in `backend/app/main.py` via `app.include_router(...)`. There is no shared base class or plugin registry — wiring a new feature in means adding the import + `include_router` line by hand. Follow this same pattern for new features rather than adding routes directly to `main.py`.
 
-`app/hardware/` is currently empty and nothing imports it. The hardware feature is being rewritten there for different hardware with new analysis logic. The previous ESP32 + GY-302 version (`app/hardware_gy302/`, `/api/hardware_gy302`, and `firmware/gy302_esp32/`) was deleted and survives only in git history.
+`app/hardware/` exposes `GET /api/hardware/status` and `WS /api/hardware/live`. `HARDWARE_MODE=mock` generates firmware-shaped frames; `HARDWARE_MODE=device` proxies an ESP32 reachable at `HARDWARE_DEVICE_BASE_URL`. Device mode therefore requires the backend and device to share a reachable network. The previous ESP32 + GY-302 version (`app/hardware_gy302/`, `/api/hardware_gy302`, and `firmware/gy302_esp32/`) was deleted and survives only in git history.
 
 #### `app/dose_response/` — prefix `/api/dose_response`
 
@@ -98,7 +98,7 @@ Single source of truth for the plate map (row → AHL concentration, column → 
 ### Frontend: flat static pages, one script per page
 
 ```
-index.html                     entry page: two linked cards, no feature API calls
+index.html                     entry page: linked cards + live spectrum via /api/hardware
 dose-response.html             the analysis UI
 hardware.html                  CAPTURE-Screen: instrument status (hardware section home)
 hardware-measure.html          CAPTURE-Screen: read a sample, convert through the active curve
@@ -111,10 +111,12 @@ Pages are flat files rather than folders (`hardware-measure.html`, not `hardware
 
 Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The dose-response page shares nothing but the global `BACKEND_BASE_URL`. The five hardware pages are the exception: they share a three-layer stack, loaded in this order after `config.js`:
 
-- `js/hardware_mock.js` — **the entire hardware backend is currently simulated here.** A 4PL truth model with proportional + additive noise generates every reading. Raw channels, scatter, and QC flags all derive from that one simulation; nothing is a hand-picked random number. It also implements plan/curve storage (localStorage, so state survives across the five pages), a weighted Levenberg–Marquardt 4PL fit, LOD/LOQ, and inversion with a delta-method 95% CI. Pages must never call it directly.
-- `js/hardware_api.js` — `HardwareApi`, the only interface pages use, plus JSDoc typedefs for the data contract (`HardwareConfig`, `Measurement`, `CalibrationPlan`, `CalibrationCurve`, `InverseEstimate`). Each function is a mock call with a 300–800 ms delay; swapping in `fetch()` here is meant to require no page changes. **Field names in the typedefs are a contract with the future backend — don't rename them.**
+- `js/device_live.js` — the landing-page spectrum. It calls the FastAPI hardware status endpoint and WebSocket; live frames are display-only and are never stored.
+- `js/hardware_mock.js` — simulates the physical reader for the five workflow pages. Raw channels, scatter, and QC flags derive from one 4PL truth model; pages must never call it directly.
+- `js/hardware_local.js` — browser-local plan/curve storage, weighted 4PL fit, LOD/LOQ, and inversion with a delta-method 95% CI. This is still the temporary backend for the five workflow pages.
+- `js/hardware_api.js` — `HardwareApi`, the only interface workflow pages use, plus JSDoc typedefs for the data contract (`HardwareConfig`, `Measurement`, `CalibrationPlan`, `CalibrationCurve`, `InverseEstimate`). **Field names in the typedefs are a contract with the future persistence backend — don't rename them.**
 - `js/hardware_common.js` — subnav + device badge, number formatting rules (concentration 1 dp and µM above 1000 nM, fluorescence integer, percent 1 dp, local time), flag chips, `setBlocked()` for disabled-with-reason buttons.
-- `js/hardware_mock_panel.js` — a collapsible "Mock controls" card on every hardware page, used to force edge cases (very low/high signal, gain change → stale config, offline, dropped dark frame). It talks to `HardwareMock` directly because a real backend has no such switches; remove it together with `hardware_mock.js` when the backend exists.
+- `js/hardware_mock_panel.js` — a collapsible "Mock controls" card on every hardware page, used to force edge cases (very low/high signal, gain change → stale config, offline, dropped dark frame). It talks to `HardwareMock` directly because a real persistence backend has no such switches.
 
 Hardware rules worth preserving: no numeric concentration unless `InverseEstimate.status === "ok"` (never extrapolate outside `range_nM`); excluded tubes stay on the plot and in the data with a reason; disabled buttons always show why; no 4PL parameters in page code. The claims boundary is strict: the pages must not contain diagnostic claims, pathogen-detection wording, or "quantify AHL" — the only exception is the required RUO footer line.
 
