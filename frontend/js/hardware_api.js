@@ -102,7 +102,7 @@
 
 const HARDWARE_API_URL = `${BACKEND_BASE_URL}/api/hardware`;
 const HARDWARE_BASIS_URL = "config/unmix_basis.json";
-// 量測本身約 1 秒、後端最多等裝置 10 秒；睡著的 Render 後端被叫醒還要再幾十秒。
+// 量測本身約 3 秒、後端最多等裝置 10 秒；睡著的 Render 後端被叫醒還要再幾十秒。
 const HARDWARE_REQUEST_TIMEOUT_MS = 60000;
 
 // 錯誤一律轉成可以直接顯示的訊息，頁面顯示 err.message 即可。

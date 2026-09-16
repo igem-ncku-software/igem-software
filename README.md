@@ -190,17 +190,17 @@ CAPTURE-Screen 是隊上自製的螢光讀取儀：ESP32 + AS7341 光譜感測�
 
 後端在 Render 上，連不進實驗室或家裡路由器後面的裝置，所以方向反過來：裝置通電、連上 Wi-Fi 後，自己連出去 `wss://igem-ncku-software.onrender.com/api/hardware/device` 並保持連線，斷了會自動重連。網頁只跟後端說話，後端再經由這條連線轉給裝置：
 
-- **即時光譜**（首頁）：打開 Live 開關，後端叫裝置開 LED、每 200 ms 送一幀；最後一個人關掉 Live 或離開頁面，後端就叫裝置關 LED。LED 一直亮著會加熱、漂白樣品，所以只在有人看的時候亮。
-- **量測**（儀器檢查、校正、Measure）：網頁送 `POST /api/hardware/read`，裝置做一次 dark → light → dark，後端把原始讀值交回網頁；暗值扣除、正規化、解混都在網頁端（`js/hardware_processing.js`）。量測期間即時串流暫停，量完自動恢復。
+- **即時光譜**（首頁）：打開 Live 開關，後端叫裝置開 LED、一幀接一幀送出（DFRobot 函式庫讀一次十通道約 1 秒，所以約每秒一幀）；最後一個人關掉 Live 或離開頁面，後端就叫裝置關 LED。LED 一直亮著會加熱、漂白樣品，所以只在有人看的時候亮。
+- **量測**（儀器檢查、校正、Measure）：網頁送 `POST /api/hardware/read`，裝置做一次 dark → light → dark（約 3 秒），後端把原始讀值交回網頁；暗值扣除、正規化、解混都在網頁端（`js/hardware_processing.js`）。量測期間即時串流暫停，量完自動恢復。
 
 這條連線目前沒有身份驗證：知道網址的人可以冒充裝置或觸發量測。之後要補上共享金鑰。
 
 ### 燒錄韌體
 
-1. Arduino IDE 安裝 ESP32 開發板支援，以及函式庫 DFRobot_AS7341、Adafruit SSD1306、Adafruit GFX、ArduinoJson（7.x）、WebSockets（Markus Sattler）。
+1. Arduino IDE 安裝 ESP32 開發板支援，以及函式庫 DFRobot_AS7341、Adafruit SSD1306、Adafruit GFX、ArduinoJson（7.x）、WebSockets（Markus Sattler）。以下版本已實際編譯通過：ESP32 開發板 3.3.8、DFRobot_AS7341 1.0.0、Adafruit SSD1306 2.5.17、Adafruit GFX 1.12.6、ArduinoJson 7.4.3、WebSockets 2.7.2。
 2. 把 `firmware/as7341/secrets.h.example` 複製成同資料夾的 `secrets.h`，填入 Wi-Fi 名稱與密碼（ESP32 只支援 2.4 GHz）。`secrets.h` 已被 `.gitignore` 排除。
 3. 開啟 `firmware/as7341/as7341.ino`，開發板選 ESP32 Dev Module，燒錄。
-4. OLED 顯示 `Backend: online` 就代表連上了，首頁的 Live 卡片會顯示 `CAPTURE-Screen online`。
+4. OLED 顯示 `Backend: online` 就代表連上了，首頁的 Live 卡片會顯示 `CAPTURE-Screen online`。連不上時打開 Serial Monitor（115200），`[wifi]` 與 `[backend]` 開頭的訊息會說明卡在哪一步。
 
 Render 免費方案閒置一段時間會睡著，被叫醒要幾十秒；這段時間裝置會自己一直重試，不用重開。
 
@@ -225,7 +225,7 @@ Render 免費方案閒置一段時間會睡著，被叫醒要幾十秒；這段�
 - `js/hardware_processing.js` — 純函式：裝置原始讀值 → `Measurement`（暗值扣除、正規化、飽和檢查、解混、QC flag、組態 fingerprint）。
 - `js/hardware_local.js` — 校正計畫與曲線的暫代儲存、加權 4PL 擬合、LOD/LOQ、反推與 95% CI。
 - `js/hardware_api.js` — 五個頁面唯一呼叫的介面：跟裝置有關的走後端，其餘走 `hardware_local.js`；也用 JSDoc 定義資料契約（`Measurement`、`CalibrationPlan`、`CalibrationCurve`、`InverseEstimate` 等）。
-- `js/device_live.js` — 首頁的即時光譜：最新一幀的十通道長條圖，加上 F4 / F3 最近 60 秒的趨勢。只畫圖，不儲存任何即時 frame。
+- `js/device_live.js` — 首頁的即時光譜：最新一幀的十通道長條圖。只畫圖，不儲存任何即時 frame。
 
 ### 後端設定
 
@@ -234,7 +234,7 @@ Render 免費方案閒置一段時間會睡著，被叫醒要幾十秒；這段�
 ```dotenv
 # 多久沒收到裝置的消息就視為離線（韌體每 5 秒回報一次）
 HARDWARE_ONLINE_TIMEOUT_SECONDS=15
-# 等一次量測結果的上限（量測本身約 1 秒）
+# 等一次量測結果的上限（量測本身約 3 秒）
 HARDWARE_READ_TIMEOUT_SECONDS=10
 ```
 

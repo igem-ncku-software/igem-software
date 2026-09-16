@@ -47,6 +47,14 @@ Because `main.py` lives inside the `app` package, it must be run as `app.main:ap
 
 `backend/tests/` has 103 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; both share device messages from `payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
 
+### Firmware (from the repo root)
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/as7341
+```
+
+Compiles cleanly (warnings only from inside the libraries) against ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, Adafruit BusIO 1.17.4, ArduinoJson 7.4.3, and WebSockets 2.7.2. The build needs `firmware/as7341/secrets.h` to exist. The Arduino IDE ships its own `arduino-cli.exe` under `resources/app/lib/backend/resources/` in its install folder, so no separate install is needed; pass `--build-path` somewhere outside the repo. Flashing is done by the user.
+
 ### Frontend
 
 No build step. Serve the folder with any static server (e.g. `python -m http.server 5500`, or VS Code Live Server — port 5500 is already whitelisted in CORS). Opening the files via `file://` also works, but the pages will hit the Render backend rather than a local one, since `config.js` branches on hostname.
@@ -131,7 +139,7 @@ Pages are flat files rather than folders (`hardware-measure.html`, not `hardware
 
 Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The dose-response page shares nothing but the global `BACKEND_BASE_URL`. The landing page's live spectrum is standalone:
 
-- `js/device_live.js` — the landing-page spectrum. It opens `WS /api/hardware/live` on page load so device presence shows at once, sends `live_start` only while the Live switch is on (off by default; `autocomplete="off"` keeps a reload from switching the LED on), and reconnects with backoff indefinitely, since a sleeping Render backend takes up to a minute to wake. It draws the latest frame as a bar chart plus a 60 s F4/F3 trend on the device's own `t_ms` clock, and flags saturated channels. Frames are display-only and never stored; the charts are cleared whenever the device goes offline or the socket drops, never left showing the last frame.
+- `js/device_live.js` — the landing-page spectrum. It opens `WS /api/hardware/live` on page load so device presence shows at once, sends `live_start` only while the Live switch is on (off by default; `autocomplete="off"` keeps a reload from switching the LED on), and reconnects with backoff indefinitely, since a sleeping Render backend takes up to a minute to wake. It draws only the latest frame as a bar chart (the user removed the trend line chart; don't add one back) and flags saturated channels. Frames are display-only and never stored; the charts are cleared whenever the device goes offline or the socket drops, never left showing the last frame.
 
 The five hardware workflow pages share a layered stack, loaded in this order after `config.js`:
 
@@ -146,13 +154,15 @@ The five hardware workflow pages share a layered stack, loaded in this order aft
 
 Hardware rules worth preserving: no numeric concentration unless `InverseEstimate.status === "ok"` (never extrapolate outside `range_nM`); excluded tubes stay on the plot and in the data with a reason; disabled buttons always show why; no 4PL parameters in page code. The claims boundary is strict: the pages must not contain diagnostic claims, pathogen-detection wording, or "quantify AHL" — the only exception is the required RUO footer line. (Measure's result card is titled "Inferred AHL" at the user's request; that's an inference label, not a quantification claim.)
 
-The firmware lives in `firmware/as7341/` (ESP32 + AS7341 + SSD1306; DFRobot_AS7341, Adafruit SSD1306/GFX, ArduinoJson 7, and WebSockets by Markus Sattler/Links2004). It runs no HTTP server. After Wi-Fi connects it keeps one outbound `WebSocketsClient` to `BACKEND_HOST` + `/api/hardware/device` and speaks the protocol above: it sends status on connect, on every state change, and every 5 s; streams a live frame every 200 ms while `liveWanted`; and answers `read` with one dark → light → dark measurement tagged with the `request_id`.
+The firmware lives in `firmware/as7341/` (ESP32 + AS7341 + SSD1306; DFRobot_AS7341, Adafruit SSD1306/GFX, ArduinoJson 7, and WebSockets by Markus Sattler/Links2004). It runs no HTTP server. After Wi-Fi connects it keeps one outbound `WebSocketsClient` to `BACKEND_HOST` + `/api/hardware/device` and speaks the protocol above: it sends status on connect, on every state change, and every 5 s; streams frames back to back while `liveWanted`; and answers `read` with one dark → light → dark measurement tagged with the `request_id`.
+- DFRobot_AS7341 1.0.0 waits ~60 ms per channel register read, so a ten-channel read takes ~1 s (live ≈ 1 frame/s) and a measurement ~3 s, and `loop()` is blocked meanwhile. The pong timeout (10 s) and the backend's 10 s read timeout are sized for that.
+- Serial Monitor (115200) prints `[wifi]` / `[backend]` connection events and a "still connecting" line every 10 s — the first place to look when the device doesn't appear online.
 - Everything runs in `loop()`. WebSocketsClient callbacks fire inside `ws.loop()`, so there is no concurrency and no mutex; callbacks only record commands (`liveWanted`, `readPending`), and the measurement itself runs in `loop()`.
 - State is IDLE / LIVE / MEASURING. LIVE follows `liveWanted` whenever no measurement is running, so a read preempts streaming and streaming resumes afterwards on its own. A backend disconnect clears `liveWanted`, so the LED never stays on with nobody watching.
 - `BACKEND_HOST` / `BACKEND_PORT` / `BACKEND_USE_TLS` default to the Render backend and are wrapped in `#ifndef`, so `secrets.h` can point the device at a local backend while an older `secrets.h` holding only Wi-Fi credentials still compiles. Wi-Fi credentials go in `secrets.h`, which is gitignored — copy `secrets.h.example`.
 - `setAGAIN()` takes a register index (5 = 16×), not the gain itself.
 - `FIRMWARE_VERSION` feeds the config fingerprint, so bumping it makes every existing curve stale — intended when the reading path changes.
-- TLS skips certificate validation (no pinned CA); if the handshake ever fails, `beginSslWithCA()` with Render's root certificate is the fallback.
+- TLS skips certificate validation: with no CA or fingerprint, WebSockets 2.7.2 calls `setInsecure()` on ESP32 (checked in its `WebSocketsClient.cpp`). `beginSslWithCA()` is how to pin Render's root certificate later. Its handshake sends `Origin: file://` and `Sec-WebSocket-Protocol: arduino`, which is why `/device` has no origin check and echoes the subprotocol.
 
 - `js/config.js` — defines `BACKEND_BASE_URL`, branching on hostname (`localhost` / `127.0.0.1` → `http://127.0.0.1:8000`, else Render). Because there's no build step there's no way to inject this at build time, so it's a runtime check kept in one file. **Must be loaded before every other script.**
 - `js/dose_response.js` (dose-response.html) — submits the chosen file to `POST /api/dose_response/analyze`, renders the summary table plus a per-strain Chart.js scatter + fit curve + EC50 line, and builds a per-strain "predict concentration" widget that calls `POST /api/dose_response/predict`. Keeps a `strainCharts` map so old Chart instances are `destroy()`ed before a re-analysis. Filters out the `x=0` point (a log axis can't plot it) and any `null` plateau in charts only; the table still shows every strain in full. Draws no curve and offers no predict widget when `responsive` is false.

@@ -3,7 +3,7 @@
 // 目標元素：
 //   #live-toggle / #live-dot / #live-dot-label / #live-device
 //   #live-f4 / #live-f3 / #live-rate / #live-saturation / #live-full-scale
-//   #live-empty / #live-charts / #live-chart / #live-trend
+//   #live-empty / #live-spectrum / #live-chart
 // 依賴 js/config.js（BACKEND_BASE_URL）與 Chart.js。
 //
 // 頁面一打開就連 WS /api/hardware/live，隨時知道裝置在不在線；打開 Live 開關
@@ -20,7 +20,6 @@ const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/hardware/live`;
 const LIVE_RECONNECT_MIN_MS = 1000;
 const LIVE_RECONNECT_MAX_MS = 15000;
 const LIVE_RATE_WINDOW = 10; // 用最近 10 幀的 seq 與 t_ms 算更新率
-const LIVE_TREND_WINDOW_MS = 60000;
 // 裝置每 5 秒回報一次；這麼久完全沒消息就不再相信它在線（後端可能還沒發現連線斷了）。
 const LIVE_PRESENCE_STALE_MS = 20000;
 const LIVE_PRESENCE_CHECK_MS = 5000;
@@ -49,10 +48,8 @@ let liveDevice = null;      // 裝置最近一次回報的 status
 let liveLastSeen = null;
 let liveLastPresenceMs = 0;
 let liveStreaming = false;  // 開著 Live 之後已經收到至少一幀
-let liveSpectrumChart = null;
-let liveTrendChart = null;
+let liveChart = null;
 const liveSamples = [];     // {seq, t}
-const liveTrend = [];       // {t, f4, f3}
 
 function liveEl(id) {
   return document.getElementById(id);
@@ -120,13 +117,10 @@ function liveIdleMessage() {
 function clearLiveData(message) {
   liveStreaming = false;
   liveSamples.length = 0;
-  liveTrend.length = 0;
-  liveSpectrumChart?.destroy();
-  liveTrendChart?.destroy();
-  liveSpectrumChart = null;
-  liveTrendChart = null;
+  liveChart?.destroy();
+  liveChart = null;
 
-  liveEl("live-charts").hidden = true;
+  liveEl("live-spectrum").hidden = true;
   liveEl("live-saturation").hidden = true;
   for (const id of ["live-f4", "live-f3", "live-rate"]) liveEl(id).textContent = "--";
   const empty = liveEl("live-empty");
@@ -136,22 +130,16 @@ function clearLiveData(message) {
 
 // ---- 圖表 ------------------------------------------------------------
 
-function ensureLiveCharts() {
-  if (liveSpectrumChart) return;
+function ensureLiveChart() {
+  if (liveChart) return;
   const accent = liveCssVar("--accent");
   const gold = liveCssVar("--gold");
   const muted = liveCssVar("--muted");
   const ink = liveCssVar("--text");
   const rule = liveCssVar("--border");
   const ticks = { color: muted, font: { size: 10 } };
-  const countsAxis = {
-    beginAtZero: true,
-    title: { display: true, text: "Raw counts", color: ink },
-    grid: { color: rule },
-    ticks: { ...ticks, maxTicksLimit: 5 },
-  };
 
-  liveSpectrumChart = new Chart(liveEl("live-chart"), {
+  liveChart = new Chart(liveEl("live-chart"), {
     type: "bar",
     data: {
       labels: LIVE_CHANNELS.map((ch) => ch.label),
@@ -168,36 +156,14 @@ function ensureLiveCharts() {
       animation: false,
       scales: {
         x: { title: { display: true, text: "Channel (nm)", color: ink }, grid: { display: false }, ticks },
-        y: countsAxis,
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: "Raw counts", color: ink },
+          grid: { color: rule },
+          ticks: { ...ticks, maxTicksLimit: 5 },
+        },
       },
       plugins: { legend: { display: false } },
-    },
-  });
-
-  liveTrendChart = new Chart(liveEl("live-trend"), {
-    type: "line",
-    data: {
-      datasets: [
-        { label: "F4 515 nm (sfGFP)", data: [], borderColor: accent, backgroundColor: accent, borderWidth: 2, pointRadius: 0 },
-        { label: "F3 480 nm (leakage)", data: [], borderColor: gold, backgroundColor: gold, borderWidth: 2, pointRadius: 0 },
-      ],
-    },
-    options: {
-      responsive: true,
-      aspectRatio: 3,
-      animation: false,
-      scales: {
-        x: {
-          type: "linear",
-          min: -LIVE_TREND_WINDOW_MS / 1000,
-          max: 0,
-          title: { display: true, text: "Seconds before the latest frame", color: ink },
-          grid: { color: rule },
-          ticks,
-        },
-        y: countsAxis,
-      },
-      plugins: { legend: { labels: { color: ink, boxHeight: 2 } } },
     },
   });
 }
@@ -237,31 +203,20 @@ function onLiveFrame(message) {
   }
   if (!liveWanted) return;
 
-  // 裝置重開機後 t_ms 從 0 重新算，舊樣本放在同一條時間軸上沒有意義。
-  const newest = liveTrend[liveTrend.length - 1];
-  if (newest && message.t_ms <= newest.t) {
-    liveTrend.length = 0;
-    liveSamples.length = 0;
-  }
-
-  ensureLiveCharts();
+  ensureLiveChart();
   liveStreaming = true;
   liveEl("live-empty").hidden = true;
-  liveEl("live-charts").hidden = false;
+  liveEl("live-spectrum").hidden = false;
   liveEl("live-f4").textContent = String(raw.F4);
   liveEl("live-f3").textContent = String(raw.F3);
 
-  liveSpectrumChart.data.datasets[0].data = LIVE_CHANNELS.map(({ key }) => raw[key]);
-  liveSpectrumChart.update();
-
-  liveTrend.push({ t: message.t_ms, f4: raw.F4, f3: raw.F3 });
-  while (message.t_ms - liveTrend[0].t > LIVE_TREND_WINDOW_MS) liveTrend.shift();
-  const [f4Series, f3Series] = liveTrendChart.data.datasets;
-  f4Series.data = liveTrend.map((p) => ({ x: (p.t - message.t_ms) / 1000, y: p.f4 }));
-  f3Series.data = liveTrend.map((p) => ({ x: (p.t - message.t_ms) / 1000, y: p.f3 }));
-  liveTrendChart.update();
+  liveChart.data.datasets[0].data = LIVE_CHANNELS.map(({ key }) => raw[key]);
+  liveChart.update();
 
   // 更新率 = seq 差 / 裝置時間差：用裝置自己的時鐘，網路抖動不影響。
+  // 裝置重開機後 t_ms 從 0 重新算，舊樣本要丟掉。
+  const newest = liveSamples[liveSamples.length - 1];
+  if (newest && message.t_ms <= newest.t) liveSamples.length = 0;
   liveSamples.push({ seq: message.seq, t: message.t_ms });
   if (liveSamples.length > LIVE_RATE_WINDOW) liveSamples.shift();
   const first = liveSamples[0];

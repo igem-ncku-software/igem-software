@@ -17,8 +17,8 @@
 //
 // 裝置 → 後端
 //   {"mode":"status", ...}       連上時、狀態改變時，之後每 5 秒一次
-//   {"mode":"live", ...}         有人開著即時光譜時，每 200 ms 一幀
-//   {"mode":"measurement", ...}  收到 read 後的三段式量測 dark_1 → light → dark_2
+//   {"mode":"live", ...}         有人開著即時光譜時一幀接一幀送出（約每秒一幀）
+//   {"mode":"measurement", ...}  收到 read 後的三段式量測 dark_1 → light → dark_2（約 3 秒）
 //   {"mode":"error", ...}        指令無法執行（busy）
 // 後端 → 裝置
 //   {"cmd":"live_start"} / {"cmd":"live_stop"}   有沒有人在看即時光譜
@@ -37,6 +37,10 @@
 //
 // 需要的函式庫：DFRobot_AS7341、Adafruit SSD1306、Adafruit GFX、ArduinoJson 7、
 // WebSockets（Markus Sattler / Links2004，Library Manager 搜尋 "WebSockets"）。
+// 已用 ESP32 開發板 3.3.8、DFRobot_AS7341 1.0.0、Adafruit SSD1306 2.5.17、
+// Adafruit GFX 1.12.6、ArduinoJson 7.4.3、WebSockets 2.7.2 實際編譯通過。
+//
+// Serial Monitor（115200）會印出 [wifi] / [backend] 連線狀況，連不上時先看這裡。
 // =========================================================
 
 #include <Wire.h>
@@ -85,14 +89,17 @@ const int I2C_SDA    = 21;
 const int I2C_SCL    = 22;
 
 // --- 4. 時序 ---
+// DFRobot_AS7341 讀每個通道都會等約 60 ms：讀一次十通道約 1 秒，一次量測（讀三次）約 3 秒。
+// 這段時間 loop() 是卡住的，下面的間隔與逾時都以此為準。
 const unsigned long DARK_SETTLE_MS      = 50;     // LED 關閉後等待
 const unsigned long LIGHT_SETTLE_MS     = 100;    // LED 開啟後等待穩定
-const unsigned long LIVE_INTERVAL_MS    = 200;    // 即時串流一幀的間隔
+const unsigned long LIVE_INTERVAL_MS    = 200;    // 兩幀之間至少留給 ws.loop() 與按鈕的時間
 const unsigned long STATUS_INTERVAL_MS  = 5000;   // 狀態心跳；後端 15 秒沒收到就當離線
 const unsigned long RECONNECT_MS        = 5000;
 const unsigned long WS_PING_INTERVAL_MS = 15000;  // 偵測「斷了卻沒收到通知」的連線
-const unsigned long WS_PONG_TIMEOUT_MS  = 5000;
+const unsigned long WS_PONG_TIMEOUT_MS  = 10000;  // 量測期間 pong 可能晚 3 秒以上才被處理
 const uint8_t       WS_MISSED_PONGS     = 2;
+const unsigned long WAITING_LOG_MS      = 10000;  // 連不上後端時，多久在 Serial 印一次
 const unsigned long DEBOUNCE_MS         = 50;
 
 #define SCREEN_WIDTH 128
@@ -359,12 +366,19 @@ void onBackendEvent(WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
       backendConnected = true;
+      Serial.printf("[backend] connected to %s:%d%s\n", BACKEND_HOST, BACKEND_PORT, BACKEND_PATH);
       sendStatus();
       break;
     case WStype_DISCONNECTED:
+      if (backendConnected) Serial.println("[backend] disconnected, reconnecting");
       backendConnected = false;
       liveWanted = false;   // 沒有後端就沒有人在看：LED 不能因此一直亮著
       readPending = false;  // 後端已經放棄這次讀取
+      break;
+    case WStype_ERROR:
+      Serial.print("[backend] error ");
+      if (length) Serial.write(payload, length);
+      Serial.println();
       break;
     case WStype_TEXT:
       handleCommand(payload, length);
@@ -372,6 +386,15 @@ void onBackendEvent(WStype_t type, uint8_t *payload, size_t length) {
     default:
       break;
   }
+}
+
+// 一直連不上後端時（Wi-Fi 密碼、網址、TLS、後端睡著），定期在 Serial 說明狀況。
+void logWhileWaitingForBackend() {
+  static unsigned long lastLogMs = 0;
+  if (backendConnected || millis() - lastLogMs < WAITING_LOG_MS) return;
+  lastLogMs = millis();
+  Serial.printf("[backend] still connecting to %s:%d (Wi-Fi %s, RSSI %d dBm)\n",
+                BACKEND_HOST, BACKEND_PORT, WiFi.status() == WL_CONNECTED ? "up" : "down", WiFi.RSSI());
 }
 
 // =========================================================
@@ -488,6 +511,7 @@ void setup() {
   as7341.setAGAIN(AS7341_AGAIN_REGISTER);
 
   showMessage("Connecting Wi-Fi...", WIFI_SSID);
+  Serial.printf("[wifi] connecting to %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // 省電模式會讓串流延遲、更新率掉下來
   WiFi.setAutoReconnect(true);
@@ -495,9 +519,11 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
   }
+  Serial.print("[wifi] connected, IP ");
+  Serial.println(WiFi.localIP());
 
-  // TLS 沒有釘憑證：library 在 ESP32 上沒給 CA 時略過驗證。若握手失敗，改用
-  // ws.beginSslWithCA() 帶入 Render 憑證鏈的根憑證。
+  // TLS 沒有釘憑證：WebSockets 2.7.2 在 ESP32 上沒給 CA 時會呼叫 setInsecure() 略過驗證。
+  // 之後要驗證憑證，改用 ws.beginSslWithCA() 帶入 Render 的根憑證。
 #if BACKEND_USE_TLS
   ws.beginSSL(BACKEND_HOST, BACKEND_PORT, BACKEND_PATH);
 #else
@@ -524,6 +550,7 @@ void loop() {
 
   if (backendConnected && millis() - lastStatusMs >= STATUS_INTERVAL_MS) sendStatus();
 
+  logWhileWaitingForBackend();
   refreshIdleScreen();
   delay(1);
 }

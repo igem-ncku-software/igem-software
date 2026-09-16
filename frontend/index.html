@@ -89,14 +89,10 @@
         <p id="live-saturation" class="status-message error" hidden></p>
 
         <div id="live-empty" class="live-empty">Connecting to the backend...</div>
-        <div id="live-charts" hidden>
+        <div id="live-spectrum" hidden>
           <p class="chart-note live-chart-note">Latest frame, all ten channels. The ADC saturates at <span id="live-full-scale">--</span> counts.</p>
           <div class="chart-plate">
             <canvas id="live-chart" aria-label="Latest AS7341 raw counts per channel"></canvas>
-          </div>
-          <p class="chart-note live-chart-note">F4 and F3 over the last 60 seconds.</p>
-          <div class="chart-plate">
-            <canvas id="live-trend" aria-label="F4 and F3 raw counts over the last 60 seconds"></canvas>
           </div>
         </div>
         <p class="plan-meta">
