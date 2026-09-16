@@ -105,7 +105,7 @@ button, input, textarea { font: inherit; }
 
 .eyebrow {
   margin: 0 0 8px; color: var(--gold-ink);
-  font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  font-size: .76rem; font-weight: 700;
 }
 
 .site-header h1 {
@@ -136,7 +136,7 @@ button, input, textarea { font: inherit; }
 
 .section-label {
   margin: 0 0 8px; color: var(--gold-ink);
-  font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  font-size: .76rem; font-weight: 700;
 }
 
 form { display: flex; flex-direction: column; gap: 8px; }
@@ -224,7 +224,7 @@ button.btn-secondary:hover { color: var(--text); background: rgba(255,253,247,.7
 .table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
 table { width: 100%; min-width: 860px; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
-th { color: var(--muted); background: var(--solid-soft); font-size: .74rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+th { color: var(--muted); background: var(--solid-soft); font-size: .74rem; font-weight: 700; }
 td { color: var(--text-dim); font-size: .9rem; font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--solid-soft); }
@@ -239,7 +239,7 @@ canvas { max-width: 100%; }
 
 .sensor-stats { display: flex; gap: 12px; margin-top: 16px; }
 .sensor-stat { flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
-.sensor-stat-label { display: block; color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.sensor-stat-label { display: block; color: var(--muted); font-size: .74rem; font-weight: 700; }
 .sensor-stat-value {
   display: block; margin-top: 4px;
   font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem;
@@ -294,6 +294,8 @@ canvas { max-width: 100%; }
 
 /* Landing-page live spectrum. */
 .live-card { margin-top: 20px; }
+/* The one reading keeps the width it had as one of three, on the left. */
+.live-card .sensor-stat { flex: 0 1 calc((100% - 24px) / 3); }
 .live-heading-row { align-items: center; }
 .live-heading-row h2 { margin: 0; }
 .live-controls { display: flex; align-items: center; gap: 18px; }
@@ -420,7 +422,7 @@ td .chip-row { margin-top: 0; }
   font-size: .82rem; text-align: right;
 }
 .curve-chip strong { color: var(--text); font-size: .95rem; }
-.curve-chip-label { color: var(--gold-ink); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.curve-chip-label { color: var(--gold-ink); font-size: .7rem; font-weight: 700; }
 .curve-summary-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text); font-size: 1.05rem; }
 
 /* Calibration run: the next tube stays pinned while the list scrolls. */
@@ -433,7 +435,7 @@ td .chip-row { margin-top: 0; }
 }
 .next-tube.is-reread { border-left-color: var(--gold); }
 .next-tube.is-done { border-left-color: var(--muted); }
-.next-tube-label { margin: 0; color: var(--gold-ink); font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.next-tube-label { margin: 0; color: var(--gold-ink); font-size: .76rem; font-weight: 700; }
 .next-tube-value {
   margin: 4px 0 0; color: var(--text);
   font-family: var(--heading-font); font-weight: 700; font-size: clamp(1.4rem, 3.6vw, 2.1rem); line-height: 1.2;
@@ -445,9 +447,8 @@ td .chip-row { margin-top: 0; }
 
 /* Tables. */
 .kv-table { min-width: 0; }
-.kv-table th { width: 34%; color: var(--text-dim); font-size: .85rem; letter-spacing: 0; text-transform: none; }
+.kv-table th { width: 34%; color: var(--text-dim); font-size: .85rem; }
 .channel-table { min-width: 640px; }
-.channel-table th[scope="row"] { letter-spacing: 0; text-transform: none; }
 tr.is-target td { color: var(--text); font-weight: 700; }
 tr.is-target td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 tr.is-excluded td:not(.group-cell) { color: var(--muted); }
