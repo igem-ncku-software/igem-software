@@ -45,7 +45,7 @@ pytest
 
 Because `main.py` lives inside the `app` package, it must be run as `app.main:app` — running `python main.py` or `uvicorn main:app` directly will fail.
 
-`backend/tests/` has 103 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; both share device messages from `payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
+`backend/tests/` has 104 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; device messages live in `payloads.py`), and `tests/live/` (the same split for `LiveHub` and `WS /api/live/spectrum`, reusing `tests/hardware/payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
 
 ### Firmware (from the repo root)
 
@@ -77,16 +77,23 @@ A relay between the one CAPTURE-Screen device and every browser. The backend nev
 
 - `GET /status` — `{online, last_seen, device}`; `device` is the last `DeviceStatus` the firmware reported, kept after it disconnects so pages can say what went offline.
 - `POST /read` — the hub sends `{"cmd": "read", "request_id"}` down the device socket and waits for the matching `mode: "measurement"` reply, returning the raw frames. 503 offline, 409 busy, 504 no answer within `HARDWARE_READ_TIMEOUT_SECONDS`, 502 malformed.
-- `WS /live` — browser → `{"cmd": "live_start" | "live_stop"}`; server → `mode: "presence"` on connect and on every device status, `mode: "live"` frames only while that browser watches, `mode: "watching"` acks.
+- `WS /device` — the device's own connection.
 
-`hub.py`'s `DeviceHub` holds all of it in memory, `router.py` is the thin HTTP/WS layer, and `models.py` is the contract with the firmware's JSON and `hardware_processing.js`'s validators (rename a field in all three or none). Rules worth preserving:
+`hub.py`'s `DeviceHub` holds all of it in memory, `router.py` is the thin HTTP/WS layer, and `models.py` is the contract with the firmware's JSON and `hardware_processing.js`'s validators (rename a field in all three or none). The live spectrum is not here: it is `app/live/`, which subscribes to `DeviceHub` as a `DeviceListener` (`on_device_changed`, `on_live`, `on_device_attached`) and sends `live_start`/`live_stop` through `DeviceHub.command()`. Hardware never imports live. Rules worth preserving:
 - **Online** means a device socket is attached, it has reported a status since attaching, and something arrived within `HARDWARE_ONLINE_TIMEOUT_SECONDS` (the firmware reports every 5 s).
-- **The LED streams only while someone watches.** The hub sends `live_start` when the first browser starts watching and `live_stop` when the last one stops or leaves; continuous excitation light heats and bleaches the sample in the cuvette. Keep it viewer-driven.
 - One read at a time (an `asyncio.Lock`). A second device connection replaces the first, which is closed with code 4000.
 - One backend process (true on Render's free tier); a multi-worker deployment would need a real pub/sub instead of this singleton.
 - `/device` echoes the `arduino` subprotocol that arduinoWebSockets requests. **Neither `/device` nor `/read` is authenticated yet**: anyone who finds the URL can pose as the device or trigger reads. The user deferred a shared secret (device `secrets.h` + a Render env var) to later.
 - `websockets` must stay in `requirements.txt`: plain `uvicorn` can't serve any WebSocket without it, and `TestClient` doesn't need it, so the tests won't catch its absence.
-- `/live` waits on `receive_text()` with a 0.1 s timeout so one coroutine can also drain the viewer's outbox; a two-task version leaked tasks under `TestClient`'s teardown cancellation.
+
+#### `app/live/` — prefix `/api/live`
+
+Live sensing: the browser side of the live spectrum, split out of `app/hardware/`. `hub.py`'s `LiveHub` keeps the watching browsers (`Viewer` outboxes), `models.py` holds `LiveFrame`, and `router.py` creates the singleton `live_hub = LiveHub(device_hub)` from `app.hardware.router`, which subscribes it at import time (so `DeviceHub.reset()` keeps listeners; tests reset both hubs).
+
+- `WS /spectrum` — browser → `{"cmd": "live_start" | "live_stop"}`; server → `mode: "presence"` on connect and on every device status, `mode: "live"` frames only while that browser watches, `mode: "watching"` acks.
+- **The LED streams only while someone watches.** The hub sends `live_start` when the first browser starts watching (or when a device attaches while someone already watches) and `live_stop` when the last one stops or leaves; continuous excitation light heats and bleaches the sample in the cuvette. Keep it viewer-driven.
+- `/spectrum` waits on `receive_text()` with a 0.1 s timeout so one coroutine can also drain the viewer's outbox; a two-task version leaked tasks under `TestClient`'s teardown cancellation.
+- `/spectrum` checks `Origin` against `CORS_ORIGINS` itself, since `CORSMiddleware` doesn't cover WebSockets.
 
 #### `app/dose_response/` — prefix `/api/dose_response`
 
@@ -121,12 +128,12 @@ Single source of truth for the plate map (row → AHL concentration, column → 
 
 ### Config
 
-`app/config.py` loads `backend/.env` via `python-dotenv` (silently no-ops if absent, e.g. on Render where env vars are injected by the platform) and centralizes `CORS_ORIGINS` (comma-separated) plus the hub's `HARDWARE_ONLINE_TIMEOUT_SECONDS` / `HARDWARE_READ_TIMEOUT_SECONDS`. Default allowed origins cover the GitHub Pages URL plus common local dev ports (5500, 8000). Any new local frontend port needs to be added here or to `.env`; `WS /live` checks the same list, since `CORSMiddleware` doesn't cover WebSockets.
+`app/config.py` loads `backend/.env` via `python-dotenv` (silently no-ops if absent, e.g. on Render where env vars are injected by the platform) and centralizes `CORS_ORIGINS` (comma-separated) plus the hub's `HARDWARE_ONLINE_TIMEOUT_SECONDS` / `HARDWARE_READ_TIMEOUT_SECONDS`. Default allowed origins cover the GitHub Pages URL plus common local dev ports (5500, 8000). Any new local frontend port needs to be added here or to `.env`; `WS /api/live/spectrum` checks the same list, since `CORSMiddleware` doesn't cover WebSockets.
 
 ### Frontend: flat static pages, one script per page
 
 ```
-index.html                     entry page: linked cards + live spectrum via /api/hardware
+index.html                     entry page: linked cards + live spectrum via /api/live
 dose-response.html             the analysis UI
 hardware.html                  CAPTURE-Screen: instrument status (hardware section home)
 hardware-measure.html          CAPTURE-Screen: read a sample, convert through the active curve
@@ -139,7 +146,7 @@ Pages are flat files rather than folders (`hardware-measure.html`, not `hardware
 
 Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The dose-response page shares nothing but the global `BACKEND_BASE_URL`. The landing page's live spectrum is standalone:
 
-- `js/device_live.js` — the landing-page spectrum. It opens `WS /api/hardware/live` on page load so device presence shows at once, sends `live_start` only while the Live switch is on (off by default; `autocomplete="off"` keeps a reload from switching the LED on), and reconnects with backoff indefinitely, since a sleeping Render backend takes up to a minute to wake. It draws only the latest frame as a bar chart (the user removed the trend line chart; don't add one back) and flags saturated channels. Frames are display-only and never stored; the charts are cleared whenever the device goes offline or the socket drops, never left showing the last frame.
+- `js/device_live.js` — the landing-page spectrum. It opens `WS /api/live/spectrum` on page load so device presence shows at once, sends `live_start` only while the Live switch is on (off by default; `autocomplete="off"` keeps a reload from switching the LED on), and reconnects with backoff indefinitely, since a sleeping Render backend takes up to a minute to wake. It draws only the latest frame as a bar chart (the user removed the trend line chart; don't add one back) and flags saturated channels. Only the sfGFP channel F4 is highlighted and read out; the user removed the F3 leakage and update-rate readouts, so don't add those back either. Frames are display-only and never stored; the charts are cleared whenever the device goes offline or the socket drops, never left showing the last frame.
 
 The five hardware workflow pages share a layered stack, loaded in this order after `config.js`:
 

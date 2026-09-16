@@ -3,11 +3,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 from app.hardware.router import device_hub
 from app.main import app
-from tests.hardware.payloads import LIVE, STATUS, measurement
+from tests.hardware.payloads import STATUS, measurement
 
 client = TestClient(app)
 
@@ -108,40 +107,3 @@ def test_read_on_a_busy_device_is_409():
 
     assert response.status_code == 409
 
-
-# --- WS /live ---
-
-
-def test_watching_switches_the_stream_and_relays_frames():
-    with client.websocket_connect("/api/hardware/device") as device:
-        device.send_json(STATUS)
-        wait_until_online()
-
-        with client.websocket_connect("/api/hardware/live") as browser:
-            assert browser.receive_json()["online"] is True
-
-            browser.send_json({"cmd": "live_start"})
-            assert device.receive_json() == {"cmd": "live_start"}
-            assert browser.receive_json() == {"mode": "watching", "watching": True}
-
-            device.send_json(LIVE)
-            assert browser.receive_json() == LIVE
-
-            browser.send_json({"cmd": "live_stop"})
-            assert device.receive_json() == {"cmd": "live_stop"}
-            assert browser.receive_json() == {"mode": "watching", "watching": False}
-
-
-def test_live_rejects_unknown_commands():
-    with client.websocket_connect("/api/hardware/live") as browser:
-        browser.receive_json()
-        browser.send_json({"cmd": "erase"})
-        assert browser.receive_json() == {"mode": "error", "error": "unknown_cmd"}
-
-
-def test_live_rejects_an_untrusted_browser_origin():
-    with pytest.raises(WebSocketDisconnect) as error:
-        with client.websocket_connect("/api/hardware/live", headers={"origin": "https://untrusted.example"}):
-            pass
-
-    assert error.value.code == 1008

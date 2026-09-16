@@ -28,7 +28,9 @@ flowchart LR
 
     subgraph BE["backend/ — FastAPI (Render)"]
         RT1["/api/dose_response<br/>analyze · predict"]
-        HUB["/api/hardware<br/>status · read · live · device"]
+        HUB["/api/hardware<br/>status · read · device"]
+        LIVE["/api/live<br/>spectrum"]
+        LIVE -->|訂閱裝置| HUB
         subgraph PIPE["dose_response 分析流程"]
             direction LR
             IO["io"] --> NRM["normalize"] --> TS["timeseries"] --> DRS["doseresponse"]
@@ -38,7 +40,7 @@ flowchart LR
 
     FILE --> DR
     DR -->|HTTPS| RT1
-    IDX -->|WSS 即時光譜| HUB
+    IDX -->|WSS 即時光譜| LIVE
     HW -->|HTTPS 狀態與量測| HUB
     DEV -->|WSS 由裝置主動連出| HUB
 ```
@@ -62,7 +64,8 @@ backend/                      FastAPI
 ├── app/
 │   ├── main.py               掛載各功能 router
 │   ├── config.py             環境變數與 CORS 設定
-│   ├── hardware/             CAPTURE-Screen 的中繼：裝置連線、狀態、量測、即時光譜
+│   ├── hardware/             CAPTURE-Screen 的中繼：裝置連線、狀態、量測
+│   ├── live/                 即時感測：瀏覽器看即時光譜，經 hardware 的連線轉給裝置
 │   └── dose_response/        劑量反應分析（本專案的主要運算）
 ├── tests/                    pytest
 └── requirements.txt
@@ -135,8 +138,8 @@ pytest
 | `POST` | `/api/dose_response/predict` | 由螢光值反推 AHL 濃度 |
 | `GET` | `/api/hardware/status` | CAPTURE-Screen 是否在線、最後一次回報的狀態與組態 |
 | `POST` | `/api/hardware/read` | 請裝置量一次（dark → light → dark），回傳原始讀值 |
-| `WS` | `/api/hardware/live` | 瀏覽器看即時光譜 |
 | `WS` | `/api/hardware/device` | 裝置自己連進來的連線 |
+| `WS` | `/api/live/spectrum` | 瀏覽器看即時光譜 |
 
 完整的請求/回應 schema 可以在後端啟動後開 `/docs` 互動式查看。
 

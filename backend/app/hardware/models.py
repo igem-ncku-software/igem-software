@@ -53,15 +53,6 @@ class DeviceStatus(DeviceIdentity):
     config: DeviceConfig
 
 
-class LiveFrame(BaseModel):
-    """Display-only: never stored, never turned into a Measurement."""
-
-    mode: Literal["live"]
-    seq: int = Field(ge=0)
-    t_ms: int = Field(ge=0)
-    raw: ChannelFrame
-
-
 class DeviceMeasurement(DeviceIdentity):
     """Result of one read: dark_1 -> light -> dark_2. Dark subtraction and
     normalization happen in the browser (hardware_processing.js)."""

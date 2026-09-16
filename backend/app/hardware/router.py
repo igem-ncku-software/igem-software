@@ -1,11 +1,11 @@
-"""HTTP and WebSocket routes for CAPTURE-Screen. hub.py explains how they connect."""
+"""HTTP and WebSocket routes for CAPTURE-Screen. hub.py explains how they connect.
+
+The browser side of the live spectrum is app.live.router, which shares device_hub.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import json
-
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket
 
 from app.config import settings
 from app.hardware.hub import DeviceBusy, DeviceError, DeviceHub, DeviceOffline, DeviceTimeout
@@ -17,10 +17,6 @@ device_hub = DeviceHub(
     online_timeout_s=settings.HARDWARE_ONLINE_TIMEOUT_SECONDS,
     read_timeout_s=settings.HARDWARE_READ_TIMEOUT_SECONDS,
 )
-
-# One coroutine both waits for browser commands and drains the viewer's outbox, checking the outbox this often.
-VIEWER_POLL_SECONDS = 0.1
-VIEWER_COMMANDS = {"live_start": True, "live_stop": False}
 
 
 @router.get("/status", response_model=HardwareStatusResponse)
@@ -42,55 +38,6 @@ async def hardware_read() -> dict:
         raise HTTPException(status_code=504, detail=str(error)) from error
     except DeviceError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
-
-
-def _viewer_command(text: str) -> bool | None:
-    try:
-        message = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    command = message.get("cmd") if isinstance(message, dict) else None
-    return VIEWER_COMMANDS.get(command) if isinstance(command, str) else None
-
-
-@router.websocket("/live")
-async def hardware_live(websocket: WebSocket) -> None:
-    """Browser side of the live spectrum.
-
-    Server -> browser: {"mode": "presence", ...} on connect and whenever the
-    device reports; {"mode": "live", ...} frames while watching;
-    {"mode": "watching", "watching": bool} after each command.
-    Browser -> server: {"cmd": "live_start"} / {"cmd": "live_stop"}.
-    """
-    # CORSMiddleware covers HTTP only; without this check any website could switch the LED on.
-    origin = websocket.headers.get("origin")
-    if origin and "*" not in settings.CORS_ORIGINS and origin not in settings.CORS_ORIGINS:
-        await websocket.close(code=1008, reason="Origin not allowed")
-        return
-
-    await websocket.accept()
-    viewer = device_hub.add_viewer()
-    try:
-        while True:
-            try:
-                text = await asyncio.wait_for(websocket.receive_text(), timeout=VIEWER_POLL_SECONDS)
-            except asyncio.TimeoutError:
-                text = None
-
-            if text is not None:
-                watching = _viewer_command(text)
-                if watching is None:
-                    await websocket.send_json({"mode": "error", "error": "unknown_cmd"})
-                else:
-                    await device_hub.set_watching(viewer, watching)
-                    await websocket.send_json({"mode": "watching", "watching": watching})
-
-            while not viewer.outbox.empty():
-                await websocket.send_text(viewer.outbox.get_nowait())
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await device_hub.remove_viewer(viewer)
 
 
 @router.websocket("/device")

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from app.hardware.hub import DeviceBusy, DeviceError, DeviceHub, DeviceOffline, DeviceTimeout
-from tests.hardware.payloads import LIVE, STATUS, measurement
+from tests.hardware.payloads import STATUS, measurement
 
 
 class FakeConnection:
@@ -39,13 +39,6 @@ async def next_command(device):
             return device.sent.pop(0)
         await asyncio.sleep(0)
     raise AssertionError("the hub sent the device nothing")
-
-
-def drain(viewer):
-    messages = []
-    while not viewer.outbox.empty():
-        messages.append(json.loads(viewer.outbox.get_nowait()))
-    return messages
 
 
 # --- presence ---
@@ -106,15 +99,10 @@ def test_a_new_device_connection_replaces_the_old_one():
 def test_malformed_device_messages_are_ignored():
     async def scenario():
         hub, device = await connected_hub()
-        viewer = hub.add_viewer()
-        await hub.set_watching(viewer, True)
-        drain(viewer)
-        device.sent.clear()
 
-        for text in ["not json", "[1, 2]", json.dumps({"mode": "live", "seq": 1}), json.dumps({**STATUS, "state": "ON FIRE"})]:
+        for text in ["not json", "[1, 2]", json.dumps({**STATUS, "state": "ON FIRE"})]:
             await hub.handle_device_message(device, text)
 
-        assert drain(viewer) == []
         assert hub.status["state"] == "IDLE"
 
     asyncio.run(scenario())
@@ -195,72 +183,3 @@ def test_a_malformed_measurement_is_an_error_not_a_result():
 
     asyncio.run(scenario())
 
-
-# --- live spectrum ---
-
-
-def test_led_stream_follows_the_first_and_last_watcher():
-    async def scenario():
-        hub, device = await connected_hub()
-        first, second = hub.add_viewer(), hub.add_viewer()
-
-        await hub.set_watching(first, True)
-        await hub.set_watching(second, True)
-        assert device.sent == [{"cmd": "live_start"}]
-
-        await hub.set_watching(first, False)
-        assert device.sent == [{"cmd": "live_start"}]
-
-        await hub.remove_viewer(second)
-        assert device.sent == [{"cmd": "live_start"}, {"cmd": "live_stop"}]
-
-    asyncio.run(scenario())
-
-
-def test_live_frames_reach_watchers_only():
-    async def scenario():
-        hub, device = await connected_hub()
-        watcher, bystander = hub.add_viewer(), hub.add_viewer()
-        await hub.set_watching(watcher, True)
-        drain(watcher)
-        drain(bystander)
-
-        await hub.handle_device_message(device, json.dumps(LIVE))
-
-        assert drain(watcher) == [LIVE]
-        assert drain(bystander) == []
-
-    asyncio.run(scenario())
-
-
-def test_viewers_hear_the_device_come_and_go():
-    async def scenario():
-        hub = make_hub()
-        viewer = hub.add_viewer()
-        assert drain(viewer) == [{"mode": "presence", "online": False, "last_seen": None, "device": None}]
-
-        device = FakeConnection()
-        await hub.attach_device(device)
-        await hub.handle_device_message(device, json.dumps(STATUS))
-        assert drain(viewer)[-1]["online"] is True
-
-        await hub.detach_device(device)
-        presence = drain(viewer)[-1]
-        assert presence["online"] is False
-        assert presence["device"]["build_id"] == "P1-PROTO-01"
-
-    asyncio.run(scenario())
-
-
-def test_a_device_that_connects_while_someone_watches_starts_streaming():
-    async def scenario():
-        hub = make_hub()
-        viewer = hub.add_viewer()
-        await hub.set_watching(viewer, True)  # no device yet: nothing to tell, no error
-
-        device = FakeConnection()
-        await hub.attach_device(device)
-
-        assert device.sent == [{"cmd": "live_start"}]
-
-    asyncio.run(scenario())

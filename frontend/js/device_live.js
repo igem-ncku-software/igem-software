@@ -2,24 +2,24 @@
 // 首頁的 CAPTURE-Screen 即時光譜。
 // 目標元素：
 //   #live-toggle / #live-dot / #live-dot-label / #live-device
-//   #live-f4 / #live-f3 / #live-rate / #live-saturation / #live-full-scale
+//   #live-f4 / #live-saturation / #live-full-scale
 //   #live-empty / #live-spectrum / #live-chart
 // 依賴 js/config.js（BACKEND_BASE_URL）與 Chart.js。
 //
-// 頁面一打開就連 WS /api/hardware/live，隨時知道裝置在不在線；打開 Live 開關
+// 頁面一打開就連 WS /api/live/spectrum，隨時知道裝置在不在線；打開 Live 開關
 // 才送 live_start。後端統計所有開著 Live 的瀏覽器，裝置的 LED 只在有人在看時
 // 亮（一直亮會加熱、漂白樣品），所以開關預設關閉。
 //
 // 規則：
 //   - 即時資料只畫圖，不寫進任何儲存、不進 plan、不擬合
+//   - 只特別標出 sfGFP 通道 F4，不顯示漏光（F3）與更新率
 //   - 裝置離線或連線中斷就清空圖表，不把最後一筆留著當成現在的數值
 //   - 斷線自動重連（睡著的 Render 後端要幾十秒才醒），不用重新整理頁面
 // =========================================================
 
-const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/hardware/live`;
+const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/live/spectrum`;
 const LIVE_RECONNECT_MIN_MS = 1000;
 const LIVE_RECONNECT_MAX_MS = 15000;
-const LIVE_RATE_WINDOW = 10; // 用最近 10 幀的 seq 與 t_ms 算更新率
 // 裝置每 5 秒回報一次；這麼久完全沒消息就不再相信它在線（後端可能還沒發現連線斷了）。
 const LIVE_PRESENCE_STALE_MS = 20000;
 const LIVE_PRESENCE_CHECK_MS = 5000;
@@ -49,7 +49,6 @@ let liveLastSeen = null;
 let liveLastPresenceMs = 0;
 let liveStreaming = false;  // 開著 Live 之後已經收到至少一幀
 let liveChart = null;
-const liveSamples = [];     // {seq, t}
 
 function liveEl(id) {
   return document.getElementById(id);
@@ -116,13 +115,12 @@ function liveIdleMessage() {
 
 function clearLiveData(message) {
   liveStreaming = false;
-  liveSamples.length = 0;
   liveChart?.destroy();
   liveChart = null;
 
   liveEl("live-spectrum").hidden = true;
   liveEl("live-saturation").hidden = true;
-  for (const id of ["live-f4", "live-f3", "live-rate"]) liveEl(id).textContent = "--";
+  liveEl("live-f4").textContent = "--";
   const empty = liveEl("live-empty");
   empty.textContent = message;
   empty.hidden = false;
@@ -133,7 +131,6 @@ function clearLiveData(message) {
 function ensureLiveChart() {
   if (liveChart) return;
   const accent = liveCssVar("--accent");
-  const gold = liveCssVar("--gold");
   const muted = liveCssVar("--muted");
   const ink = liveCssVar("--text");
   const rule = liveCssVar("--border");
@@ -146,7 +143,7 @@ function ensureLiveChart() {
       datasets: [{
         label: "Raw counts",
         data: LIVE_CHANNELS.map(() => 0),
-        backgroundColor: LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : key === "F3" ? gold : muted)),
+        backgroundColor: LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : muted)),
         borderRadius: 3,
       }],
     },
@@ -208,22 +205,9 @@ function onLiveFrame(message) {
   liveEl("live-empty").hidden = true;
   liveEl("live-spectrum").hidden = false;
   liveEl("live-f4").textContent = String(raw.F4);
-  liveEl("live-f3").textContent = String(raw.F3);
 
   liveChart.data.datasets[0].data = LIVE_CHANNELS.map(({ key }) => raw[key]);
   liveChart.update();
-
-  // 更新率 = seq 差 / 裝置時間差：用裝置自己的時鐘，網路抖動不影響。
-  // 裝置重開機後 t_ms 從 0 重新算，舊樣本要丟掉。
-  const newest = liveSamples[liveSamples.length - 1];
-  if (newest && message.t_ms <= newest.t) liveSamples.length = 0;
-  liveSamples.push({ seq: message.seq, t: message.t_ms });
-  if (liveSamples.length > LIVE_RATE_WINDOW) liveSamples.shift();
-  const first = liveSamples[0];
-  const last = liveSamples[liveSamples.length - 1];
-  if (last.t > first.t && last.seq > first.seq) {
-    liveEl("live-rate").textContent = (((last.seq - first.seq) * 1000) / (last.t - first.t)).toFixed(1);
-  }
 
   renderSaturation(raw);
   renderLiveState();
