@@ -2,7 +2,7 @@
 // CAPTURE-Screen's API layer: the one interface between the hardware pages and the
 // device / storage.
 //
-// Device: CAPTURE-Screen dials into the backend itself (firmware/as7341); pages only ever
+// Device: CAPTURE-Screen dials into the backend itself (firmware/capture_screen); pages only ever
 // talk to the backend:
 //   GET  /api/hardware/status  whether the device is online, and its config
 //   POST /api/hardware/read    takes one measurement, returning the device's raw reading,

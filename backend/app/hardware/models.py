@@ -1,6 +1,6 @@
 """Data contracts between the CAPTURE-Screen firmware, this backend, and the browser.
 
-Field names match the JSON that firmware/as7341/as7341.ino sends and the
+Field names match the JSON that firmware/capture_screen/capture_screen.ino sends and the
 validators in frontend/js/hardware_processing.js. Renaming one means
 changing all three.
 """

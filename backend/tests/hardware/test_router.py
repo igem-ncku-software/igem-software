@@ -58,7 +58,7 @@ def test_status_reflects_the_connected_device():
         body = client.get("/api/hardware/status").json()
 
     assert body["device"]["build_id"] == "P1-PROTO-01"
-    assert body["device"]["config"]["gain"] == 16
+    assert body["device"]["config"]["gain"] == 512
     assert body["last_seen"] is not None
 
 

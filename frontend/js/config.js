@@ -9,7 +9,7 @@
 // If the Render URL ever changes, updating this one line is enough — everywhere that calls
 // the backend (dose_response.js, device_live.js, hardware_api.js, backend_status.js) picks
 // it up automatically. CAPTURE-Screen's own URL needs updating too: BACKEND_HOST in
-// firmware/as7341/as7341.ino.
+// firmware/capture_screen/capture_screen.ino.
 //
 // Must load before every other <script> that uses BACKEND_BASE_URL.
 // =========================================================

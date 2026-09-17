@@ -42,7 +42,7 @@ async def hardware_read() -> dict:
 
 @router.websocket("/device")
 async def hardware_device(websocket: WebSocket) -> None:
-    """The ESP32's own outbound connection (firmware/as7341/as7341.ino).
+    """The ESP32's own outbound connection (firmware/capture_screen/capture_screen.ino).
 
     Device -> server: status, live frames, measurements, errors.
     Server -> device: {"cmd": "live_start"}, {"cmd": "live_stop"},

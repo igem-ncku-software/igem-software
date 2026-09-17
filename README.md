@@ -70,7 +70,7 @@ backend/                      FastAPI
 ├── tests/                    pytest
 └── requirements.txt
 
-firmware/as7341/              CAPTURE-Screen firmware (ESP32 + AS7341 + OLED)
+firmware/capture_screen/      CAPTURE-Screen firmware (ESP32 + AS7341 + OLED)
 scripts/                      install and run scripts (.sh and .ps1 versions)
 docs/dose_response_model_spec.md   implementation spec for the dose-response model
 ```
@@ -201,9 +201,11 @@ This connection currently has no authentication: anyone who knows the URL could 
 ### Flashing the firmware
 
 1. Install ESP32 board support in the Arduino IDE, plus the libraries DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson (7.x), and WebSockets (Markus Sattler). Verified to compile against: ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, ArduinoJson 7.4.3, WebSockets 2.7.2.
-2. Copy `firmware/as7341/secrets.h.example` to `secrets.h` in the same folder, and fill in your Wi-Fi name and password (ESP32 only supports 2.4 GHz). `secrets.h` is already excluded by `.gitignore`.
-3. Open `firmware/as7341/as7341.ino`, select the ESP32 Dev Module board, and flash it.
-4. The OLED showing `Backend: online` means it's connected, and the landing page's Live card will show `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200) — lines starting with `[wifi]` and `[backend]` explain where it's stuck.
+2. Copy `firmware/capture_screen/secrets.h.example` to `secrets.h` in the same folder, and fill in your Wi-Fi name and password (ESP32 only supports 2.4 GHz). `secrets.h` is excluded by `.gitignore`, so the password never gets committed; the sketch refuses to compile without it.
+3. Open `firmware/capture_screen/capture_screen.ino`, select the ESP32 Dev Module board, and flash it.
+4. The OLED idle screen showing `Web  online` means it's connected, and the landing page's Live card will show `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200) — lines starting with `[wifi]` and `[backend]` explain where it's stuck.
+
+The device also works with no network at all: type a sample ID in the Serial Monitor, press the button, and it runs a batch of 5 averaged dark/light readings, printing CSV to Serial and a summary on the OLED (Serial commands are listed in the sketch). A batch and a web measurement can't overlap: a web read during a batch is answered "busy".
 
 The Render free tier sleeps after a period of inactivity and can take tens of seconds to wake up; the device keeps retrying on its own during that time, no need to reflash or restart it.
 

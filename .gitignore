@@ -28,7 +28,7 @@ htmlcov/
 *.key
 *.pem
 secrets.json
-# Firmware Wi-Fi credentials; template is firmware/as7341/secrets.h.example
+# Firmware Wi-Fi credentials; template is firmware/capture_screen/secrets.h.example
 secrets.h
 
 # ===== IDE / editor =====

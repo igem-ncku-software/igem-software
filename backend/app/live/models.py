@@ -1,4 +1,4 @@
-"""The live frame the firmware streams (firmware/as7341/as7341.ino, mode "live").
+"""The live frame the firmware streams (firmware/capture_screen/capture_screen.ino, mode "live").
 
 Field names match that JSON and frontend/js/device_live.js. Renaming one
 means changing all three.
