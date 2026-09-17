@@ -1,20 +1,23 @@
 // =========================================================
-// CAPTURE-Screen 的 API 層：hardware 頁面跟裝置 / 儲存之間唯一的介面。
+// CAPTURE-Screen's API layer: the one interface between the hardware pages and the
+// device / storage.
 //
-// 裝置：CAPTURE-Screen 自己連上後端（firmware/as7341），頁面只跟後端說話：
-//   GET  /api/hardware/status  裝置在不在線、組態
-//   POST /api/hardware/read    量一次，拿回裝置的原始讀值，再由
-//                              js/hardware_processing.js 轉成 Measurement
-// plan / curve / fit / invert：js/hardware_local.js（瀏覽器端的暫代儲存）。
-// 之後後端有了儲存，把那幾個函式換成 fetch 即可，頁面不用改。
+// Device: CAPTURE-Screen dials into the backend itself (firmware/as7341); pages only ever
+// talk to the backend:
+//   GET  /api/hardware/status  whether the device is online, and its config
+//   POST /api/hardware/read    takes one measurement, returning the device's raw reading,
+//                              which js/hardware_processing.js then converts to a Measurement
+// plan / curve / fit / invert: js/hardware_local.js (the browser-side stand-in storage).
+// Once the backend has storage, swapping those functions for fetch calls is enough — pages
+// don't need to change.
 //
-// 進出儲存端都做一次 structuredClone：頁面改到回傳的物件，不會偷偷改到
-// 儲存端的內部狀態。
+// Every value going in or out of storage is structuredClone'd: a page mutating the returned
+// object can never quietly mutate storage's own internal state.
 //
-// 載入順序：config → hardware_processing → hardware_local → 這支
+// Load order: config -> hardware_processing -> hardware_local -> this file
 // =========================================================
 
-// ---- 資料契約（前後端共用，欄位名稱不要改） -------------------------
+// ---- Data contract (shared between frontend and backend — don't rename these fields) -------------------------
 
 /**
  * @typedef {"SATURATED" | "NO_DARK_PAIR" | "HIGH_SCATTER" | "STALE_CONFIG" | "BELOW_LOD" | "ABOVE_RANGE"} QCFlag
@@ -22,14 +25,14 @@
 
 /**
  * @typedef {Object} HardwareConfig
- * @property {string} fingerprint        HardwareProcessing.configFingerprint() 的結果，例如 "a7f21c"
+ * @property {string} fingerprint        Result of HardwareProcessing.configFingerprint(), e.g. "a7f21c"
  * @property {number} led_current_mA
  * @property {number} gain
  * @property {number} atime
  * @property {number} astep
  * @property {string} build_id           "P1-PROTO-01"
  * @property {string} firmware_version
- * @property {string | null} emission_filter  目前為 null，尚未選定
+ * @property {string | null} emission_filter  currently null, not yet chosen
  */
 
 /**
@@ -37,22 +40,22 @@
  * @property {string} sample_id
  * @property {string} timestamp_utc
  * @property {"blank" | "standard" | "unknown"} sample_type
- * @property {number | null} known_concentration_nM  sample_type 為 standard 時才有值
- * @property {number} fluorescence       解混後的 sfGFP 訊號，basic counts
- * @property {number} fluorescence_sd    讀取雜訊的標準差估計（由兩張 dark 估計），basic counts
- * @property {number} scatter            散射分量，干擾指標，basic counts
+ * @property {number | null} known_concentration_nM  only set when sample_type is standard
+ * @property {number} fluorescence       the unmixed sfGFP signal, basic counts
+ * @property {number} fluorescence_sd    estimated standard deviation of read noise (from the two dark frames), basic counts
+ * @property {number} scatter            the scatter component, an interference indicator, basic counts
  * @property {QCFlag[]} flags
  * @property {string} config_fingerprint
- * @property {Record<string, number>} raw  F1..F8, Clear, NIR，dark 扣除後的 basic counts
+ * @property {Record<string, number>} raw  F1..F8, Clear, NIR — dark-subtracted basic counts
  */
 
 /**
  * @typedef {Object} CalibrationPlanItem
- * @property {number} slot               1-based，使用者要依序跑的順序
- * @property {string} label              例如 "100 nM r2"、"blank r1"
+ * @property {number} slot               1-based, the order the user should run them in
+ * @property {string} label              e.g. "100 nM r2", "blank r1"
  * @property {"blank" | "standard"} sample_type
  * @property {number | null} concentration_nM
- * @property {Measurement | null} measurement  尚未量測時為 null
+ * @property {Measurement | null} measurement  null until measured
  */
 
 /**
@@ -60,7 +63,7 @@
  * @property {string} plan_id
  * @property {string} created_at
  * @property {string} config_fingerprint
- * @property {string} timepoint          例如 "t=6h endpoint"
+ * @property {string} timepoint          e.g. "t=6h endpoint"
  * @property {CalibrationPlanItem[]} items
  */
 
@@ -73,7 +76,7 @@
  * @property {number} lod_nM
  * @property {number} loq_nM
  * @property {number} rmse
- * @property {{min: number, max: number}} range_nM  可信的反推範圍
+ * @property {{min: number, max: number}} range_nM  the trusted inversion range
  * @property {{sample_id: string, reason: string}[]} excluded
  * @property {string} config_fingerprint
  * @property {string} timepoint
@@ -89,23 +92,24 @@
  */
 
 /**
- * 解混基底（config/unmix_basis.json）。
+ * Unmixing basis (config/unmix_basis.json).
  * @typedef {Object} UnmixBasis
- * @property {string} version            以 "placeholder" 開頭表示尚未標定
+ * @property {string} version            starting with "placeholder" means it's not calibrated yet
  * @property {string} note
  * @property {"single_channel"} method
  * @property {string} signal_channel
  * @property {string} scatter_channel
  */
 
-// ---- 傳輸層 -----------------------------------------------------------
+// ---- Transport layer -----------------------------------------------------------
 
 const HARDWARE_API_URL = `${BACKEND_BASE_URL}/api/hardware`;
 const HARDWARE_BASIS_URL = "config/unmix_basis.json";
-// 量測本身約 3 秒、後端最多等裝置 10 秒；睡著的 Render 後端被叫醒還要再幾十秒。
+// A measurement itself takes ~3 s, and the backend waits up to 10 s on the device; a sleeping
+// Render backend being woken up can add several more tens of seconds on top of that.
 const HARDWARE_REQUEST_TIMEOUT_MS = 60000;
 
-// 錯誤一律轉成可以直接顯示的訊息，頁面顯示 err.message 即可。
+// Every error is turned into a message that can be shown as-is; pages just display err.message.
 async function hardwareRequest(path, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HARDWARE_REQUEST_TIMEOUT_MS);
@@ -151,7 +155,7 @@ function loadUnmixBasis() {
         return res.json();
       })
       .catch((err) => {
-        hardwareBasisPromise = null; // 下次再試
+        hardwareBasisPromise = null; // retry next time
         throw new Error(`Could not load the unmixing basis (${HARDWARE_BASIS_URL}): ${err.message}`);
       });
   }
@@ -166,11 +170,11 @@ async function hardwareCurrentFingerprint() {
   }
 }
 
-// ---- 對頁面公開的函式 -----------------------------------------------
+// ---- Functions exposed to pages -----------------------------------------------
 
 const HardwareApi = {
   /**
-   * 裝置不在線時丟出錯誤（訊息可直接顯示），頁面一律當作連不上處理。
+   * Throws when the device is offline (with a message that can be shown as-is); pages should treat it as unreachable either way.
    * @returns {Promise<{online: true, last_seen: string, config: HardwareConfig,
    *   device_id: string, state: "IDLE" | "LIVE" | "MEASURING", wifi_rssi: number, uptime_ms: number}>}
    */
@@ -209,7 +213,7 @@ const HardwareApi = {
    * @returns {Promise<Measurement>}
    */
   async readSample(input) {
-    // 先檢查輸入、載入基底：有問題就不要讓裝置白白亮一次 LED。
+    // Check the input and load the basis first: if something's wrong, don't waste a device LED cycle.
     const inputError = HardwareProcessing.validateSampleInput(input);
     if (inputError) throw new Error(inputError);
     const basis = await loadUnmixBasis();
@@ -225,7 +229,7 @@ const HardwareApi = {
   },
 
   /**
-   * plan 綁定裝置目前的組態，所以建立時要先問裝置。
+   * A plan is bound to the device's current config, so the device has to be checked before creating one.
    * @param {{concentrations_nM: number[], replicates: number, blanks: number, timepoint: string}} input
    * @returns {Promise<CalibrationPlan>}
    */
@@ -250,8 +254,8 @@ const HardwareApi = {
   fitCurve: (plan_id, excluded_sample_ids) => hardwareLocalCall(HardwareLocal.fitCurve, plan_id, excluded_sample_ids),
 
   /**
-   * 新擬合的曲線：存檔（excluded 要帶理由）。已存檔的曲線：只切換 is_active。
-   * 設為 active 時會向裝置確認目前組態。
+   * A newly fitted curve: saved (excluded entries need a reason). An already-saved curve: only toggles is_active.
+   * Setting it active confirms the current config against the device.
    * @param {CalibrationCurve} curve @returns {Promise<CalibrationCurve>}
    */
   async saveCurve(curve) {

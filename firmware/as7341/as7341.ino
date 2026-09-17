@@ -1,46 +1,55 @@
 // =========================================================
-// CAPTURE-Screen 韌體（iGEM NCKU-Tainan 2026）
+// CAPTURE-Screen firmware (iGEM NCKU-Tainan 2026)
 //
-// 硬體：ESP32-WROOM-32（DOIT DevKit V1 30-pin）
-//       AS7341 光譜感測器（DFRobot SEN0365），I2C 於 GPIO 21 / 22
-//       SSD1306 OLED 128×64，I2C 位址 0x3C
-//       470 nm 激發 LED，GPIO 2 經 2N7000 低側開關
-//       按鈕 GPIO 13（INPUT_PULLUP）
+// Hardware: ESP32-WROOM-32 (DOIT DevKit V1 30-pin)
+//           AS7341 spectral sensor (DFRobot SEN0365), I2C on GPIO 21 / 22
+//           SSD1306 OLED 128x64, I2C address 0x3C
+//           470 nm excitation LED, GPIO 2 through a 2N7000 low-side switch
+//           Button on GPIO 13 (INPUT_PULLUP)
 //
-// 通電、連上 Wi-Fi 之後，裝置自己連出去後端的 WebSocket
+// After power-on and joining Wi-Fi, the device dials out to the backend's WebSocket
 //   wss://<BACKEND_HOST>/api/hardware/device
-// 並一直保持連線（斷了會自動重連）。後端在 Render 上，連不進家用或實驗室的
-// 路由器，所以一定是裝置主動連出去；網頁上的即時光譜、量測、校正都走這一條。
+// and keeps that connection open (reconnecting automatically if it drops). The backend
+// runs on Render and can't reach a router behind a home or lab network, so the device
+// always has to be the one connecting out; the live spectrum, measurement, and
+// calibration on the web pages all go through this one connection.
 //
-// 裝置只負責「讀」，不做任何運算——暗值扣除、正規化、解混都在網頁端
-// （frontend/js/hardware_processing.js）。
+// The device only "reads" — it does no computation. Dark subtraction, normalization,
+// and unmixing all happen on the web side (frontend/js/hardware_processing.js).
 //
-// 裝置 → 後端
-//   {"mode":"status", ...}       連上時、狀態改變時，之後每 5 秒一次
-//   {"mode":"live", ...}         有人開著即時光譜時一幀接一幀送出（約每秒一幀）
-//   {"mode":"measurement", ...}  收到 read 後的三段式量測 dark_1 → light → dark_2（約 3 秒）
-//   {"mode":"error", ...}        指令無法執行（busy）
-// 後端 → 裝置
-//   {"cmd":"live_start"} / {"cmd":"live_stop"}   有沒有人在看即時光譜
-//   {"cmd":"read","request_id":"..."}             量一次
+// Device -> backend
+//   {"mode":"status", ...}       on connect, on any state change, then every 5 s
+//   {"mode":"live", ...}         one frame after another while someone has the live
+//                                spectrum open (about one frame per second)
+//   {"mode":"measurement", ...}  the three-part dark_1 -> light -> dark_2 measurement
+//                                after a read command (about 3 s)
+//   {"mode":"error", ...}        the command couldn't run (busy)
+// Backend -> device
+//   {"cmd":"live_start"} / {"cmd":"live_stop"}   whether anyone is watching the live spectrum
+//   {"cmd":"read","request_id":"..."}             take one measurement
 //
-// 狀態機：IDLE / LIVE / MEASURING。LED 只在有人看即時光譜或量測的那一刻亮：
-// 一直亮著會加熱、漂白 cuvette 裡的樣品。量測會暫停串流（LED 常亮會污染暗讀），
-// 量完只要還有人在看就自動恢復。與後端斷線時一律關 LED。
+// State machine: IDLE / LIVE / MEASURING. The LED is only lit while someone is watching
+// the live spectrum or a measurement is running: leaving it on would heat and bleach the
+// sample in the cuvette. A measurement pauses streaming (a lit LED would contaminate the
+// dark reads) and resumes automatically afterward as long as someone is still watching.
+// The LED is always turned off when disconnected from the backend.
 //
-// 全部工作都在 loop() 裡：WebSocketsClient 的事件回呼也是從 ws.loop() 裡呼叫，
-// 不會跟 loop() 同時執行，所以不需要 mutex。回呼只登記指令，量測在 loop() 做。
+// Everything runs inside loop(): WebSocketsClient's event callbacks also fire from within
+// ws.loop(), so they never run concurrently with loop(), which means no mutex is needed.
+// Callbacks only record commands; the actual measuring happens in loop().
 //
-// secrets.h（不進版控，從 secrets.h.example 複製）放 Wi-Fi 認證；要接本機後端時
-// 也在那裡覆寫 BACKEND_HOST / BACKEND_PORT / BACKEND_USE_TLS。
-// 目前這條連線沒有身份驗證：知道網址的人都能冒充裝置。
+// secrets.h (not committed, copied from secrets.h.example) holds the Wi-Fi credentials;
+// to point at a local backend, also override BACKEND_HOST / BACKEND_PORT / BACKEND_USE_TLS
+// there. This connection currently has no authentication: anyone who knows the URL can
+// impersonate the device.
 //
-// 需要的函式庫：DFRobot_AS7341、Adafruit SSD1306、Adafruit GFX、ArduinoJson 7、
-// WebSockets（Markus Sattler / Links2004，Library Manager 搜尋 "WebSockets"）。
-// 已用 ESP32 開發板 3.3.8、DFRobot_AS7341 1.0.0、Adafruit SSD1306 2.5.17、
-// Adafruit GFX 1.12.6、ArduinoJson 7.4.3、WebSockets 2.7.2 實際編譯通過。
+// Required libraries: DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson 7,
+// WebSockets (Markus Sattler / Links2004 — search "WebSockets" in the Library Manager).
+// Verified to compile against ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17,
+// Adafruit GFX 1.12.6, ArduinoJson 7.4.3, WebSockets 2.7.2.
 //
-// Serial Monitor（115200）會印出 [wifi] / [backend] 連線狀況，連不上時先看這裡。
+// The Serial Monitor (115200) prints [wifi] / [backend] connection status — check there first
+// if the device won't connect.
 // =========================================================
 
 #include <Wire.h>
@@ -53,7 +62,7 @@
 
 #include "secrets.h"
 
-// --- 0. 後端位置：預設是 Render 上的正式後端，secrets.h 可以覆寫 ---
+// --- 0. Backend location: defaults to the production backend on Render, secrets.h can override it ---
 #ifndef BACKEND_HOST
 #define BACKEND_HOST "igem-ncku-software.onrender.com"
 #endif
@@ -65,41 +74,42 @@
 #endif
 #define BACKEND_PATH "/api/hardware/device"
 
-// --- 1. 裝置常數：原樣放進每一則 status / measurement ---
+// --- 1. Device constants: dropped as-is into every status / measurement message ---
 #define DEVICE_ID        "capture-screen-p1"
 #define BUILD_ID         "P1-PROTO-01"
 #define FIRMWARE_VERSION "0.3.0"
-#define LED_CURRENT_MA   5.553f   // 以三用電表量測，韌體無法自行讀取
+#define LED_CURRENT_MA   5.553f   // measured with a multimeter; firmware can't read this itself
 
-// --- 2. 感測器設定：一定要明確設定，不能用函式庫預設值 ---
-// gain / atime / astep 會進入網頁端的正規化與 config fingerprint，
-// 改這裡的值，status 與 measurement 回報的值會跟著變。
-const uint8_t  AS7341_AGAIN = 16;   // 16×，回報給網頁端的倍率
-// DFRobot 的 setAGAIN() 收的是暫存器索引不是倍率：
-// 0..10 對應 0.5×, 1×, 2×, 4×, 8×, 16×, 32×, 64×, 128×, 256×, 512×。
-// 改 AS7341_AGAIN 時這個索引要一起改。
+// --- 2. Sensor settings: must be set explicitly, never rely on the library defaults ---
+// gain / atime / astep feed into the web side's normalization and config fingerprint,
+// so changing the values here changes what status and measurement report.
+const uint8_t  AS7341_AGAIN = 16;   // 16x, the multiplier reported to the web side
+// DFRobot's setAGAIN() takes a register index, not the multiplier itself:
+// 0..10 map to 0.5x, 1x, 2x, 4x, 8x, 16x, 32x, 64x, 128x, 256x, 512x.
+// Update this index whenever AS7341_AGAIN changes.
 const uint8_t  AS7341_AGAIN_REGISTER = 5;
 const uint8_t  AS7341_ATIME = 29;
 const uint16_t AS7341_ASTEP = 599;
 
-// --- 3. 腳位 ---
+// --- 3. Pins ---
 const int LED_PIN    = 2;
 const int BUTTON_PIN = 13;
 const int I2C_SDA    = 21;
 const int I2C_SCL    = 22;
 
-// --- 4. 時序 ---
-// DFRobot_AS7341 讀每個通道都會等約 60 ms：讀一次十通道約 1 秒，一次量測（讀三次）約 3 秒。
-// 這段時間 loop() 是卡住的，下面的間隔與逾時都以此為準。
-const unsigned long DARK_SETTLE_MS      = 50;     // LED 關閉後等待
-const unsigned long LIGHT_SETTLE_MS     = 100;    // LED 開啟後等待穩定
-const unsigned long LIVE_INTERVAL_MS    = 200;    // 兩幀之間至少留給 ws.loop() 與按鈕的時間
-const unsigned long STATUS_INTERVAL_MS  = 5000;   // 狀態心跳；後端 15 秒沒收到就當離線
+// --- 4. Timing ---
+// DFRobot_AS7341 waits ~60 ms per channel read: one ten-channel read takes ~1 s, and one
+// measurement (three reads) takes ~3 s. loop() is blocked the whole time, so the intervals
+// and timeouts below are all sized around that.
+const unsigned long DARK_SETTLE_MS      = 50;     // wait after turning the LED off
+const unsigned long LIGHT_SETTLE_MS     = 100;    // wait for the LED to stabilize after turning on
+const unsigned long LIVE_INTERVAL_MS    = 200;    // leaves ws.loop() and the button time between frames
+const unsigned long STATUS_INTERVAL_MS  = 5000;   // status heartbeat; backend treats 15 s silence as offline
 const unsigned long RECONNECT_MS        = 5000;
-const unsigned long WS_PING_INTERVAL_MS = 15000;  // 偵測「斷了卻沒收到通知」的連線
-const unsigned long WS_PONG_TIMEOUT_MS  = 10000;  // 量測期間 pong 可能晚 3 秒以上才被處理
+const unsigned long WS_PING_INTERVAL_MS = 15000;  // detects a connection that dropped without notice
+const unsigned long WS_PONG_TIMEOUT_MS  = 10000;  // a pong during a measurement may be handled 3+ s late
 const uint8_t       WS_MISSED_PONGS     = 2;
-const unsigned long WAITING_LOG_MS      = 10000;  // 連不上後端時，多久在 Serial 印一次
+const unsigned long WAITING_LOG_MS      = 10000;  // how often to log to Serial while unable to reach the backend
 const unsigned long DEBOUNCE_MS         = 50;
 
 #define SCREEN_WIDTH 128
@@ -110,13 +120,13 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 DFRobot_AS7341 as7341;
 WebSocketsClient ws;
 
-// --- 5. 狀態 ---
+// --- 5. State ---
 enum DeviceState { STATE_IDLE, STATE_LIVE, STATE_MEASURING };
 
 DeviceState state = STATE_IDLE;
 bool backendConnected = false;
-bool liveWanted = false;        // 後端說有人開著即時光譜
-bool readPending = false;       // 收到 read，還沒量
+bool liveWanted = false;        // backend says someone has the live spectrum open
+bool readPending = false;       // a read arrived and hasn't been taken yet
 char readRequestId[40] = "";
 
 uint32_t liveSeq = 0;
@@ -147,12 +157,12 @@ const char* stateName(DeviceState s) {
 }
 
 // =========================================================
-// 感測器
+// Sensor
 // =========================================================
 
-// 讀一次完整十通道：兩段 SMUX（沿用原本的讀取邏輯）。
-// 第一段給 F1–F4 與 Clear / NIR；第二段給 F5–F8，它另外附的 Clear / NIR
-// 記在 mode2，量測序列會把它回傳為 clear_nir_mode2。
+// Reads one full set of ten channels: two SMUX passes (same read logic as before).
+// The first pass gives F1-F4 plus Clear / NIR; the second gives F5-F8, whose own
+// Clear / NIR is recorded as mode2 — the measurement sequence returns it as clear_nir_mode2.
 void readTenChannels(SpectralFrame &frame, ClearNir &mode2) {
   as7341.startMeasure(as7341.eF1F4ClearNIR);
   DFRobot_AS7341::sModeOneData_t data1 = as7341.readSpectralDataOne();
@@ -192,7 +202,7 @@ void runMeasurementSequence(MeasurementResult &result) {
   result.readTimeMs = millis() - start;
 }
 
-// Serial Plotter 格式（沿用原本的輸出），USB 接電腦時方便除錯。
+// Serial Plotter format (same output as before), handy for debugging over USB.
 void printFrameSerial(const SpectralFrame &f) {
   Serial.print("F1:"); Serial.print(f.f1); Serial.print(",");
   Serial.print("F2:"); Serial.print(f.f2); Serial.print(",");
@@ -210,7 +220,7 @@ void printFrameSerial(const SpectralFrame &f) {
 // OLED
 // =========================================================
 
-// 讀值畫面：左右雙欄排版（沿用原本的排版）。
+// Reading screen: two-column layout (same layout as before).
 void showFrame(const SpectralFrame &f) {
   display.clearDisplay();
   display.setTextSize(1);
@@ -241,7 +251,8 @@ void showMessage(const char* line1, const char* line2) {
   display.display();
 }
 
-// 待機畫面：Wi-Fi 與後端連線狀態，裝置沒出現在網頁上時先看這裡。
+// Idle screen: Wi-Fi and backend connection status — check here first if the device
+// doesn't show up on the web page.
 void showIdleScreen() {
   display.clearDisplay();
   display.setTextSize(1);
@@ -262,7 +273,8 @@ void showIdleScreen() {
   display.display();
 }
 
-// 連線狀態改變時才重畫待機畫面，按鈕量測的結果才不會一下就被蓋掉。
+// Only redraws the idle screen when connection status changes, so a button measurement's
+// result isn't immediately overwritten.
 void refreshIdleScreen() {
   static bool shownWifi = false;
   static bool shownBackend = false;
@@ -274,7 +286,7 @@ void refreshIdleScreen() {
 }
 
 // =========================================================
-// 對後端的訊息
+// Messages to the backend
 // =========================================================
 
 void addIdentity(JsonDocument &doc) {
@@ -284,7 +296,8 @@ void addIdentity(JsonDocument &doc) {
 }
 
 void addConfig(JsonObject config) {
-  // 固定 3 位小數：float 直接序列化會變成 5.5529999…，網頁端算 fingerprint 會對不上。
+  // Fixed at 3 decimal places: serializing the float directly gives 5.5529999...,
+  // which would make the web side's fingerprint calculation mismatch.
   config["led_current_mA"] = serialized(String(LED_CURRENT_MA, 3));
   config["gain"] = AS7341_AGAIN;
   config["atime"] = AS7341_ATIME;
@@ -339,7 +352,7 @@ void setState(DeviceState next) {
 }
 
 // =========================================================
-// 後端的指令（在 ws.loop() 裡被呼叫：只登記，不量測）
+// Commands from the backend (called from within ws.loop(): only record, never measure here)
 // =========================================================
 
 void handleCommand(uint8_t *payload, size_t length) {
@@ -372,8 +385,8 @@ void onBackendEvent(WStype_t type, uint8_t *payload, size_t length) {
     case WStype_DISCONNECTED:
       if (backendConnected) Serial.println("[backend] disconnected, reconnecting");
       backendConnected = false;
-      liveWanted = false;   // 沒有後端就沒有人在看：LED 不能因此一直亮著
-      readPending = false;  // 後端已經放棄這次讀取
+      liveWanted = false;   // no backend means no one is watching: the LED can't stay on for that
+      readPending = false;  // the backend has already given up on this read
       break;
     case WStype_ERROR:
       Serial.print("[backend] error ");
@@ -388,7 +401,8 @@ void onBackendEvent(WStype_t type, uint8_t *payload, size_t length) {
   }
 }
 
-// 一直連不上後端時（Wi-Fi 密碼、網址、TLS、後端睡著），定期在 Serial 說明狀況。
+// Logs to Serial periodically while stuck unable to reach the backend
+// (Wi-Fi password, URL, TLS, or the backend being asleep).
 void logWhileWaitingForBackend() {
   static unsigned long lastLogMs = 0;
   if (backendConnected || millis() - lastLogMs < WAITING_LOG_MS) return;
@@ -398,10 +412,10 @@ void logWhileWaitingForBackend() {
 }
 
 // =========================================================
-// loop() 端的工作
+// Work done in loop()
 // =========================================================
 
-// 量一次。requestId 為 nullptr 表示按鈕觸發，結果只顯示在 OLED。
+// Takes one measurement. requestId is nullptr for a button trigger, whose result is only shown on the OLED.
 void measure(const char *requestId) {
   digitalWrite(LED_PIN, LOW);
   setState(STATE_MEASURING);
@@ -428,11 +442,12 @@ void measure(const char *requestId) {
   }
 
   printFrameSerial(result.light);
-  setState(STATE_IDLE);  // 還有人在看的話，下一輪 syncLive() 會恢復串流
+  setState(STATE_IDLE);  // if someone is still watching, the next syncLive() resumes streaming
   if (!requestId) showFrame(result.light);
 }
 
-// 串流開不開只看兩件事：有沒有人在看、現在是不是在量測。
+// Whether streaming runs depends on just two things: whether anyone is watching, and
+// whether a measurement is in progress.
 void syncLive() {
   bool shouldStream = backendConnected && liveWanted && state != STATE_MEASURING;
   if (shouldStream && state == STATE_IDLE) {
@@ -466,13 +481,13 @@ void streamLiveFrame() {
   showFrame(frame);
 }
 
-// 按鈕短按：在裝置上量一次，結果只顯示在 OLED，不送出去。
+// Button tap: takes one measurement on the device, result shown only on the OLED, never sent out.
 void onButtonPress() {
   if (state == STATE_MEASURING || readPending) return;
   measure(nullptr);
 }
 
-// 非阻塞防彈跳：按下的邊緣觸發一次。
+// Non-blocking debounce: fires once on the press edge.
 void handleButton() {
   static bool lastRaw = false;
   static bool stablePressed = false;
@@ -492,7 +507,7 @@ void handleButton() {
 // =========================================================
 
 void setup() {
-  // 開機安全：最早就把激發 LED 關掉。
+  // Boot safety: turn off the excitation LED as early as possible.
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -513,7 +528,7 @@ void setup() {
   showMessage("Connecting Wi-Fi...", WIFI_SSID);
   Serial.printf("[wifi] connecting to %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);  // 省電模式會讓串流延遲、更新率掉下來
+  WiFi.setSleep(false);  // power-save mode would add streaming latency and lower the update rate
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
@@ -522,8 +537,9 @@ void setup() {
   Serial.print("[wifi] connected, IP ");
   Serial.println(WiFi.localIP());
 
-  // TLS 沒有釘憑證：WebSockets 2.7.2 在 ESP32 上沒給 CA 時會呼叫 setInsecure() 略過驗證。
-  // 之後要驗證憑證，改用 ws.beginSslWithCA() 帶入 Render 的根憑證。
+  // TLS has no pinned certificate: WebSockets 2.7.2 on ESP32 calls setInsecure() to skip
+  // validation when no CA is given. To validate the certificate later, switch to
+  // ws.beginSslWithCA() with Render's root certificate.
 #if BACKEND_USE_TLS
   ws.beginSSL(BACKEND_HOST, BACKEND_PORT, BACKEND_PATH);
 #else

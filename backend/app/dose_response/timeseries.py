@@ -31,8 +31,8 @@ class TimeSigmoidFit:
 
 def aggregate_by_condition(normalized: pd.DataFrame, strain: str, concentration_M: float) -> pd.DataFrame:
     """Per-time_h mean/SD/n of F across replicates for one strain x concentration
-    (spec §5.1's closing note: "之後每個 (strain, conc, t) 對 replicate 取 mean
-    ± SD"). OD-gated NaN F rows are excluded by pandas' default skipna
+    (spec §5.1's closing note: "each (strain, conc, t) triple then takes mean
+    ± SD across replicates"). OD-gated NaN F rows are excluded by pandas' default skipna
     mean/std/count, not filtered explicitly here.
     """
     subset = normalized[(normalized["strain"] == strain) & (normalized["concentration_M"] == concentration_M)]

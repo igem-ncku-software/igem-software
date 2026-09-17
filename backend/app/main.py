@@ -13,7 +13,7 @@ app = FastAPI(
     version="1.3.0",
 )
 
-# CORS 來源清單統一從 app/config.py 讀取（可由 .env 覆寫）
+# CORS origin list is centralized in app/config.py (overridable via .env)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 
-# AHL dose-response 分析 API
+# AHL dose-response analysis API
 app.include_router(dose_response_router)
 app.include_router(hardware_router)
 app.include_router(live_router)
@@ -31,7 +31,7 @@ app.include_router(live_router)
 
 @app.get("/")
 def root() -> dict:
-    """API 根目錄，順便列出目前有哪些 endpoint 可以測試。"""
+    """API root; also lists which endpoints are currently available to try."""
     return {
         "message": "LasReader API is running.",
         "docs": "/docs",
@@ -47,17 +47,17 @@ def root() -> dict:
 
 @app.get("/health")
 def health_check() -> dict:
-    """給前端與 Render 用來檢查後端是否正常運作。"""
+    """Used by the frontend and Render to check whether the backend is healthy."""
     return {"status": "ok", "service": "LasReader API"}
 
 
-# 本機測試：
-# 1. 進入 backend 資料夾
-# 2. 執行 uvicorn app.main:app --reload
+# Local testing:
+# 1. cd into the backend folder
+# 2. Run uvicorn app.main:app --reload
 #
-# 注意：因為 main.py 現在是 app 這個套件裡的模組，
-# 不能再直接用 `python main.py` 或 `uvicorn main:app` 執行，
-# 一律要用 `app.main:app` 這個路徑。
+# Note: because main.py is now a module inside the app package,
+# it can no longer be run directly with `python main.py` or `uvicorn main:app` —
+# always use the `app.main:app` path.
 if __name__ == "__main__":
     import uvicorn
 

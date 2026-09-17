@@ -4,7 +4,7 @@ python-multipart
 uvicorn
 pytest
 httpx
-# uvicorn 沒有它就無法處理任何 WebSocket（/api/hardware/live 與 /api/hardware/device）
+# uvicorn can't serve any WebSocket without it (/api/hardware/live and /api/hardware/device)
 websockets
 python-dotenv
 numpy

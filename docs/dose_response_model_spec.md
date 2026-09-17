@@ -1,36 +1,36 @@
-# Dose-Response Model — 實作規格 (Spec for Claude Code)
+# Dose-Response Model — Implementation Spec (Spec for Claude Code)
 
-**專案**：E. coli LasR–AHL 生物感測器對 3-oxo-C12-HSL 的劑量反應定量
-**對應實驗**：`[E. coli-LasR-AHL][Time-Course AHL Dose-Response Fluorescence] design v.1 (20260809)`
-**目標讀者**：實作者（人 or Claude Code）。本文件把數學、資料格式、模組結構、測試都定死，實作時照著做即可。
+**Project**: Dose-response quantification of the E. coli LasR-AHL biosensor's response to 3-oxo-C12-HSL
+**Corresponding experiment**: `[E. coli-LasR-AHL][Time-Course AHL Dose-Response Fluorescence] design v.1 (20260809)`
+**Intended audience**: whoever implements this (a person or Claude Code). This document pins down the math, data format, module structure, and tests — implementation just needs to follow it.
 
-> 假設：以 **Python** 實作（numpy / pandas / scipy / lmfit / matplotlib）。若你的軟體是別的 stack（R、JS、或要嵌進既有大專案），把「模組結構」那節換成對應寫法即可，數學與流程不變。
-
----
-
-## 0. 這個模組要回答的問題
-
-給定一組 kinetic plate reader 數據（RFU + OD600 隨時間，多個 AHL 濃度、多株菌），輸出：
-
-1. **每株菌的 dose-response 曲線**：EC50、Hill 係數 n、dynamic range、fold-change（含 95% CI）。
-2. **每條曲線的時間動力學**：onset time、response rate、plateau。
-3. **偵測極限 LOD / LOQ**（以 nM 表示）。
-4. **診斷判斷**：這株菌對 AHL 到底有沒有反應（平坦檢定）。
-5. QC 報告（生長抑制、DMSO 效應、replicate 變異）。
-
-**設計原則**：把純數學（Hill、logistic）跟資料處理分開，前者要能單獨用合成數據做單元測試。
+> Assumption: implemented in **Python** (numpy / pandas / scipy / lmfit / matplotlib). If your stack is different (R, JS, or embedding into an existing larger project), just swap the "module structure" section for the equivalent — the math and workflow stay the same.
 
 ---
 
-## 1. 實驗結構（程式要知道的形狀）
+## 0. What this module needs to answer
 
-- **AHL 濃度**（3-oxo-C12-HSL）：`0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5` M（即 0、1、10、100 nM、1、10 µM），DMSO 終濃度全盤固定 0.5%。
-- **菌株**：TOP10、DH5α、BL21（三株比較，挑最佳 chassis）。
-- **讀值**：kinetic，OD600 + GFP（Ex/Em ≈ 485/510 nm），每 1 小時一次，共 6–8 小時或到 plateau。
-- **重複**：每組 n ≥ 3。
-- **Plate map（design v.1）**：列 = 濃度、欄 = 菌株。
+Given a set of kinetic plate reader data (RFU + OD600 over time, across multiple AHL concentrations and strains), output:
 
-| Row | 內容 | Col 1–3 | Col 4–6 | Col 7–9 |
+1. **Each strain's dose-response curve**: EC50, Hill coefficient n, dynamic range, fold-change (with 95% CI).
+2. **Each curve's time-course kinetics**: onset time, response rate, plateau.
+3. **Detection limits LOD / LOQ** (in nM).
+4. **Diagnostic call**: whether this strain responds to AHL at all (the flatness test).
+5. QC report (growth inhibition, DMSO effects, replicate variability).
+
+**Design principle**: keep the pure math (Hill, logistic) separate from data handling, so the former can be unit-tested against synthetic data alone.
+
+---
+
+## 1. Experiment structure (the shape the code needs to know)
+
+- **AHL concentration** (3-oxo-C12-HSL): `0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5` M (i.e. 0, 1, 10, 100 nM, 1, 10 µM); final DMSO concentration is fixed at 0.5% across the whole plate.
+- **Strains**: TOP10, DH5α, BL21 (compared against each other to pick the best chassis).
+- **Readings**: kinetic, OD600 + GFP (Ex/Em ≈ 485/510 nm), once per hour, for 6-8 hours or until plateau.
+- **Replicates**: n ≥ 3 per condition.
+- **Plate map (design v.1)**: row = concentration, column = strain.
+
+| Row | Contents | Col 1–3 | Col 4–6 | Col 7–9 |
 |-----|------|---------|---------|---------|
 | A | 0 nM (DMSO only, neg ctrl) | TOP10 | DH5α | BL21 |
 | B | 1 nM | TOP10 | DH5α | BL21 |
@@ -38,179 +38,179 @@
 | D | 100 nM | TOP10 | DH5α | BL21 |
 | E | 1 µM | TOP10 | DH5α | BL21 |
 | F | 10 µM | TOP10 | DH5α | BL21 |
-| G | Blank（培養基+DMSO，無菌液） | TOP10-well | DH5α-well | BL21-well |
+| G | Blank (media + DMSO, no cells) | TOP10-well | DH5α-well | BL21-well |
 | H | Positive control (H1–3) | — | — | — |
 
-> Plate map 不要寫死在程式裡，放進 config（見 §7），因為之後盤面會改。
+> Don't hardcode the plate map in the code — put it in config (see §7), since the layout will change later.
 
 ---
 
-## 2. 推薦技術棧
+## 2. Recommended tech stack
 
-| 用途 | 套件 |
+| Purpose | Package |
 |------|------|
-| 數值/資料 | `numpy`, `pandas` |
-| 擬合 + 參數信賴區間 | `lmfit`（首選，`conf_interval()` 直接給 CI）；退而求其次 `scipy.optimize.curve_fit` + bootstrap |
-| 統計檢定 | `scipy.stats`（Welch t-test、F-test） |
-| 繪圖 | `matplotlib` |
-| 設定檔 | `pyyaml` |
-| 測試 | `pytest` |
+| Numerics/data | `numpy`, `pandas` |
+| Fitting + parameter CIs | `lmfit` (preferred — `conf_interval()` gives a CI directly); fallback `scipy.optimize.curve_fit` + bootstrap |
+| Statistical tests | `scipy.stats` (Welch t-test, F-test) |
+| Plotting | `matplotlib` |
+| Config file | `pyyaml` |
+| Testing | `pytest` |
 
 ---
 
-## 3. 模組結構
+## 3. Module structure
 
 ```
 dose_response/
 ├── config/
-│   ├── experiment.yaml        # 濃度、plate map、Ex/Em、閾值
-│   └── plate_map.csv          # 或直接寫在 yaml 裡
-├── data/raw/                  # reader 匯出的原始檔
+│   ├── experiment.yaml        # concentrations, plate map, Ex/Em, thresholds
+│   └── plate_map.csv          # or written directly into the yaml
+├── data/raw/                  # raw files exported by the reader
 ├── src/dose_response/
 │   ├── __init__.py
-│   ├── models.py              # 純數學：hill(), logistic_time(), 反函式 — 可單獨測試
+│   ├── models.py              # pure math: hill(), logistic_time(), inverse functions — testable on their own
 │   ├── io.py                  # load_reader_export(), load_plate_map(), to_tidy()
 │   ├── normalize.py           # blank_subtract(), normalize_fluorescence()
 │   ├── timeseries.py          # onset_time(), response_rate(), plateau(), fit_time_sigmoid()
 │   ├── doseresponse.py        # fit_hill(), ec50_with_ci(), flatness_test(), lod_loq()
 │   ├── qc.py                  # growth_check(), cv_check(), dmso_check()
-│   ├── plots.py               # 三張標準圖
-│   └── pipeline.py            # 串起 end-to-end
+│   ├── plots.py               # the three standard plots
+│   └── pipeline.py            # chains everything together end-to-end
 ├── tests/
-│   ├── test_models.py         # ★ 合成數據還原已知 EC50
+│   ├── test_models.py         # ★ recovers a known EC50 from synthetic data
 │   ├── test_normalize.py
 │   └── test_doseresponse.py
-├── scripts/run_analysis.py    # CLI 入口
-└── outputs/                   # 產出的表與圖
+├── scripts/run_analysis.py    # CLI entry point
+└── outputs/                   # generated tables and plots
 ```
 
 ---
 
-## 4. 資料格式
+## 4. Data format
 
-### 4.1 內部標準格式（tidy long）
-所有下游函式都吃這張表：
+### 4.1 Internal standard format (tidy long)
+Every downstream function consumes this table:
 
-| 欄位 | 型別 | 說明 |
+| Column | Type | Description |
 |------|------|------|
 | `strain` | str | TOP10 / DH5α / BL21 |
-| `concentration_M` | float | AHL 莫耳濃度；0 保留為 0 |
-| `replicate` | int | 重複編號 |
-| `time_h` | float | 讀值時間（小時） |
-| `RFU` | float | 原始螢光 |
-| `OD600` | float | 原始 OD |
+| `concentration_M` | float | AHL molar concentration; 0 is kept as 0 |
+| `replicate` | int | replicate number |
+| `time_h` | float | reading time (hours) |
+| `RFU` | float | raw fluorescence |
+| `OD600` | float | raw OD |
 | `well` | str | e.g. "A1" |
 | `role` | str | sample / blank / positive |
 
-### 4.2 輸入來源
-`load_reader_export()` 要能吃 SpectraMax M2/M2e 的匯出（通常是每個時間點一張 8×12 矩陣，OD 與 RFU 分開）。**寫成 adapter 模式**：一個 parser 對一種匯出格式，回傳統一的 tidy 表；未來換機器只加 parser。
+### 4.2 Input source
+`load_reader_export()` needs to consume a SpectraMax M2/M2e export (usually one 8x12 matrix per timepoint, OD and RFU separate). **Write it as an adapter pattern**: one parser per export format, all returning the same tidy table; supporting a different instrument later just means adding a parser.
 
-> 目前團隊用 `iGEM wet 實驗數據.xlsb` 手動整理，這個模組要能取代那步：直接吃原始匯出 → tidy → 分析。
+> The team currently curates data by hand in a spreadsheet (`iGEM-wet-lab-data.xlsb`); this module should replace that step: raw export -> tidy -> analysis, directly.
 
 ---
 
-## 5. 數學核心（`models.py` + 各步驟）
+## 5. Math core (`models.py` + each step)
 
-### 5.1 正規化
-對每個 well `w`、時間 `t`：
+### 5.1 Normalization
+For every well `w` and time `t`:
 
 ```
-OD_corr(w,t)  = OD600(w,t) − OD_blank(t)          # blank = G 列（無菌液），取同時間點均值
+OD_corr(w,t)  = OD600(w,t) − OD_blank(t)          # blank = row G (no cells), averaged at the same timepoint
 RFU_corr(w,t) = RFU(w,t)   − RFU_blank(t)
-F(w,t)        = RFU_corr(w,t) / OD_corr(w,t)       # 若 OD_corr < OD_min 則設 NaN（gating）
+F(w,t)        = RFU_corr(w,t) / OD_corr(w,t)       # set to NaN if OD_corr < OD_min (gating)
 ```
 
-`OD_min` 建議 0.02（放 config）。之後每個 (strain, conc, t) 對 replicate 取 mean ± SD。
+`OD_min` is suggested at 0.02 (put it in config). Each (strain, conc, t) triple then takes mean ± SD across replicates.
 
-> **決定（§10 item 3，實作 `normalize.py` 時）**：`F(w,t)` 算出負值時**不做任何截斷**，原始負值直接保留傳給下游。原因：負值只出現在早期低訊號時間點（背景 > 訊號的雜訊區間；模擬資料集中在 t=0–2h，t≥3h 後全部轉正），不影響 plateau 或後續 EC50 擬合；若歸零會系統性墊高低劑量組（尤其 0 nM 對照）的平均值，污染 §5.4 平坦檢定與 §5.5 LOD/LOQ 的基線估計。之後畫圖（§6）如果想要非負的視覺呈現，只能在畫圖時把 y 軸下限夾在 0，不能改動 `tidy_normalized.csv` 裡的原始數據。**這是預期行為，不是 bug**，之後看到負的 F 不要直接當成錯誤去「修」。
+> **Decision (§10 item 3, made while implementing `normalize.py`)**: when `F(w,t)` comes out negative, **it is not clamped at all** — the raw negative value is passed downstream as-is. Reason: negative values only show up at early, low-signal timepoints (a noise regime where background > signal; in the synthetic dataset this is concentrated at t=0–2h, and everything turns positive by t≥3h), and they don't affect the plateau or the downstream EC50 fit. Zeroing them would systematically inflate the mean of the low-dose groups (especially the 0 nM control), contaminating the baseline estimates used by the §5.4 flatness test and the §5.5 LOD/LOQ. If a non-negative visual is wanted later when plotting (§6), the y-axis lower bound can be clamped to 0 at plot time only — the raw data in `tidy_normalized.csv` must not be altered. **This is expected behavior, not a bug**; don't treat a negative F you see later as an error to "fix".
 
-### 5.2 時間動力學指標（每條 strain×conc 曲線）
-**主方法：擬時間 logistic**
+### 5.2 Time-course kinetics metrics (per strain x concentration curve)
+**Primary method: fit a time-course logistic**
 
 ```
 F(t) = F0 + (Fmax − F0) / (1 + exp(−r · (t − t0)))
 ```
 
 - `plateau = Fmax`
-- `rate    = r · (Fmax − F0) / 4`（logistic 最大斜率）
+- `rate    = r · (Fmax − F0) / 4` (the logistic's maximum slope)
 - `t_half  = t0`
 
-> **實作發現（§10 item 4，`timeseries.py`）**：0 nM / 低劑量的曲線在整個 8 小時觀測窗內都還在爬升（因為 §5.1 記錄的「早期背景>訊號」現象，F 從很負一路升到觀測窗結束都還沒看到平坦的下段），這種形狀會讓 logistic 的 `f0`/`t0` 變成不可識別（non-identifiable）——`curve_fit` 不會報錯，但在這份模擬資料上實際擬出 `t0≈-13h`、`f0≈-2,000,000`（8 小時的實驗！），套進 `rate=r·(Fmax−F0)/4` 直接爆成 30 萬等級的離譜數字。對策：擬合後多檢查一次 `t0` 有沒有落在觀測時間窗外一定範圍（目前用窗寬的 50% 當容忍度），超出就視同「未收斂」，改用 fallback 公式。`plateau`（Fmax）本身在這些情況下其實還算合理（末端有看到轉緩），問題只出在 `f0`/`t0`/`rate`。
+> **Implementation finding (§10 item 4, `timeseries.py`)**: the 0 nM / low-dose curves are still climbing across the entire 8-hour observation window (because of the "early background > signal" effect noted in §5.1 — F rises from deeply negative all the way to the end of the window without ever showing a flat tail), and this shape makes the logistic's `f0`/`t0` non-identifiable. `curve_fit` doesn't raise an error, but on this synthetic dataset it actually fits `t0≈-13h` and `f0≈-2,000,000` (for an 8-hour experiment!), which blows `rate=r·(Fmax−F0)/4` up to an absurd value in the hundreds of thousands. Countermeasure: after fitting, additionally check whether `t0` falls outside the observation window by more than some margin (currently 50% of the window width is used as the tolerance); if it does, treat the fit as "not converged" and fall back to the fallback formula instead. `plateau` (Fmax) itself is actually reasonable in these cases (the tail does show a slowdown) — the problem is confined to `f0`/`t0`/`rate`.
 
-**onset time（不依賴擬合，較穩健）**：以 0 nM 同株為對照，找出**連續 ≥2 個時間點** F(conc) 超過 `mean_0nM + k·SD_0nM`（k 放 config，預設 3）的**第一個**時間點。
+**Onset time (fit-independent, more robust)**: using the same strain's 0 nM condition as the control, find the **first** timepoint that starts a run of **at least 2 consecutive timepoints** where F(conc) exceeds `mean_0nM + k·SD_0nM` (k is in config, default 3).
 
-> **實作澄清**：`mean_0nM`/`SD_0nM` 是**每個時間點分別算**（同一時間點、跨 replicate），不是整個時間序列一起 pool。原因：0 nM 組自己的 F 在 8 小時內也會從很負飄到 100~200 這個量級（跟上面同一個現象），如果把所有時間點 pool 在一起算一個 SD，SD 會被撐到 ~230-250，`mean+3·SD` 這個閾值會高到幾乎沒有劑量組能穿越，onset 偵測形同失效。按時間點分開算，SD 就穩定在個位數到十位數，跟每個時間點的雜訊量級相符。
+> **Implementation clarification**: `mean_0nM`/`SD_0nM` are computed **separately per timepoint** (same timepoint, across replicates), not pooled across the whole time series. Reason: the 0 nM condition's own F also drifts from deeply negative up to roughly 100-200 over the 8 hours (the same effect as above); pooling every timepoint into one SD would inflate it to ~230-250, pushing the `mean+3·SD` threshold so high that almost no dose group could ever cross it, making onset detection effectively useless. Computed per timepoint instead, the SD stays in the single-to-double digits, matching each timepoint's actual noise level.
 
-**fallback**（logistic 擬合失敗時）：`plateau = mean(最後 2 個讀值)`、`rate = max 有限差分斜率`、`onset = 上述閾值穿越`。
+**Fallback** (when the logistic fit fails): `plateau = mean(last 2 readings)`, `rate = max finite-difference slope`, `onset = the threshold crossing described above`.
 
-**旗標**：若最後兩點斜率仍顯著 > 0 → `plateau_reached = False`（低濃度常見，8 小時內未達平台）。
+**Flag**: if the slope between the last two points is still significantly > 0 -> `plateau_reached = False` (common at low concentrations, which haven't reached a plateau within 8 hours).
 
-> **實作澄清**：「顯著 > 0」沒有給正式檢定，logistic 數學上永遠不會在有限時間內斜率剛好等於 0，所以字面上的「> 0」判斷會讓每一條收斂的曲線都判定成「未達平台」。改用「最後兩點斜率 ≤ 曲線自身最大斜率（在 t0 附近）的 10%」當判準——這個 10% 是選定的經驗閾值，不是 spec 給的數字。
+> **Implementation clarification**: no formal test was given for "significantly > 0" — mathematically, a logistic's slope is never exactly 0 in finite time, so a literal ">0" check would mark every converged curve as "not reaching plateau". This instead uses "the slope between the last two points is ≤ 10% of the curve's own maximum slope (near t0)" as the criterion — the 10% is a chosen empirical threshold, not a number given by the spec.
 
-### 5.3 劑量反應（每株菌，用 plateau vs [AHL]）
-**Hill（活化型）**：
+### 5.3 Dose-response (per strain, plateau vs [AHL])
+**Hill (activation form)**:
 
 ```
 F_plateau([A]) = bottom + (top − bottom) · [A]^n / (EC50^n + [A]^n)
 ```
 
-擬合參數與邊界：
+Fit parameters and bounds:
 
-| 參數 | 初值 | 邊界 |
+| Parameter | Initial value | Bounds |
 |------|------|------|
-| `bottom` | 0 nM 組的 plateau | ≥ 0 |
-| `top`    | 最高濃度組 plateau | > bottom |
-| `EC50`   | 中間濃度 | > 0 |
+| `bottom` | the 0 nM condition's plateau | ≥ 0 |
+| `top`    | the highest-concentration condition's plateau | > bottom |
+| `EC50`   | the middle concentration | > 0 |
 | `n`      | 1.0 | [0.5, 4] |
 
-**實作要點**：
-- 在 **log10[A]** 座標上擬合較穩定。
-- **[A]=0 排除在擬合之外**（不能取 log），但用 0 nM 組的 plateau 當 `bottom` 初值，並在圖上把它畫成最左的基準點。
-- 用 `lmfit` 的 `conf_interval()` 取 **EC50 的 95% CI**；`scipy` 版就用殘差 bootstrap。
-- 輸出：`EC50 (nM)`、`n`、`dynamic_range = top/bottom`、`R²`。
+**Implementation notes**:
+- More stable to fit in **log10[A]** coordinates.
+- **[A]=0 is excluded from the fit** (can't take its log), but the 0 nM condition's plateau is used as the `bottom` initial value, and it's drawn as the leftmost reference point on the plot.
+- Use `lmfit`'s `conf_interval()` to get **EC50's 95% CI**; for the `scipy` version, use residual bootstrap instead.
+- Output: `EC50 (nM)`, `n`, `dynamic_range = top/bottom`, `R²`.
 
-### 5.4 平坦檢定（★ 診斷關鍵，不可省）
-因為感測器目前可能對 AHL 無反應，必須判斷 dose-dependence 是否真實存在：
+### 5.4 Flatness test (★ the key diagnostic — do not skip)
+Since the sensor may currently not respond to AHL at all, whether dose-dependence genuinely exists must be determined:
 
-- 擬 **Hill 模型** vs **常數模型**（F = 平均值）。
-- 用 **F-test** 或 **ΔAIC** 比較。
-- 若 Hill 沒有顯著較好（p > 0.05 或 ΔAIC < 2）→ 回報 `responsive = False`、`EC50 = None`，**不要輸出假 EC50**。訊息例：`"No significant dose-dependence detected; EC50 not identifiable."`
+- Fit the **Hill model** vs a **constant model** (F = the mean).
+- Compare using an **F-test** or **ΔAIC**.
+- If Hill isn't significantly better (p > 0.05 or ΔAIC < 2) -> report `responsive = False`, `EC50 = None`, and **never output a fake EC50**. Example message: `"No significant dose-dependence detected; EC50 not identifiable."`
 
 ### 5.5 LOD / LOQ
-以 0 nM 組分布為基準：
+Using the 0 nM condition's distribution as the baseline:
 
 ```
 signal_threshold_LOD = mean_0nM + 3 · SD_0nM
 signal_threshold_LOQ = mean_0nM + 10 · SD_0nM
 ```
 
-`LOD = 最小的 [AHL]，其 plateau 均值 ≥ LOD 閾值 且 Welch 單尾 t-test 對 0 nM 顯著 (α=0.05)`。以 nM 回報；查不到就回 `> 10 µM (not detectable in tested range)`。
+`LOD = the smallest [AHL] whose plateau mean ≥ the LOD threshold and whose one-sided Welch t-test against 0 nM is significant (α=0.05)`. Reported in nM; if none is found, report `> 10 µM (not detectable in tested range)`.
 
 ---
 
-## 6. QC 檢查（`qc.py`）
-- **生長抑制**：比較各濃度的 OD600 生長曲線；若高濃度組終點 OD 比 0 nM 低超過 X%（config，預設 20%）→ 旗標 `growth_inhibition`，因為這會讓 RFU/OD 正規化失真。
-- **DMSO 效應**：0 nM(DMSO) vs 純 blank，確認溶劑本身沒有壓生長或加背景。
-- **Replicate CV**：每組算 CV，> 閾值（config，預設 20%）旗標。
-- **OD gating 記錄**：報告被 gate 掉的 (well, time) 數量。
+## 6. QC checks (`qc.py`)
+- **Growth inhibition**: compare the OD600 growth curves across concentrations; if a high-concentration condition's endpoint OD is more than X% lower than 0 nM's (config, default 20%) -> flag `growth_inhibition`, since this would distort the RFU/OD normalization.
+- **DMSO effect**: 0 nM (DMSO) vs a pure blank, to confirm the solvent itself isn't suppressing growth or adding background.
+- **Replicate CV**: compute the CV for each condition; flag it above a threshold (config, default 20%).
+- **OD gating record**: report how many (well, time) pairs were gated out.
 
 ---
 
-## 7. Config（`experiment.yaml`）
+## 7. Config (`experiment.yaml`)
 
 ```yaml
 fluorescence:
   ex_nm: 485
   em_nm: 510
 read_interval_h: 1.0
-concentrations_M:   # row 對應
+concentrations_M:   # maps to rows
   A: 0.0
   B: 1.0e-9
   C: 1.0e-8
   D: 1.0e-7
   E: 1.0e-6
   F: 1.0e-5
-strains:            # 欄範圍對應
+strains:            # maps to column ranges
   TOP10: [1, 2, 3]
   DH5a:  [4, 5, 6]
   BL21:  [7, 8, 9]
@@ -228,48 +228,48 @@ hill:
 
 ---
 
-## 8. 輸出
+## 8. Output
 
-**表（CSV，存 outputs/）**
-- `tidy_normalized.csv`：全部 (strain, conc, replicate, time, F)。
-- `timeseries_metrics.csv`：每 strain×conc 的 onset、rate、plateau ± SD、plateau_reached。
-- `doseresponse_params.csv`：每株 EC50、EC50_CI、n、top、bottom、dynamic_range、R²、responsive、LOD_nM、LOQ_nM。
-- `qc_report.csv`。
+**Tables (CSV, saved to outputs/)**
+- `tidy_normalized.csv`: every (strain, conc, replicate, time, F).
+- `timeseries_metrics.csv`: each strain x concentration's onset, rate, plateau ± SD, plateau_reached.
+- `doseresponse_params.csv`: each strain's EC50, EC50_CI, n, top, bottom, dynamic_range, R², responsive, LOD_nM, LOQ_nM.
+- `qc_report.csv`.
 
-**圖（PNG）**
-- `growth_curves.png`：OD600 vs 時間，每濃度一線（看有沒有生長抑制）。
-- `timecourse_normF.png`：正規化螢光 vs 時間，每株一張、每濃度一線。
-- `doseresponse.png`：每株 plateau vs log[AHL]，資料點 + Hill 擬合曲線 + EC50 垂直標線 + CI 帶；平坦者標註 "not responsive"。
-
----
-
-## 9. 單元測試（先寫，當 ground truth）
-
-`tests/test_models.py`：
-1. 用已知參數 (`EC50=1e-7, n=1.5, top=8000, bottom=200`) 產生 6 個濃度的合成 plateau，加小量高斯雜訊 → `fit_hill()` 應還原 EC50 在 ±20% 內、n 在 ±0.3 內。
-2. 產生一條**平的**合成曲線（top≈bottom）→ `flatness_test()` 應回 `responsive=False`。
-3. `hill()` 邊界：`[A]→0` 回 `bottom`、`[A]→∞` 回 `top`、`[A]=EC50` 回 `(top+bottom)/2`。
-
-> **完成（§10 item 4）**：item 1、2 實際落在 `tests/dose_response/test_doseresponse.py`，直接呼叫 `doseresponse.py` 的真正 `fit_hill()`/`flatness_test()`（不是暫代版本）。`test_models.py` 當初那個用 `scipy.optimize.curve_fit` 直接對 `hill()` 擬合的暫代測試已移除。
-
-`tests/test_normalize.py`：給定人工 RFU/OD/blank 矩陣，驗證 blank 扣除與 OD gating 正確。
+**Plots (PNG)**
+- `growth_curves.png`: OD600 vs time, one line per concentration (to check for growth inhibition).
+- `timecourse_normF.png`: normalized fluorescence vs time, one plot per strain, one line per concentration.
+- `doseresponse.png`: each strain's plateau vs log[AHL], data points + Hill fit curve + a vertical EC50 line + a CI band; flat ones are labeled "not responsive".
 
 ---
 
-## 10. 建議建置順序（給 Claude Code 的里程碑）
+## 9. Unit tests (write these first, as ground truth)
 
-1. `models.py`（純函式）+ `test_models.py` — 先讓數學正確且可驗。
-2. `io.py`：一個 SpectraMax parser + plate map 載入 + to_tidy + `test`。
-3. `normalize.py` + `test`。
-4. `doseresponse.py`：fit_hill → flatness_test → lod_loq → EC50 CI。
-5. `timeseries.py`：onset / rate / plateau。
-6. `qc.py`。
-7. `plots.py`：三張圖。
-8. `pipeline.py` + `scripts/run_analysis.py`（CLI：吃 config + raw 資料夾 → 產出 outputs）。
+`tests/test_models.py`:
+1. Using known parameters (`EC50=1e-7, n=1.5, top=8000, bottom=200`), generate synthetic plateaus at 6 concentrations with a small amount of Gaussian noise added -> `fit_hill()` should recover EC50 within ±20% and n within ±0.3.
+2. Generate a **flat** synthetic curve (top≈bottom) -> `flatness_test()` should return `responsive=False`.
+3. `hill()` boundaries: `[A]→0` returns `bottom`, `[A]→∞` returns `top`, `[A]=EC50` returns `(top+bottom)/2`.
+
+> **Done (§10 item 4)**: items 1 and 2 actually live in `tests/dose_response/test_doseresponse.py`, calling `doseresponse.py`'s real `fit_hill()`/`flatness_test()` directly (not a stand-in version). The original placeholder test in `test_models.py` that fit `hill()` directly with `scipy.optimize.curve_fit` has been removed.
+
+`tests/test_normalize.py`: given a synthetic RFU/OD/blank matrix, verify that blank subtraction and OD gating are correct.
 
 ---
 
-## 11. 參考實作（把數值最敏感的兩塊釘死，其餘讓 Claude Code 補）
+## 10. Suggested build order (milestones for Claude Code)
+
+1. `models.py` (pure functions) + `test_models.py` — get the math correct and verifiable first.
+2. `io.py`: one SpectraMax parser + plate map loading + to_tidy + `test`.
+3. `normalize.py` + `test`.
+4. `doseresponse.py`: fit_hill -> flatness_test -> lod_loq -> EC50 CI.
+5. `timeseries.py`: onset / rate / plateau.
+6. `qc.py`.
+7. `plots.py`: the three plots.
+8. `pipeline.py` + `scripts/run_analysis.py` (CLI: takes config + a raw data folder -> produces outputs).
+
+---
+
+## 11. Reference implementation (pinning down the two most numerically sensitive pieces; Claude Code fills in the rest)
 
 ```python
 # models.py
@@ -285,13 +285,13 @@ def logistic_time(t, f0, fmax, r, t0):
 ```
 
 ```python
-# doseresponse.py  (lmfit 版，取 EC50 CI)
+# doseresponse.py  (lmfit version, gets the EC50 CI)
 import numpy as np
 from lmfit import Model
 from scipy import stats
 
 def fit_hill(conc_M, plateau, plateau_sd=None):
-    """conc_M, plateau: 1D arrays aligned. 排除 conc==0（單獨拿來估 bottom）。"""
+    """conc_M, plateau: 1D arrays aligned. Excludes conc==0 (used separately to estimate bottom)."""
     mask = conc_M > 0
     x, y = conc_M[mask], plateau[mask]
     bottom0 = float(plateau[conc_M == 0].mean()) if (conc_M == 0).any() else float(y.min())
@@ -311,7 +311,7 @@ def fit_hill(conc_M, plateau, plateau_sd=None):
     return result  # result.params['ec50'].value / .stderr; result.conf_interval()
 
 def flatness_test(result, y):
-    """F-test: Hill vs 常數模型。回傳 (responsive: bool, p: float)."""
+    """F-test: Hill vs a constant model. Returns (responsive: bool, p: float)."""
     rss_full = np.sum(result.residual**2)
     rss_null = np.sum((y - y.mean())**2)
     n = len(y); p_full, p_null = 4, 1
@@ -325,9 +325,9 @@ def flatness_test(result, y):
 
 ---
 
-## 12. 這份 model 之後怎麼接下去
-擬出的 `EC50 / n / top / bottom` 會直接餵給後續兩個 model：
-- **機制 ODE model**：EC50、n 校準 pLas 啟動子的活化函數。
-- **AHL pH 水解 + 共培養 model**：把 EC50 當「偵測門檻」，疊上 AHL 在 pH 8.3 的衰減曲線，解釋為什麼共培養測不到。
+## 12. How this model feeds into what's next
+The fitted `EC50 / n / top / bottom` feed directly into two downstream models:
+- **Mechanistic ODE model**: EC50 and n calibrate the pLas promoter's activation function.
+- **AHL pH-hydrolysis + co-culture model**: treats EC50 as the "detection threshold", layering AHL's decay curve at pH 8.3 on top, to explain why co-culture can't detect it.
 
-所以 `doseresponse_params.csv` 要設計成能被那兩個 model 直接讀取的乾淨介面。
+So `doseresponse_params.csv` needs to be designed as a clean interface those two models can read directly.

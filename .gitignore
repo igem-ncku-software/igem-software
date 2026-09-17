@@ -7,54 +7,54 @@ __pycache__/
 build/
 dist/
 
-# ===== 虛擬環境 =====
+# ===== Virtual environment =====
 .venv/
 venv/
 env/
 ENV/
 
-# ===== 測試 / 覆蓋率 =====
+# ===== Tests / coverage =====
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
 .tox/
 
-# ===== 環境變數 / 機密資訊 =====
-# 注意：只忽略 .env 本身，不要用 .env* 這種萬用字元，
-# 否則會連 backend/.env.example（範本，應該要進版控）都忽略掉。
+# ===== Environment variables / secrets =====
+# Note: only ignore .env itself, not a .env* wildcard —
+# that would also ignore backend/.env.example (the template, which should be tracked).
 .env
 .env.local
 *.key
 *.pem
 secrets.json
-# 韌體的 Wi-Fi 認證；範本是 firmware/as7341/secrets.h.example
+# Firmware Wi-Fi credentials; template is firmware/as7341/secrets.h.example
 secrets.h
 
-# ===== IDE / 編輯器 =====
+# ===== IDE / editor =====
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-# Claude Code 本機預覽設定（只是開發時啟動靜態伺服器用，不屬於專案）
+# Claude Code's local preview config (just starts a dev static server, not part of the project)
 .claude/launch.json
 
-# ===== 作業系統 =====
+# ===== OS =====
 .DS_Store
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
 
-# ===== 上傳 / 暫存的使用者檔案（如果之後有存圖片等） =====
+# ===== Uploaded / temp user files (in case images etc. get stored later) =====
 uploads/
 *.tmp
 
-# ===== 日誌 =====
+# ===== Logs =====
 *.log
 
-# ===== Jupyter（如果之後用 notebook 做資料分析） =====
+# ===== Jupyter (in case notebooks get used for data analysis later) =====
 .ipynb_checkpoints/
 
-# ===== 前端（如果之後加 npm 工具鏈） =====
+# ===== Frontend (in case an npm toolchain gets added later) =====
 node_modules/

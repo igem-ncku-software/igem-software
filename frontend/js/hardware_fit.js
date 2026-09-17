@@ -1,27 +1,28 @@
 // =========================================================
-// 對接 hardware-calibration-fit.html：用跑完的 calibration plan 擬合 4PL，
-// 排除個別管（一定要附理由），存檔後詢問是否設為 active。
+// Backs hardware-calibration-fit.html: fits a 4PL curve from a completed calibration plan,
+// excludes individual tubes (always with a reason), and asks whether to make it active on save.
 //
-// 狀態機：
-//   unfitted -> 只有 Fit 可用，Save 停用
-//   fitted   -> 顯示曲線與指標，Save 可用；改變排除項目退回 unfitted
-//   saved    -> 顯示曲線 id，提供前往 Measure 的連結
+// State machine:
+//   unfitted -> only Fit is enabled, Save disabled
+//   fitted   -> shows the curve and metrics, Save enabled; changing exclusions reverts to unfitted
+//   saved    -> shows the curve id, offers a link to Measure
 //
-// 被排除的管不會從圖上或表格裡消失：圖上畫成灰色空心，表格留著並帶理由。
+// Excluded tubes never disappear from the chart or table: they're drawn as hollow gray points
+// on the chart, and kept in the table along with their reason.
 //
-// 目標元素：#fit-* / #save-* / #saved-* / #activate-* / #refit-button，見 HTML
-// 對接 API：getCalibrationPlan / getDeviceStatus / fitCurve / saveCurve
+// Target elements: #fit-* / #save-* / #saved-* / #activate-* / #refit-button, see the HTML
+// Backing API: getCalibrationPlan / getDeviceStatus / fitCurve / saveCurve
 // =========================================================
 
 let fitPlan = null;
 let fitDeviceFingerprint = null;
 let fitState = "unfitted";
-let fitCurveResult = null; // fitCurve / saveCurve 回傳的 CalibrationCurve
+let fitCurveResult = null; // the CalibrationCurve returned by fitCurve / saveCurve
 let fitBusy = false;
 let fitHasFittedOnce = false;
 let activatePromptOpen = false;
 let fitChart = null;
-const fitExclusions = new Map(); // sample_id -> 理由；勾選了就在這裡，理由可能還沒填
+const fitExclusions = new Map(); // sample_id -> reason; present once checked, reason may not be filled in yet
 
 const FIT_STATE_CHIP = {
   unfitted: ["Unfitted", ""],
@@ -29,8 +30,8 @@ const FIT_STATE_CHIP = {
   saved: ["Saved", "ok"],
 };
 
-// 誤差棒。Chart.js 沒有內建，外掛是新依賴，所以自己畫：
-// 讀 dataset 上的 errorBars: true，每個點的 sd 決定上下長度。
+// Error bars. Chart.js has no built-in support and a plugin would be a new dependency, so this draws them manually:
+// reads errorBars: true on the dataset, and each point's sd sets the bar's length above and below.
 const fitErrorBarPlugin = {
   id: "fitErrorBars",
   afterDatasetsDraw(chart) {
@@ -69,12 +70,12 @@ function fitSd(values) {
   return Math.sqrt(values.reduce((acc, v) => acc + (v - m) ** 2, 0) / (values.length - 1));
 }
 
-// 殘差：跟螢光值同一套有效數字規則（basic counts 常小於 1，取整數會變 0）。
+// Residuals: same significant-figures rule as fluorescence values (basic counts are often below 1, so rounding to an integer would give 0).
 function formatSignedCounts(value) {
   return formatSignedFluorescence(value);
 }
 
-// 依濃度分組（blank 當 0），組內依 slot 排序。
+// Groups by concentration (blank counts as 0), sorted by slot within each group.
 function groupPlanItems(items) {
   const groups = new Map();
   for (const item of items) {
@@ -95,12 +96,12 @@ function missingReasonCount() {
   return [...fitExclusions.values()].filter((reason) => !reason.trim()).length;
 }
 
-// 只有 fitted / saved 才有能畫、能算殘差的曲線。
+// Only fitted / saved states have a curve that can be drawn or used to compute residuals.
 function currentCurve() {
   return fitState === "unfitted" ? null : fitCurveResult;
 }
 
-// ---- 停用原因 --------------------------------------------------------
+// ---- Disabled-reason text ----------------------------------------------
 
 function blockedFitReason() {
   const pending = fitPlan.items.filter((it) => !it.measurement).length;
@@ -121,7 +122,7 @@ function blockedSaveReason() {
   return null;
 }
 
-// ---- 繪製 ------------------------------------------------------------
+// ---- Drawing -------------------------------------------------------
 
 function renderFitSource() {
   document.getElementById("fit-source").hidden = false;
@@ -238,7 +239,7 @@ function renderFitChart() {
   ];
 
   if (curve) {
-    // 曲線只畫在標準品濃度範圍內：畫到範圍外等於在圖上外插。
+    // The curve is only drawn within the standards' concentration range: drawing beyond it would be extrapolating on the chart.
     const concs = standards.map((it) => it.concentration_nM);
     const lo = Math.log10(Math.min(...concs));
     const hi = Math.log10(Math.max(...concs));
@@ -374,7 +375,7 @@ function renderFitTable() {
         reason.addEventListener("input", () => {
           fitExclusions.set(m.sample_id, reason.value);
           reason.classList.toggle("is-missing", !reason.value.trim());
-          renderFitControls(); // 只更新按鈕，不重畫表格，才不會打字打到一半失去焦點
+          renderFitControls(); // only updates the buttons, not the table, so typing mid-word doesn't lose focus
         });
         reasonCell.appendChild(reason);
       }
@@ -404,7 +405,7 @@ function renderFitAll() {
   }
 }
 
-// ---- 動作 ------------------------------------------------------------
+// ---- Actions ---------------------------------------------------------
 
 function toggleExclusion(sampleId, checked) {
   if (checked) fitExclusions.set(sampleId, fitExclusions.get(sampleId) ?? "");
@@ -453,7 +454,7 @@ async function saveFit() {
   setHardwareStatus(statusEl, "Saving curve...", null);
 
   try {
-    // fitCurve 只收 sample id，理由在存檔時附上。
+    // fitCurve only takes sample ids; the reason is attached when saving.
     const payload = {
       ...fitCurveResult,
       excluded: fitCurveResult.excluded.map((e) => ({

@@ -1,7 +1,7 @@
 """End-to-end orchestrator: reader export -> per-strain dose-response results.
 
 Runs io -> normalize -> timeseries -> doseresponse in sequence (spec §3's
-"pipeline.py # 串起 end-to-end"). Doesn't introduce any new computation -
+"pipeline.py # chains everything together end-to-end"). Doesn't introduce any new computation -
 every step here is a direct call into an already-tested function from the
 other four modules.
 """

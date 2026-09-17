@@ -1,25 +1,25 @@
-﻿# 一次裝好後端環境：建立 .venv 並安裝 requirements.txt。
-# 用法（在 repo 根目錄）：powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+﻿# Sets up the backend environment in one go: creates .venv and installs requirements.txt.
+# Usage (from the repo root): powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 #
-# 前端沒有依賴、沒有 build step，所以這支只處理後端。
+# The frontend has no dependencies and no build step, so this script only handles the backend.
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location (Join-Path $root "backend")
 
 if (-not (Test-Path ".venv")) {
-    Write-Host "==> 建立虛擬環境 backend\.venv"
+    Write-Host "==> Creating virtual environment backend\.venv"
     python -m venv .venv
 } else {
-    Write-Host "==> backend\.venv 已存在，沿用"
+    Write-Host "==> backend\.venv already exists, reusing it"
 }
 
-# 直接叫 venv 裡的 python，不需要先 activate，這樣腳本在哪個 shell 跑都一樣。
+# Call the venv's python directly without activating, so the script behaves the same in any shell.
 $py = Join-Path (Get-Location) ".venv\Scripts\python.exe"
 
-Write-Host "==> 安裝依賴"
+Write-Host "==> Installing dependencies"
 & $py -m pip install --upgrade pip --quiet
 & $py -m pip install -r requirements.txt
 
 Write-Host ""
-Write-Host "完成。接著執行 scripts\dev.ps1 啟動前後端。"
+Write-Host "Done. Next, run scripts\dev.ps1 to start the frontend and backend."

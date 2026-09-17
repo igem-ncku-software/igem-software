@@ -1,21 +1,22 @@
 // =========================================================
-// 對接 dose-response.html 的分析區塊
-// 目標元素：
+// Backs the analysis section of dose-response.html
+// Target elements:
 //   #dose-response-form / #dose-response-file / #analyze-button
 //   #dose-response-status
 //   #dose-response-result / #results-table-body / #strain-charts
-// 對接 API：
-//   POST /api/dose_response/analyze（回傳 {strains: {strain名: {...}}}）
-//   POST /api/dose_response/predict（每株菌結果區塊裡的反推小工具用）
-// 依賴 js/config.js 的全域 BACKEND_BASE_URL，這支必須排在它後面載入。
+// Backing API:
+//   POST /api/dose_response/analyze (returns {strains: {strain_name: {...}}})
+//   POST /api/dose_response/predict (used by the inversion widget in each strain's result block)
+// Depends on js/config.js's global BACKEND_BASE_URL, so this must load after it.
 // =========================================================
 
-// strain -> Chart 實例，重新分析時要先 destroy 舊的，避免 canvas 殘留舊圖層。
+// strain -> Chart instance; the old one must be destroy()ed before re-analyzing, to avoid stale layers left on the canvas.
 const strainCharts = {};
 
-// Chart.js 收的是實際色碼，沒辦法直接吃 CSS 變數，所以在這裡讀出來。
-// 這樣配色只有 css/style.css 的 :root 一個來源，改色票圖表會跟著變，
-// 不用兩邊各改一次（以前這裡是寫死的字面值，跟樣式表對不起來）。
+// Chart.js needs an actual color code and can't consume a CSS variable directly, so it's
+// read out here. This keeps css/style.css's :root as the one source of truth for colors —
+// changing the palette updates the charts too, instead of having to edit both places
+// (this used to be hardcoded literals that could drift out of sync with the stylesheet).
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -59,7 +60,7 @@ function renderResultsTable(strains) {
 }
 
 function renderStrainChart(strain, result) {
-  // responsive=False：不畫假的劑量反應曲線（沒有 fit_curve 可畫），只留一句診斷訊息。
+  // responsive=False: no fake dose-response curve is drawn (there's no fit_curve to draw), just a one-line diagnostic message.
   if (!result.responsive || !result.fit_curve) {
     const message = document.createElement("p");
     message.className = "status-message";
@@ -67,13 +68,14 @@ function renderStrainChart(strain, result) {
     return message;
   }
 
-  // 不設 canvas.height：Chart.js 只要 canvas 有寫死高度就會忽略 aspectRatio，
-  // 圖會被拉成跟卡片一樣寬的超高空白區塊。高度改由下面的 aspectRatio 決定。
+  // canvas.height is left unset: Chart.js ignores aspectRatio as soon as the canvas has a
+  // hardcoded height, stretching the chart into a mostly-empty block as wide as the card.
+  // Height is instead controlled by the aspectRatio set below.
   const canvas = document.createElement("canvas");
   canvas.id = `chart-${strain}`;
 
-  // 圖表坐在不透明的 .chart-plate 上，不套玻璃：曲線和格線疊在模糊的
-  // 面板上會看不清楚，玻璃只負責外框。
+  // The chart sits on an opaque .chart-plate rather than the glass panel style: curves and
+  // gridlines over a blurred panel would be hard to read, so glass is reserved for the frame only.
   const plate = document.createElement("div");
   plate.className = "chart-plate";
   plate.appendChild(canvas);
@@ -85,9 +87,10 @@ function renderStrainChart(strain, result) {
   const muted = cssVar("--muted");
   const rule = cssVar("--border");
 
-  // Chart.js 的對數 x 軸畫不出 x=0，跟舊版 4PL 圖表一樣把 0 nM（負對照）那個點濾掉，
-  // 摘要表格裡還是看得到每株菌的完整結果，只有這張圖不畫。
-  // plateau 為 null 表示該濃度的讀值全被 OD gating 排除，沒有點可畫。
+  // Chart.js's logarithmic x-axis can't plot x=0, so — same as the old 4PL chart — the 0 nM
+  // (negative control) point is filtered out here; the summary table still shows every
+  // strain's full result, only this chart skips it.
+  // A null plateau means every reading at that concentration was excluded by OD gating, so there's no point to draw.
   const scatterPoints = result.plateau_points
     .filter(([x, y]) => x > 0 && Number.isFinite(y))
     .map(([x, y]) => ({ x, y }));
@@ -160,8 +163,8 @@ function renderStrainChart(strain, result) {
   return plate;
 }
 
-// 螢光 -> 濃度反推小工具，每個 responsive 的菌株一份，直接沿用 /analyze
-// 給的 Hill 參數（bottom/top/ec50_nM/n/ec50_nM_ci95），不用另外存 session。
+// Fluorescence -> concentration inversion widget, one per responsive strain, reusing the
+// Hill params (bottom/top/ec50_nM/n/ec50_nM_ci95) /analyze already returned — no separate session storage needed.
 function buildPredictWidget(strain, result) {
   const form = document.createElement("form");
   form.className = "predict-form";
@@ -226,7 +229,7 @@ function buildPredictWidget(strain, result) {
       const prediction = await res.json();
 
       if (!prediction.in_range) {
-        // 後端已經給了說明訊息（例如低於偵測下限），直接顯示，不要顯示 null 或報錯。
+        // The backend already provides an explanatory message (e.g. below the detection limit); show it as-is instead of null or a generic error.
         output.textContent = prediction.message || "Fluorescence value is out of the predictable range.";
         output.className = "status-message error";
         return;
@@ -273,7 +276,7 @@ function renderStrainCharts(strains) {
 
     block.appendChild(renderStrainChart(strain, result));
 
-    // responsive=False：沒有可信的曲線可以反推，不提供這個小工具。
+    // responsive=False: there's no trustworthy curve to invert against, so this widget isn't offered.
     if (result.responsive) {
       const predictBlock = document.createElement("div");
       predictBlock.className = "result-block";

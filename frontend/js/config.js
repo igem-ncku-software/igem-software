@@ -1,16 +1,17 @@
 // =========================================================
-// 集中設定：後端 base URL。
-// 本機開發（localhost / 127.0.0.1）打本機的 uvicorn，其他一律打線上網址。
+// Central config: the backend base URL.
+// Local dev (localhost / 127.0.0.1) hits the local uvicorn; everything else hits the live URL.
 //
-// 這個專案沒有 build step（純靜態檔案直接部署到 GitHub Pages），沒有辦法
-// 用一般 SPA 那種「build 時注入環境變數」的做法，所以沿用 hostname 判斷方式，
-// 集中在這一個檔案管理，而不是每支 script 各自寫一份。
+// This project has no build step (plain static files deployed straight to GitHub Pages), so
+// there's no way to do the usual SPA trick of injecting env vars at build time. Hence the
+// hostname check, kept in this one file rather than duplicated in every script.
 //
-// 之後若 Render 網址換掉，只要改這一行，所有打後端的地方（dose_response.js、
-// device_live.js、hardware_api.js、backend_status.js）都會自動生效。
-// CAPTURE-Screen 的網址也要一起改：firmware/as7341/as7341.ino 的 BACKEND_HOST。
+// If the Render URL ever changes, updating this one line is enough — everywhere that calls
+// the backend (dose_response.js, device_live.js, hardware_api.js, backend_status.js) picks
+// it up automatically. CAPTURE-Screen's own URL needs updating too: BACKEND_HOST in
+// firmware/as7341/as7341.ino.
 //
-// 必須在其他會用到 BACKEND_BASE_URL 的 <script> 之前載入。
+// Must load before every other <script> that uses BACKEND_BASE_URL.
 // =========================================================
 
 const BACKEND_BASE_URL = ["localhost", "127.0.0.1"].includes(window.location.hostname)

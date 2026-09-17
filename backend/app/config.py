@@ -2,18 +2,18 @@ import os
 
 from dotenv import load_dotenv
 
-# 讀取 backend/.env（本機開發用）。
-# 在 Render 等正式環境上，環境變數會直接由平台注入，
-# load_dotenv() 找不到 .env 檔時不會報錯，只會略過。
+# Loads backend/.env (for local development).
+# On production platforms like Render, environment variables are injected directly by
+# the platform; load_dotenv() silently no-ops when it can't find a .env file.
 load_dotenv()
 
 
 class Settings:
-    """集中管理所有環境變數，避免設定值散落在各個檔案裡。"""
+    """Centralizes all environment variables so config values don't end up scattered across files."""
 
-    # 允許呼叫後端 API 的前端來源。
-    # 正式環境（GitHub Pages）與本機開發用的 origin 都列在這裡，
-    # 用逗號分隔，可透過 .env 覆寫，不需要改程式碼。
+    # Frontend origins allowed to call the backend API.
+    # Both the production origin (GitHub Pages) and local dev origins are listed here,
+    # comma-separated, and can be overridden via .env without touching code.
     CORS_ORIGINS: list[str] = [
         origin.strip()
         for origin in os.getenv(
@@ -26,10 +26,10 @@ class Settings:
         ).split(",")
     ]
 
-    # CAPTURE-Screen 自己連進 WS /api/hardware/device（見 app/hardware/hub.py）。
-    # 韌體每 5 秒回報一次狀態；超過這麼久沒收到任何訊息就視為離線。
+    # CAPTURE-Screen dials into WS /api/hardware/device itself (see app/hardware/hub.py).
+    # The firmware reports status every 5 s; going longer than this without any message counts as offline.
     HARDWARE_ONLINE_TIMEOUT_SECONDS: float = float(os.getenv("HARDWARE_ONLINE_TIMEOUT_SECONDS", "15"))
-    # POST /api/hardware/read 等裝置回傳結果的上限；一次量測本身約 3 秒。
+    # Upper bound for POST /api/hardware/read to wait on the device's result; one measurement itself takes about 3 s.
     HARDWARE_READ_TIMEOUT_SECONDS: float = float(os.getenv("HARDWARE_READ_TIMEOUT_SECONDS", "10"))
 
     if HARDWARE_ONLINE_TIMEOUT_SECONDS <= 0 or HARDWARE_READ_TIMEOUT_SECONDS <= 0:

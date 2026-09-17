@@ -1,30 +1,32 @@
 // =========================================================
-// CAPTURE-Screen 資料處理：裝置原始讀值（POST /api/hardware/read 的回應）-> Measurement。
+// CAPTURE-Screen data processing: raw device reading (POST /api/hardware/read's response) -> Measurement.
 //
-// 全部是純函式：不碰 DOM、不發請求、不讀 localStorage、不讀時鐘（時間由
-// 呼叫端傳入）。之後要原封不動移植到 backend/app/hardware/，所以這裡的
-// 規則——尤其是 configFingerprint() 的串接格式——前後端必須完全一致。
+// Everything here is a pure function: no DOM, no requests, no localStorage, no clock (time is
+// passed in by the caller). This is meant to be ported verbatim to backend/app/hardware/, so the
+// rules here — especially configFingerprint()'s concatenation format — must match exactly between
+// frontend and backend.
 //
-// 單位：Measurement 的 fluorescence / scatter / raw 都是
-//   basic counts = (light − dark) / (gain × integration_time_ms)
+// Units: Measurement's fluorescence / scatter / raw are all
+//   basic counts = (light - dark) / (gain x integration_time_ms)
 // =========================================================
 
 const HardwareProcessing = (() => {
   const ADC_MAX_COUNTS = 65535;
-  const ASTEP_UNIT_MS = 2.78e-3; // 每個 step 2.78 µs
+  const ASTEP_UNIT_MS = 2.78e-3; // 2.78 µs per step
   const DEVICE_CHANNELS = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "CLR", "NIR"];
-  // 裝置用 CLR；資料契約（Measurement.raw）用 Clear。
+  // The device uses CLR; the data contract (Measurement.raw) uses Clear.
   const CONTRACT_NAME = { CLR: "Clear" };
-  // ADC 量化誤差的標準差（1 count 的均勻分布）：讀雜訊估計的下限。
+  // Standard deviation of ADC quantization error (uniform distribution over 1 count): the floor for the read-noise estimate.
   const QUANTIZATION_SD_COUNTS = 1 / Math.sqrt(12);
   const HIGH_SCATTER_RATIO = 2;
   const SAMPLE_TYPES = ["blank", "standard", "unknown"];
 
-  // ---- 組態 -----------------------------------------------------------
+  // ---- Config -----------------------------------------------------------
 
-  // 固定順序、固定格式：LED 電流取 3 位小數，其餘原樣轉字串，以 "|" 串接，
-  // UTF-8 位元組做 FNV-1a 32-bit，取十六進位前 6 碼。
-  // 後端必須用一模一樣的規則，否則同一台儀器前後端算出的 fingerprint 會不同。
+  // Fixed order, fixed format: LED current to 3 decimal places, everything else stringified as-is,
+  // joined with "|", then FNV-1a 32-bit over the UTF-8 bytes, keeping the first 6 hex digits.
+  // The backend must use the exact same rule, or the same instrument's frontend and backend
+  // would compute different fingerprints.
   function configFingerprint(config) {
     const canonical = [
       Number(config.led_current_mA).toFixed(3),
@@ -54,7 +56,7 @@ const HardwareProcessing = (() => {
     return counts / (config.gain * integrationTimeMs(config));
   }
 
-  // GET /status（或 /read）的回應 -> 資料契約的 HardwareConfig。
+  // GET /status (or /read)'s response -> the data contract's HardwareConfig.
   function toHardwareConfig(body) {
     const config = {
       fingerprint: "",
@@ -64,13 +66,13 @@ const HardwareProcessing = (() => {
       astep: body.config.astep,
       build_id: body.build_id,
       firmware_version: body.firmware_version,
-      emission_filter: null, // 韌體不知道裝了哪片濾光片；目前也還沒選定
+      emission_filter: null, // the firmware doesn't know which filter is installed; none has been chosen yet either
     };
     config.fingerprint = configFingerprint(config);
     return config;
   }
 
-  // ---- 驗證：回傳錯誤訊息字串，沒問題回傳 null ---------------------------
+  // ---- Validation: returns an error message string, or null if it's fine ---------------------------
 
   function isChannelFrame(frame) {
     return Boolean(frame) && typeof frame === "object"
@@ -109,7 +111,7 @@ const HardwareProcessing = (() => {
     const config = validateDeviceConfig(body.config);
     if (config) return config;
     if (!isChannelFrame(body.light)) return "light frame is missing or incomplete";
-    // dark_1 / dark_2 可以缺（會標 NO_DARK_PAIR），但有給就要完整。
+    // dark_1 / dark_2 may be missing (flagged as NO_DARK_PAIR), but if present they must be complete.
     for (const key of ["dark_1", "dark_2"]) {
       if (body[key] !== undefined && !isChannelFrame(body[key])) return `${key} frame is incomplete`;
     }
@@ -126,14 +128,14 @@ const HardwareProcessing = (() => {
     return null;
   }
 
-  // ---- 處理步驟 ---------------------------------------------------------
+  // ---- Processing steps ---------------------------------------------------------
 
   function darkFrames(reading) {
     return [reading.dark_1, reading.dark_2].filter(isChannelFrame);
   }
 
-  // 1. 暗值扣除：dark_1 與 dark_2 平均後相減，負值截為 0。
-  //    只有一張 dark 就用那一張；兩張都沒有就不扣（並由 toMeasurement 標 NO_DARK_PAIR）。
+  // 1. Dark subtraction: subtract the average of dark_1 and dark_2, clamping negative values to 0.
+  //    With only one dark frame, use that one; with neither, skip subtraction (toMeasurement flags NO_DARK_PAIR).
   function subtractDark(reading) {
     const darks = darkFrames(reading);
     const result = {};
@@ -144,7 +146,7 @@ const HardwareProcessing = (() => {
     return result;
   }
 
-  // 2. 正規化為 basic counts：raw / (gain × integration_time_ms)
+  // 2. Normalize to basic counts: raw / (gain x integration_time_ms)
   function normalize(channels, config) {
     const factor = config.gain * integrationTimeMs(config);
     const result = {};
@@ -152,14 +154,15 @@ const HardwareProcessing = (() => {
     return result;
   }
 
-  // 3. 飽和檢查：任一通道達到 min(65535, (atime + 1) × (astep + 1))。
+  // 3. Saturation check: any channel reaching min(65535, (atime + 1) x (astep + 1)).
   function checkSaturation(rawLight, config) {
     const limit = fullScaleCounts(config);
     return DEVICE_CHANNELS.some((key) => rawLight[key] >= limit);
   }
 
-  // 4. 解混。目前只有 single_channel：基底尚未以 sfGFP 標準品標定，
-  //    最小平方法要等有實測基底向量才實作，這裡不編造基底數值。
+  // 4. Unmixing. Only single_channel exists so far: the basis hasn't been calibrated with an
+  //    sfGFP standard yet, and least-squares unmixing waits until a measured basis vector
+  //    exists — no basis values are invented here.
   function unmix(channels, basis) {
     if (!basis || basis.method !== "single_channel") {
       throw new Error(`Unmixing method "${basis?.method}" is not implemented.`);
@@ -170,9 +173,10 @@ const HardwareProcessing = (() => {
     return { fluorescence: channels[basis.signal_channel], scatter: channels[basis.scatter_channel] };
   }
 
-  // fluorescence 的標準差估計（raw counts）：只含讀取雜訊。
-  // 兩張 dark 的差估計單張 frame 的雜訊（下限為量化誤差），light − mean(dark)
-  // 的變異 = σ² (1 + 1/n_dark)。不含 shot noise——裝置沒有提供可以估它的資訊。
+  // Estimated standard deviation of fluorescence (raw counts): read noise only.
+  // The difference between the two dark frames estimates a single frame's noise (floored at
+  // the quantization error); the variance of light - mean(dark) = sigma^2 (1 + 1/n_dark).
+  // Shot noise isn't included — the device gives no information that could estimate it.
   function readNoiseSdCounts(reading, channel) {
     const darks = darkFrames(reading);
     const frameSd = darks.length === 2
@@ -187,13 +191,13 @@ const HardwareProcessing = (() => {
     return result;
   }
 
-  // 5. 組裝成資料契約的 Measurement。
-  //    context.basis         解混基底（config/unmix_basis.json）
-  //    context.blankScatter  同組態最近一次 blank 的 scatter，沒有就 null
-  //    context.timestampUtc  ISO 字串
-  //    需要儲存狀態才能判斷的 flag（STALE_CONFIG、BELOW_LOD、ABOVE_RANGE）不在這裡。
+  // 5. Assembles the data contract's Measurement.
+  //    context.basis         unmixing basis (config/unmix_basis.json)
+  //    context.blankScatter  scatter of the most recent blank under the same config, or null
+  //    context.timestampUtc  ISO string
+  //    Flags that need stored state to determine (STALE_CONFIG, BELOW_LOD, ABOVE_RANGE) aren't set here.
   function toMeasurement(reading, input, context) {
-    // 即時串流的資料一律不得變成 Measurement（不存、不進 plan、不擬合）。
+    // Live-stream data must never become a Measurement (never stored, never added to a plan, never fitted).
     if (!reading || reading.mode !== "measurement") {
       throw new Error(`Only "measurement" readings can become a Measurement (got mode "${reading?.mode}").`);
     }
@@ -228,8 +232,8 @@ const HardwareProcessing = (() => {
     };
   }
 
-  // 暗讀檢查：兩張 dark 相減（保留正負號），正常應該每個通道都在 0 附近。
-  // 裝置沒有「只讀暗值」的端點，所以用同一次 POST /read 的 dark_1 / dark_2。
+  // Dark-read check: subtracts the two dark frames (sign preserved); normally every channel should sit near 0.
+  // The device has no "dark-only" endpoint, so this reuses the dark_1 / dark_2 from one POST /read call.
   function toDarkCheckMeasurement(reading, sampleId, timestampUtc) {
     if (!reading || reading.mode !== "measurement") {
       throw new Error(`Only "measurement" readings can be dark-checked (got mode "${reading?.mode}").`);

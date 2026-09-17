@@ -1,18 +1,18 @@
 // =========================================================
-// 對接 hardware.html：CAPTURE-Screen 儀器狀態頁（hardware 區的首頁）。
-// 目標元素：
+// Backs hardware.html: the CAPTURE-Screen instrument status page (the hardware section's home).
+// Target elements:
 //   #status-load / #status-body / #status-connection / #status-heartbeat
 //   #status-fingerprint / #status-curve-count / #status-dark-alert / #status-config-body
 //   #status-active-curve
 //   #dark-read-button / #blank-read-button / #check-status / #check-result
-// 對接 API（js/hardware_api.js）：getDeviceStatus / listCurves / getActiveCurve /
+// Backing API (js/hardware_api.js): getDeviceStatus / listCurves / getActiveCurve /
 //   runDarkRead / readSample
 // =========================================================
 
-// 暗讀超過這麼久就提醒重做：環境光和溫度都會讓 dark level 漂移。
+// Prompt to redo a dark read after this long: ambient light and temperature both drift the dark level.
 const DARK_READ_STALE_MINUTES = 60;
-// 兩張 dark 相減後每個通道應該是 0；讀取噪音容許到這麼多「原始」ADC counts，
-// 比較時依裝置的 gain / ATIME / ASTEP 換算成 basic counts。
+// Subtracting two dark reads should give 0 on every channel; this is how much read noise is
+// tolerated, in "raw" ADC counts converted to basic counts using the device's gain / ATIME / ASTEP.
 const DARK_READ_TOLERANCE_COUNTS = 2;
 const DARK_READ_ALERT_REFRESH_MS = 30000;
 
@@ -32,7 +32,7 @@ async function loadInstrumentStatus() {
   ]);
   const config = statusResult.status === "fulfilled" ? statusResult.value.config : null;
 
-  // 曲線存在瀏覽器端，裝置連不上時照樣顯示。
+  // Curves live in the browser, so they still show even when the device is unreachable.
   if (activeResult.status === "fulfilled") {
     renderActiveCurveSummary(activeResult.value, config);
   } else {
@@ -97,7 +97,7 @@ function renderDarkReadAlert() {
   }
 }
 
-// config 為 null 表示裝置連不上，無法判斷曲線是否還適用。
+// config being null means the device is unreachable, so there's no way to tell if the curve still applies.
 function renderActiveCurveSummary(curve, config) {
   const container = document.getElementById("status-active-curve");
   container.innerHTML = "";
@@ -183,7 +183,7 @@ async function runInstrumentCheck(kind) {
   }
 }
 
-// 暗讀的 raw 是 dark_2 − dark_1（basic counts，保留正負號）。
+// A dark read's raw value is dark_2 - dark_1 (basic counts, sign preserved).
 function renderDarkResult(m, config, container, statusEl) {
   const heading = hwEl("h3", "subsection-heading", `Dark read (dark_2 − dark_1) · ${formatLocalTime(m.timestamp_utc)}`);
 

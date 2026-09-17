@@ -1,8 +1,9 @@
 // =========================================================
-// hardware 五個頁面共用：子導覽列 + 右上角儀器連線小標、數字格式、
-// QC flag chips、AS7341 通道對照、停用按鈕的原因說明、解混基底附註。
-// 目標元素：#hardware-subnav（data-page 標示目前頁面）、[data-basis-note]
-// 依賴 js/hardware_api.js 的 HardwareApi，必須排在它後面、各頁面 script 前面載入。
+// Shared across all five hardware pages: the subnav + the instrument connection badge in the
+// top right, number formatting, QC flag chips, the AS7341 channel table, disabled-button
+// reason text, and the unmixing-basis note.
+// Target elements: #hardware-subnav (data-page marks the current page), [data-basis-note]
+// Depends on js/hardware_api.js's HardwareApi, so this must load after it and before every page's own script.
 // =========================================================
 
 const HARDWARE_PAGES = [
@@ -15,12 +16,13 @@ const HARDWARE_PAGES = [
 
 const DEVICE_STATUS_POLL_INTERVAL_MS = 12000;
 
-// Measurement 的 fluorescence / scatter / raw 的單位：
-// (light − dark) / (gain × integration_time_ms)，見 js/hardware_processing.js。
+// Unit for Measurement's fluorescence / scatter / raw:
+// (light - dark) / (gain x integration_time_ms), see js/hardware_processing.js.
 const HARDWARE_FLUORESCENCE_UNIT = "basic counts";
 
-// AS7341 的通道順序與中心波長。key 是資料契約（Measurement.raw）的名稱，
-// 軸標籤跟首頁即時監看一致：波長數字，Clear 與 NIR 用縮寫。
+// AS7341 channel order and center wavelengths. The key is the data contract's name
+// (Measurement.raw); axis labels match the landing page's live view: wavelength numbers,
+// with Clear and NIR abbreviated.
 const HARDWARE_CHANNELS = [
   { key: "F1", axis: "415" },
   { key: "F2", axis: "445" },
@@ -34,7 +36,7 @@ const HARDWARE_CHANNELS = [
   { key: "NIR", axis: "NIR" },
 ];
 
-// chip 顏色：error 代表這筆讀值不能用，warn 代表能用但要注意。
+// Chip color: error means this reading can't be used, warn means it can but needs attention.
 const FLAG_SEVERITY = {
   SATURATED: "error",
   NO_DARK_PAIR: "error",
@@ -44,13 +46,13 @@ const FLAG_SEVERITY = {
   ABOVE_RANGE: "warn",
 };
 
-// Chart.js 收的是實際色碼，沒辦法直接吃 CSS 變數，所以在這裡讀出來，
-// 配色只有 css/style.css 的 :root 一個來源。
+// Chart.js needs an actual color code and can't consume a CSS variable directly, so it's
+// read out here — css/style.css's :root stays the one source of truth for colors.
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-// ---- 顯示規則：濃度 1 位小數（>1000 nM 改 µM）、螢光 4 位有效數字、百分比 1 位小數 ----
+// ---- Display rules: concentration to 1 dp (>1000 nM switches to µM), fluorescence to 4 sig figs, percent to 1 dp ----
 
 function formatConcentration(nM) {
   if (nM === null || nM === undefined || !Number.isFinite(nM)) return "--";
@@ -62,8 +64,9 @@ function formatConcentrationInterval(interval) {
   return `${formatConcentration(interval[0])} – ${formatConcentration(interval[1])}`;
 }
 
-// basic counts 的量級從 0.001 到上千都有（真實裝置正規化後大約 0.05–5），
-// 固定小數位會把小值顯示成 0，所以取 4 位有效數字；≥ 1000 才取整數。
+// Basic counts range from 0.001 to the thousands (the real device normalizes to roughly
+// 0.05-5); a fixed decimal count would round small values to 0, so this uses 4 significant
+// figures instead, rounding to an integer only above 1000.
 function formatFluorescence(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "--";
   if (value === 0) return "0";
@@ -71,7 +74,7 @@ function formatFluorescence(value) {
   return String(Number(value.toPrecision(4)));
 }
 
-// 殘差這類有正負號的螢光值。
+// For signed fluorescence values, such as residuals.
 function formatSignedFluorescence(value) {
   if (!Number.isFinite(value)) return "--";
   const text = formatFluorescence(value);
@@ -83,7 +86,7 @@ function formatPercent(fraction) {
   return `${(fraction * 100).toFixed(1)}%`;
 }
 
-// 資料一律存 UTC，畫面一律顯示瀏覽器的當地時間。
+// Data is always stored in UTC; the display always shows the browser's local time.
 function formatLocalTime(utc) {
   return utc ? new Date(utc).toLocaleString() : "--";
 }
@@ -98,13 +101,13 @@ function formatAgo(utc) {
   return `${Math.round(hours / 24)} d ago`;
 }
 
-// 4PL 方程式本身（沒有參數）。參數一律來自 API 回傳的 CalibrationCurve。
+// The 4PL equation itself (no fitting). Parameters always come from the API's returned CalibrationCurve.
 function fourPL(c, params) {
   if (c <= 0) return params.bottom;
   return params.bottom + (params.top - params.bottom) / (1 + (params.ec50_nM / c) ** params.hill);
 }
 
-// ---- DOM 小工具 -----------------------------------------------------
+// ---- DOM helpers -----------------------------------------------------
 
 function hwEl(tag, className, text) {
   const el = document.createElement(tag);
@@ -129,8 +132,8 @@ function setHardwareStatus(el, text, kind) {
   el.className = "status-message" + (kind ? ` ${kind}` : "");
 }
 
-// 因為「還不能做」而停用的按鈕，旁邊一定要寫出原因，不能只是變灰。
-// reason 為空字串 / null 時啟用按鈕並隱藏說明。
+// A button disabled because the action "isn't possible yet" must always show why next to it, not just gray out.
+// An empty string / null reason enables the button and hides the explanation.
 function setBlocked(button, reasonEl, reason) {
   button.disabled = Boolean(reason);
   button.classList.toggle("is-blocked", Boolean(reason));
@@ -152,7 +155,7 @@ function renderFlagChips(flags) {
   return row;
 }
 
-// 數字小卡：標題、大數字、一行補充說明。
+// A stat tile: a label, a large value, and one line of supporting text.
 function hwStatTile(label, value, sub) {
   const tile = hwEl("div", "sensor-stat");
   tile.appendChild(hwEl("span", "sensor-stat-label", label));
@@ -161,7 +164,7 @@ function hwStatTile(label, value, sub) {
   return tile;
 }
 
-// key/value 表格的一列；value 可以是字串或 DOM 節點。
+// One row of a key/value table; value can be a string or a DOM node.
 function appendKvRow(tbody, label, value) {
   const row = hwEl("tr");
   const th = hwEl("th", null, label);
@@ -173,7 +176,7 @@ function appendKvRow(tbody, label, value) {
   tbody.appendChild(row);
 }
 
-// 十個通道的數值表（儀器狀態頁的暗讀 / blank 讀值用）。
+// A ten-channel value table (used by the instrument status page for dark / blank readings).
 function renderChannelTable(raw) {
   const wrapper = hwEl("div", "table-wrapper table-spaced");
   const table = hwEl("table", "channel-table");
@@ -198,10 +201,11 @@ function hardwareQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
-// ---- 解混基底附註 ---------------------------------------------------
-// 基底版本以 "placeholder" 開頭表示尚未以 sfGFP 標準品標定：凡是顯示
-// fluorescence 的地方都要附註。頁面上放一個帶 data-basis-note 的元素，
-// 這裡負責填字；動態產生的畫面用 hwBasisNote() 建元素再呼叫 fillBasisNotes()。
+// ---- Unmixing-basis note ---------------------------------------------------
+// A basis version starting with "placeholder" means it hasn't been calibrated with an sfGFP
+// standard yet: every place that shows fluorescence must carry this note. Pages place an
+// element with data-basis-note, and this fills in the text; dynamically generated views
+// build the element with hwBasisNote() and then call fillBasisNotes().
 
 let hardwareBasisNotePromise = null;
 
@@ -209,7 +213,7 @@ function hardwareBasisNoteText() {
   if (!hardwareBasisNotePromise) {
     hardwareBasisNotePromise = HardwareApi.getUnmixBasis()
       .then((basis) => (String(basis.version).startsWith("placeholder")
-        ? `解混基底尚未標定 · Unmixing basis not yet calibrated (${basis.version}); the signal is the F4 channel alone.`
+        ? `Unmixing basis not yet calibrated (${basis.version}); the signal is the F4 channel alone.`
         : ""))
       .catch((err) => {
         hardwareBasisNotePromise = null;
@@ -234,11 +238,11 @@ async function fillBasisNotes(root = document) {
   }
 }
 
-// ---- 瀏覽器端的小記憶（只是方便，不是資料） ---------------------------
+// ---- Browser-side scratch memory (just a convenience, not real data) ---------------------------
 
-// v2：舊的 key 指向已移除的模擬裝置產生的 plan 與暗讀，由 hardware_local.js 清掉。
+// v2: the old key pointed at plans and dark reads produced by the now-removed simulated device; cleared by hardware_local.js.
 const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v2.lastPlanId";
-// 資料契約目前沒有「上次暗讀時間」，先由前端記住；後端補上欄位後改讀 API。
+// The data contract has no "last dark read time" field yet, so the frontend remembers it for now; switch to the API once the backend adds the field.
 const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v2.lastDarkReadUtc";
 
 function hardwareRemember(key, value) {
@@ -246,7 +250,7 @@ function hardwareRemember(key, value) {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   } catch (err) {
-    // 無痕模式或被停用：只是少了「接續上次」的便利。
+    // Private browsing or disabled: just loses the "resume where I left off" convenience.
   }
 }
 
@@ -258,7 +262,7 @@ function hardwareRecall(key) {
   }
 }
 
-// ---- 子導覽列與儀器狀態小標 -----------------------------------------
+// ---- Subnav and instrument status badge -----------------------------------------
 
 function renderHardwareSubnav() {
   const nav = document.getElementById("hardware-subnav");

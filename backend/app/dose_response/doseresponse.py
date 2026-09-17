@@ -58,7 +58,7 @@ class LodLoqResult:
 
 def _hill_log10x(log10_A: np.ndarray, bottom: float, top: float, log10_ec50: float, n: float) -> np.ndarray:
     """Hill equation reparametrized for fitting in log10[A] space (spec §5.3:
-    "在 log10[A] 座標上擬合較穩定"). Delegates to models.hill() so the Hill
+    "more stable to fit in log10[A] coordinates"). Delegates to models.hill() so the Hill
     formula itself has one implementation; this only converts the log10
     x-axis and log10(EC50) parameter back to linear before calling it -
     EC50 can span many orders of magnitude (1e-9 to 1e-5 M here), which is

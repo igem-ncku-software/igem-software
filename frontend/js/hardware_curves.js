@@ -1,8 +1,8 @@
 // =========================================================
-// 對接 hardware-curves.html：列出所有已存檔的校正曲線，標出 active /
-// available / stale，可以切換 active、展開詳情。
-// 目標元素：#curves-status / #curves-empty / #curves-table-wrapper / #curves-table-body
-// 對接 API：listCurves / getDeviceStatus / saveCurve（切換 is_active）
+// Backs hardware-curves.html: lists every saved calibration curve, marking it
+// active / available / stale, and lets you switch the active one or expand details.
+// Target elements: #curves-status / #curves-empty / #curves-table-wrapper / #curves-table-body
+// Backing API: listCurves / getDeviceStatus / saveCurve (to toggle is_active)
 // =========================================================
 
 let curvesList = [];
@@ -13,7 +13,7 @@ const openCurveDetails = new Set();
 const CURVE_STATUS_CHIP = { active: "ok", available: "", stale: "error" };
 const CURVES_COLUMN_COUNT = 8;
 
-// stale 優先：組態不符的曲線就算 is_active 也不能用。
+// Stale takes priority: a curve with a mismatched config can't be used even if is_active.
 function curveStatus(curve) {
   if (curve.config_fingerprint !== curvesFingerprint) return "stale";
   return curve.is_active ? "active" : "available";
@@ -21,7 +21,7 @@ function curveStatus(curve) {
 
 async function loadCurves(message) {
   const statusEl = document.getElementById("curves-status");
-  // 曲線存在瀏覽器端：裝置連不上時照樣列出，只是無法判斷 stale。
+  // Curves live in the browser: they still list even when the device is unreachable, just without a stale check.
   const [curvesResult, statusResult] = await Promise.allSettled([HardwareApi.listCurves(), HardwareApi.getDeviceStatus()]);
   if (curvesResult.status === "rejected") {
     console.error("Failed to load curves:", curvesResult.reason);

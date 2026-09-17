@@ -1,22 +1,22 @@
 // =========================================================
-// 對接 hardware-measure.html：量一管樣品，顯示 sfGFP 訊號、推得的 AHL 濃度、
-// QC flags、十通道長條圖與組態 provenance。
-// 目標元素：
-//   #measure-curve（右上角目前使用的曲線）
+// Backs hardware-measure.html: measures one sample tube, showing the sfGFP signal, the
+// inferred AHL concentration, QC flags, a ten-channel bar chart, and config provenance.
+// Target elements:
+//   #measure-curve (the curve currently in use, top right)
 //   #measure-form / #measure-sample-id / #measure-sample-type
 //   #measure-known-field / #measure-known-concentration / #measure-read-button
 //   #measure-status / #measure-result / #measure-signal(-sub)
 //   #measure-concentration(-sub) / #measure-flags / #measure-channel-chart / #measure-provenance
-// 對接 API：getActiveCurve / getDeviceStatus / readSample / invert
+// Backing API: getActiveCurve / getDeviceStatus / readSample / invert
 //
-// 反推結果只有 status === "ok" 才顯示數字濃度。其他狀態一律不給點估計，
-// 曲線範圍外絕對不外插。
+// The inverse estimate only shows a numeric concentration when status === "ok". Every other
+// status gets no point estimate at all, and nothing is ever extrapolated outside the curve's range.
 // =========================================================
 
 let channelChart = null;
 
-// 在 F4 / F3 長條上方標註文字。Chart.js 沒有內建 annotation，外掛又是新依賴，
-// 所以自己畫。
+// Draws a text label above the F4 / F3 bars. Chart.js has no built-in annotation support,
+// and the plugin would be a new dependency, so this draws it manually.
 const channelAnnotationPlugin = {
   id: "channelAnnotations",
   afterDatasetsDraw(chart, _args, options) {
@@ -59,7 +59,7 @@ function renderCurveChip(curve, config) {
   );
 }
 
-// 裝置連不上時仍然要顯示曲線本身，只是沒辦法判斷它是否 stale。
+// The curve itself should still show when the device is unreachable, just without a stale check.
 async function refreshCurveChip() {
   const [curveResult, statusResult] = await Promise.allSettled([
     HardwareApi.getActiveCurve(),
@@ -85,7 +85,7 @@ function renderEstimate(estimate, curve, measurement) {
       sub.textContent = `95% CI ${formatConcentrationInterval(estimate.ci95_nM)} · curve ${estimate.curve_id}`;
       break;
     case "below_lod":
-      // range_nM.min = max(LOD, lowest standard)，通常就等於 LOD。
+      // range_nM.min = max(LOD, lowest standard), which usually just equals the LOD.
       value.textContent = curve ? `< ${formatConcentration(curve.range_nM.min)}` : "< LOD";
       sub.textContent = curve
         ? `Below the curve's lower limit (LOD ${formatConcentration(curve.lod_nM)}). No point estimate.`
@@ -157,7 +157,7 @@ function renderChannelChart(raw) {
         },
         y: {
           beginAtZero: true,
-          grace: "12%", // 留空間給長條上方的標註文字
+          grace: "12%", // leaves room for the label text above the bars
           title: { display: true, text: "Basic counts (dark-subtracted)", color: ink },
           grid: { color: rule },
           ticks: { color: muted },
@@ -188,7 +188,7 @@ function renderProvenance(m, config) {
     el.appendChild(span);
   };
 
-  // 只有組態沒變時，目前的組態細節才代表這筆讀值；否則只能給 fingerprint。
+  // The current config details only describe this reading if the config hasn't changed; otherwise all that can be shown is the fingerprint.
   if (config && config.fingerprint === m.config_fingerprint) {
     item("LED", `${config.led_current_mA} mA`);
     item("Gain", `${config.gain}×`);
@@ -234,7 +234,7 @@ async function readMeasureSample(event) {
   }
 
   button.disabled = true;
-  // 先收起上一管的結果：讀取失敗時不能讓舊數字留在畫面上，看起來像這一管的。
+  // Hide the previous tube's result first: if this read fails, the old numbers can't be left on screen looking like they belong to this one.
   document.getElementById("measure-result").hidden = true;
   setHardwareStatus(statusEl, `Reading ${sampleId}...`, null);
 
@@ -244,7 +244,7 @@ async function readMeasureSample(event) {
       HardwareApi.invert(m.fluorescence, m.config_fingerprint),
       HardwareApi.getActiveCurve(),
     ]);
-    // 兩個呼叫之間 active 曲線可能被換掉；對不上就不拿它的 LOD / range 來顯示。
+    // The active curve could be swapped between the two calls; if they don't match, don't use its LOD / range for display.
     const matchingCurve = curve && curve.curve_id === estimate.curve_id ? curve : null;
 
     renderCurveChip(curve, status.config);

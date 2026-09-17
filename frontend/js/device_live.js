@@ -1,44 +1,52 @@
 // =========================================================
-// 首頁的 CAPTURE-Screen 即時光譜。
-// 目標元素：
+// The landing page's CAPTURE-Screen live spectrum.
+// Target elements:
 //   #live-toggle / #live-dot / #live-dot-label
 //   #live-f4
 //   #live-empty / #live-spectrum / #live-chart / #live-settings
-// 依賴 js/config.js（BACKEND_BASE_URL）與 Chart.js。
+// Depends on js/config.js (BACKEND_BASE_URL) and Chart.js.
 //
-// 頁面一打開就連 WS /api/live/spectrum，隨時知道裝置在不在線；Live 開關打開、
-// 而且分頁在前景時才送 live_start。後端統計所有在看的瀏覽器，裝置的 LED 只在
-// 有人在看時亮（一直亮會加熱、漂白樣品），所以開關預設關閉，分頁切到背景也
-// 先叫它關掉，回來再開。
+// Connects to WS /api/live/spectrum as soon as the page opens, so device presence is known
+// right away; live_start is only sent while the Live switch is on AND the tab is in the
+// foreground. The backend counts every watching browser, and the device's LED only lights
+// up while someone is watching (leaving it on would heat and bleach the sample), so the
+// switch defaults off, and moving the tab to the background turns it off too, resuming when
+// the tab comes back.
 //
-// 每一項資訊只放在一個地方：
-//   圓點旁的一個詞     現在的狀態（liveStatus()）
-//   圖表位置的框       細節與下一步（liveStatus()）
-//   圖表下的設定列     哪一台、韌體、Wi-Fi（離線時是最後回報的那台，不含 Wi-Fi），
-//                      以及 gain、積分時間、LED 電流、滿格值——少了它們原始計數無從解讀
+// Every fact lives in exactly one place:
+//   the word next to the dot       current status (liveStatus())
+//   the box where the chart sits   details and next step (liveStatus())
+//   the settings row under the chart   which device, firmware, Wi-Fi (the last-reported
+//                      device and no Wi-Fi once offline), plus gain, integration time,
+//                      LED current, and full scale — without these the raw counts can't be interpreted
 //
-// 規則：
-//   - 即時資料只畫圖，不寫進任何儲存、不進 plan、不擬合
-//   - 只特別標出 sfGFP 通道 F4，不顯示漏光（F3）與更新率
-//   - 裝置離線或連線中斷就清空圖表，不把最後一筆留著當成現在的數值
-//   - 斷線自動重連（睡著的 Render 後端要幾十秒才醒），不用重新整理頁面
+// Rules:
+//   - Live data is only ever drawn; it's never written to storage, added to a plan, or fitted
+//   - Only the sfGFP channel F4 is called out; leakage (F3) and the update rate aren't shown
+//   - The chart is cleared whenever the device goes offline or the connection drops — the last
+//     frame is never left showing as if it were current
+//   - Reconnects automatically on disconnect (a sleeping Render backend can take tens of
+//     seconds to wake), no page reload needed
 // =========================================================
 
 const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/live/spectrum`;
 const LIVE_RECONNECT_MIN_MS = 1000;
 const LIVE_RECONNECT_MAX_MS = 15000;
-// 裝置沉默時後端會自己推離線；但裝置在線時每 5 秒就有一則 presence，這麼久沒收到代表瀏覽器到後端的連線默默斷了。
+// The backend pushes offline on its own once the device goes silent; but while online it
+// sends a presence message every 5 s, so going this long without one means the browser-to-backend
+// connection has quietly dropped.
 const LIVE_PRESENCE_STALE_MS = 20000;
-// 每秒一次：重連倒數與「last seen … ago」要跟著走。
+// Once a second: the reconnect countdown and "last seen … ago" need to keep advancing.
 const LIVE_TICK_MS = 1000;
-// 積分時間與滿格值跟 hardware_processing.js 同一套公式：(ATIME+1)(ASTEP+1) 步，每步 2.78 µs，
-// ADC 在 min(65535, (ATIME+1)(ASTEP+1)) 飽和。
+// Integration time and full scale use the same formula as hardware_processing.js: (ATIME+1)(ASTEP+1)
+// steps, 2.78 µs each, with the ADC saturating at min(65535, (ATIME+1)(ASTEP+1)).
 const LIVE_ADC_MAX_COUNTS = 65535;
 const LIVE_ASTEP_UNIT_MS = 2.78e-3;
-// 圖表比這窄（手機）時，2.4 的長寬比只剩一百多 px 高、十個軸標籤也擠不下：改成接近方形，標籤只留通道代號。
+// Below this chart width (mobile), a 2.4 aspect ratio leaves only ~100 px of height and no
+// room for ten axis labels: switch to a near-square ratio with channel codes only as labels.
 const LIVE_NARROW_CHART_PX = 480;
 
-// 首頁不載入 hardware_common.js，通道名稱在這裡自己定義一份。
+// The landing page doesn't load hardware_common.js, so channel names are defined again here on their own.
 const LIVE_CHANNELS = [
   { key: "F1", nm: 415 },
   { key: "F2", nm: 445 },
@@ -55,22 +63,22 @@ const LIVE_CHANNELS = [
 let liveSocket = null;
 let liveReconnectMs = LIVE_RECONNECT_MIN_MS;
 let liveReconnectTimer = null;
-let liveRetryAt = 0;        // 下一次重連的時間；0 表示沒有在等
-let liveWanted = false;     // 使用者開著 Live
-let liveOnline = false;     // 後端最近一次說裝置在線
-let liveDevice = null;      // 裝置最近一次回報的 status
+let liveRetryAt = 0;        // time of the next reconnect attempt; 0 means not waiting
+let liveWanted = false;     // the user has Live switched on
+let liveOnline = false;     // the backend's most recent word on whether the device is online
+let liveDevice = null;      // the device's most recently reported status
 let liveLastSeen = null;
 let liveLastPresenceMs = 0;
-let liveStreaming = false;  // 開著 Live 之後已經收到至少一幀，圖表正顯示著
+let liveStreaming = false;  // at least one frame has arrived since Live was turned on, and the chart is showing it
 let liveChart = null;
 
-// ---- 小工具 ----------------------------------------------------------
+// ---- Small helpers ----------------------------------------------------------
 
 function liveEl(id) {
   return document.getElementById(id);
 }
 
-// 內容沒變就不重設：#live-dot-label 在 aria-live 區塊裡，每秒重設會讓螢幕閱讀器一直重唸。
+// Skip resetting when the content hasn't changed: #live-dot-label sits in an aria-live region, and resetting it every second would make a screen reader keep re-announcing it.
 function setLiveText(id, text) {
   const el = liveEl(id);
   if (el.textContent !== text) el.textContent = text;
@@ -93,7 +101,7 @@ function liveAgo(iso) {
   return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-// ["F4", "515 nm"]：圖表軸上分兩行；文字裡接成一行。
+// ["F4", "515 nm"]: two lines on the chart axis; joined into one line for text.
 function liveChannelLines({ key, nm, name }) {
   return nm ? [key, `${nm} nm`] : [name];
 }
@@ -110,12 +118,12 @@ function liveIntegrationMs(config) {
   return (config.atime + 1) * (config.astep + 1) * LIVE_ASTEP_UNIT_MS;
 }
 
-// 開著 Live 但分頁在背景，沒有人看得到，LED 不該為它亮著。
+// Live is on but the tab is backgrounded, so nobody can see it — the LED shouldn't be lit for that.
 function liveWatching() {
   return liveWanted && !document.hidden;
 }
 
-// ---- 狀態 ------------------------------------------------------------
+// ---- Status ------------------------------------------------------------
 
 function liveStatus() {
   if (liveSocket?.readyState !== WebSocket.OPEN) {
@@ -123,7 +131,7 @@ function liveStatus() {
     return {
       dot: "reconnecting",
       label: "Connecting",
-      // 睡著的 Render 後端要將近一分鐘才醒，不說一聲看起來像壞了。
+      // A sleeping Render backend can take nearly a minute to wake — without saying so, it looks broken.
       message: liveRetryAt && retryS > 0
         ? `Connection lost. Retrying in ${retryS} s`
         : "Connecting to backend (up to 1 min after idle)...",
@@ -158,7 +166,7 @@ function renderSettings() {
   const items = [
     ["Build", liveDevice.build_id],
     ["Firmware", liveDevice.firmware_version],
-    // 離線時 Wi-Fi 強度已經是舊的，不列出來。
+    // Wi-Fi strength is stale once offline, so it's left out.
     ...(liveOnline ? [["Wi-Fi", `${liveDevice.wifi_rssi} dBm`]] : []),
     ["Gain", `${config.gain}×`],
     ["Integration", `${liveIntegrationMs(config).toFixed(2)} ms`],
@@ -182,7 +190,7 @@ function renderLive() {
   liveEl("live-dot").className = `live-dot is-${dot}`;
   setLiveText("live-dot-label", label);
   setLiveText("live-empty", message);
-  // 量測期間沒有新幀：圖表與 F4 變淡，不讓上一幀看起來像現在的數值。
+  // No new frames arrive during a measurement: the chart and F4 fade, so the last frame doesn't look like a current value.
   liveEl("live-spectrum").closest(".live-card").classList.toggle("is-paused", liveStreaming && liveDevice?.state === "MEASURING");
   renderSettings();
 }
@@ -197,7 +205,7 @@ function clearLiveChart() {
   liveEl("live-empty").hidden = false;
 }
 
-// ---- 圖表 ------------------------------------------------------------
+// ---- Chart ------------------------------------------------------------
 
 function liveAspectRatio(width) {
   return width < LIVE_NARROW_CHART_PX ? 1.3 : 2.4;
@@ -270,7 +278,7 @@ function drawLiveFrame(raw) {
   const dataset = liveChart.data.datasets[0];
   dataset.data = values;
   dataset.backgroundColor = LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : muted));
-  // 只放大不縮小，長條才不會隨最高的通道一直跳；清空圖表後重新開始。
+  // Grows only, never shrinks, so the bars don't keep jumping around with the highest channel; resets when the chart is cleared.
   const y = liveChart.options.scales.y;
   y.suggestedMax = Math.max(y.suggestedMax ?? 0, ...values);
   liveChart.update();
@@ -278,7 +286,7 @@ function drawLiveFrame(raw) {
   liveEl("live-f4").textContent = liveCounts(raw.F4);
 }
 
-// ---- 訊息 ------------------------------------------------------------
+// ---- Messages ------------------------------------------------------------
 
 function onLivePresence(message) {
   liveOnline = message.online === true;
@@ -300,7 +308,7 @@ function onLiveFrame(message) {
   }
   if (!liveWatching()) return;
 
-  // 先顯示再建圖表：Chart.js 要量得到容器寬度才選得對長寬比。
+  // Show before building the chart: Chart.js needs to measure the container's width to pick the right aspect ratio.
   liveStreaming = true;
   liveEl("live-empty").hidden = true;
   liveEl("live-spectrum").hidden = false;
@@ -309,7 +317,7 @@ function onLiveFrame(message) {
   renderLive();
 }
 
-// ---- 連線 ------------------------------------------------------------
+// ---- Connection ------------------------------------------------------------
 
 function sendLiveCommand() {
   if (liveSocket?.readyState === WebSocket.OPEN) {
@@ -380,21 +388,21 @@ document.addEventListener("DOMContentLoaded", () => {
   openLiveSocket();
   setInterval(tickLive, LIVE_TICK_MS);
 
-  // 分頁切到背景就沒人看得到：叫 LED 關掉；回到前景再開，開關維持原樣。
+  // Moving the tab to the background means nobody can see it: turn the LED off, and back on when it returns to the foreground — the switch itself stays as it was.
   document.addEventListener("visibilitychange", () => {
     if (!liveWanted) return;
     sendLiveCommand();
     clearLiveChart();
     renderLive();
   });
-  // 離開頁面就關掉連線：後端少算一個觀看者，沒人看時會自己叫裝置關 LED。
+  // Closes the connection on leaving the page: the backend counts one fewer viewer, and turns the device's LED off itself once nobody is watching.
   window.addEventListener("pagehide", () => {
     clearTimeout(liveReconnectTimer);
     const socket = liveSocket;
     liveSocket = null;
     socket?.close();
   });
-  // 從上一頁／下一頁快取回來時頁面狀態還在，只要重新連線。
+  // Coming back from the back/forward cache, page state is still intact — just reconnect.
   window.addEventListener("pageshow", (event) => {
     if (event.persisted && !liveSocket) openLiveSocket();
   });

@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# 一次裝好後端環境：建立 .venv 並安裝 requirements.txt。
-# 用法（在 repo 根目錄）：bash scripts/setup.sh
+# Sets up the backend environment in one go: creates .venv and installs requirements.txt.
+# Usage (from the repo root): bash scripts/setup.sh
 #
-# 前端沒有依賴、沒有 build step，所以這支只處理後端。
+# The frontend has no dependencies and no build step, so this script only handles the backend.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/backend"
 
 if [ ! -d .venv ]; then
-  echo "==> 建立虛擬環境 backend/.venv"
+  echo "==> Creating virtual environment backend/.venv"
   python3 -m venv .venv 2>/dev/null || python -m venv .venv
 else
-  echo "==> backend/.venv 已存在，沿用"
+  echo "==> backend/.venv already exists, reusing it"
 fi
 
-# 直接叫 venv 裡的 python，不需要先 activate，這樣腳本在哪個 shell 跑都一樣。
+# Call the venv's python directly without activating, so the script behaves the same in any shell.
 PY=".venv/bin/python"
-[ -x "$PY" ] || PY=".venv/Scripts/python.exe"   # Windows 的 venv 路徑不一樣
+[ -x "$PY" ] || PY=".venv/Scripts/python.exe"   # venv path differs on Windows
 
-echo "==> 安裝依賴"
+echo "==> Installing dependencies"
 "$PY" -m pip install --upgrade pip --quiet
 "$PY" -m pip install -r requirements.txt
 
 echo
-echo "完成。接著執行 bash scripts/dev.sh 啟動前後端。"
+echo "Done. Next, run bash scripts/dev.sh to start the frontend and backend."

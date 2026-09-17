@@ -1,23 +1,24 @@
 // =========================================================
-// 對接 hardware-calibration.html：建立 calibration plan，依 slot 順序逐管量測。
+// Backs hardware-calibration.html: creates a calibration plan and measures each tube in slot order.
 //
-// 狀態機（由 plan 資料推出來，不另外存）：
-//   no_plan      -> 只顯示建立表單（網址沒有 ?plan=）
-//   plan_created -> 清單、進度 0/N，Read 可用
-//   running      -> 進度 n/N，Read 可用，Go to fit 停用
-//   complete     -> 全部已測，Go to fit 可用
+// State machine (derived from the plan data, not stored separately):
+//   no_plan      -> shows only the create form (no ?plan= in the URL)
+//   plan_created -> list, progress 0/N, Read enabled
+//   running      -> progress n/N, Read enabled, Go to fit disabled
+//   complete     -> everything measured, Go to fit enabled
 //
-// 儀器只有一支 cuvette，所以「下一管是什麼」固定顯示在頁面頂端的 sticky 區塊；
-// 按 Read 會量「下一管」並自動記錄、跳下一管。已測的管可以按 Re-read 重測。
+// The instrument has only one cuvette, so "what's the next tube" is pinned in a sticky
+// block at the top of the page; pressing Read measures the "next tube", records it
+// automatically, and advances to the next one. An already-measured tube can be redone with Re-read.
 //
-// 目標元素：#plan-create-card / #plan-form / #plan-* 系列，見 HTML
-// 對接 API：createCalibrationPlan / getCalibrationPlan / recordPlanMeasurement /
+// Target elements: #plan-create-card / #plan-form / #plan-* family, see the HTML
+// Backing API: createCalibrationPlan / getCalibrationPlan / recordPlanMeasurement /
 //   readSample / getDeviceStatus
 // =========================================================
 
 let plan = null;
-let planDeviceFingerprint = null; // null = 裝置連不上，無法確認組態
-let rereadSlot = null; // 使用者按了 Re-read 的 slot；null 表示量「下一管」
+let planDeviceFingerprint = null; // null = device unreachable, config can't be confirmed
+let rereadSlot = null; // the slot the user pressed Re-read on; null means measure the "next tube"
 let planReading = false;
 
 const PLAN_STATE_CHIP = {
@@ -66,7 +67,7 @@ async function showCreateForm(errorText) {
   updatePlanPreview();
   if (errorText) setHardwareStatus(document.getElementById("plan-create-status"), errorText, "error");
 
-  // 上次在這個瀏覽器操作的 plan：給一個接續的連結，但不自動跳過去。
+  // The last plan worked on in this browser: offer a link to resume it, but don't jump there automatically.
   const lastId = hardwareRecall(HARDWARE_LAST_PLAN_KEY);
   if (!lastId) return;
   try {
@@ -91,14 +92,14 @@ async function createPlan(event) {
   setHardwareStatus(statusEl, "Creating plan...", null);
 
   try {
-    // plan 綁定裝置目前的組態，所以建立時裝置必須連得上（API 層會先問裝置）。
+    // The plan is bound to the device's current config, so the device must be reachable to create one (the API layer checks the device first).
     const created = await HardwareApi.createCalibrationPlan({
       concentrations_nM: parseConcentrationList(document.getElementById("plan-concentrations").value),
       replicates: Number(document.getElementById("plan-replicates").value),
       blanks: Number(document.getElementById("plan-blanks").value),
       timepoint: document.getElementById("plan-timepoint").value,
     });
-    // 網址帶上 plan id：重新整理或分享連結都會回到同一個 run。
+    // Carry the plan id in the URL: a refresh or a shared link both return to the same run.
     history.replaceState(null, "", `?plan=${encodeURIComponent(created.plan_id)}`);
     setHardwareStatus(statusEl, "", null);
     await openPlan(created.plan_id, created);
@@ -116,7 +117,7 @@ async function openPlan(planId, alreadyLoaded) {
   document.getElementById("plan-create-card").hidden = true;
   const runCard = document.getElementById("plan-run-card");
 
-  // plan 存在瀏覽器端：裝置連不上時照樣打開，只是無法確認組態。
+  // The plan lives in the browser: it still opens when the device is unreachable, just without a config check.
   const [planResult, statusResult] = await Promise.allSettled([
     alreadyLoaded ? Promise.resolve(alreadyLoaded) : HardwareApi.getCalibrationPlan(planId),
     HardwareApi.getDeviceStatus(),
@@ -168,7 +169,7 @@ function renderPlan() {
       "error");
   }
 
-  // 下一管提示
+  // Next-tube prompt
   const banner = document.getElementById("next-tube");
   const label = document.getElementById("next-tube-label");
   const value = document.getElementById("next-tube-value");

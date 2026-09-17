@@ -1,23 +1,24 @@
 // =========================================================
-// CAPTURE-Screen 的暫代後端：calibration plan / curve 的存取、4PL 加權擬合
-// （Levenberg–Marquardt）、LOD/LOQ、濃度反推與 95% CI（delta method），以及
-// 需要儲存狀態才能判斷的 QC flag。
+// CAPTURE-Screen's temporary stand-in backend: calibration plan / curve storage, weighted
+// 4PL fitting (Levenberg-Marquardt), LOD/LOQ, concentration inversion with a 95% CI
+// (delta method), and the QC flags that need stored state to determine.
 //
-// 裝置只負責讀值（經由後端的 POST /api/hardware/read）；plan 與 curve 的儲存和
-// 擬合後端還沒有，所以先放在瀏覽器的 localStorage（讀寫失敗時退回記憶體）。
-// 之後後端有了儲存，這支整個由 HTTP 取代。
+// The device only takes readings (via the backend's POST /api/hardware/read); the backend
+// has no plan/curve storage or fitting yet, so this lives in the browser's localStorage for
+// now (falling back to memory if reads/writes fail). Once the backend has storage, this
+// whole file gets replaced by HTTP calls.
 //
-// 只收 mode 為 "measurement" 的讀值轉成的 Measurement；即時串流的資料不會
-// 也不可以進到這裡。
+// Only accepts Measurements converted from a mode "measurement" reading; live-stream data
+// never can and never should reach this.
 //
-// 頁面一律不直接呼叫這支，只透過 js/hardware_api.js。
+// Pages never call this directly — only through js/hardware_api.js.
 // =========================================================
 
-// 反推範圍的上限：4PL 到達 95% span 之後太平，反推誤差會爆掉。
+// Upper bound on the inversion range: past 95% of the 4PL span the curve is too flat, and inversion error blows up.
 const LOCAL_RANGE_SPAN_FRACTION = 0.95;
 const LOCAL_STORE_KEY = "lasreader.hardware.local.v2";
-// v2 以前的資料全部來自已移除的模擬裝置：載入時清掉，模擬的 plan、曲線與暗讀紀錄
-// 才不會混進真實量測。
+// Everything before v2 came from the now-removed simulated device: clear it on load so
+// simulated plans, curves, and dark-read records never mix in with real measurements.
 const LOCAL_LEGACY_KEYS = [
   "lasreader.hardware.local.v1",
   "lasreader.hardware.mock.v1",
@@ -29,18 +30,18 @@ const LOCAL_LEGACY_KEYS = [
 try {
   for (const key of LOCAL_LEGACY_KEYS) localStorage.removeItem(key);
 } catch (err) {
-  // localStorage 不能用，也就沒有舊資料要清。
+  // localStorage is unavailable, so there's no old data to clear either.
 }
 
-// ---- 狀態儲存 --------------------------------------------------------
+// ---- State storage --------------------------------------------------------
 
 function localDefaultStore() {
   return {
     plans: {},         // plan_id -> CalibrationPlan
-    drafts: {},        // curve_id -> { curve, cov, noise }：已擬合、尚未存檔
-    curves: {},        // curve_id -> CalibrationCurve：已存檔
-    curve_private: {}, // curve_id -> { cov, noise }：反推 CI 需要，但不在資料契約裡
-    blank_scatter: {}, // config fingerprint -> 最近一次合格 blank 的 scatter（HIGH_SCATTER 的基準）
+    drafts: {},        // curve_id -> { curve, cov, noise }: fitted but not yet saved
+    curves: {},        // curve_id -> CalibrationCurve: saved
+    curve_private: {}, // curve_id -> { cov, noise }: needed for inversion CI, but not part of the data contract
+    blank_scatter: {}, // config fingerprint -> scatter of the most recent passing blank (the HIGH_SCATTER baseline)
   };
 }
 
@@ -51,7 +52,7 @@ function localLoad() {
     const raw = localStorage.getItem(LOCAL_STORE_KEY);
     if (raw) return { ...localDefaultStore(), ...JSON.parse(raw) };
   } catch (err) {
-    // localStorage 被停用或內容壞掉：退回記憶體。
+    // localStorage is disabled or its contents are corrupt: fall back to memory.
   }
   return localMemoryStore ?? localDefaultStore();
 }
@@ -61,11 +62,11 @@ function localSave(store) {
   try {
     localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(store));
   } catch (err) {
-    // 同上，記憶體裡那份還在。
+    // Same as above; the in-memory copy is still there.
   }
 }
 
-// ---- 小工具 ----------------------------------------------------------
+// ---- Small helpers ----------------------------------------------------------
 
 function localId(prefix) {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -77,7 +78,7 @@ function localFail(message) {
   throw new Error(message);
 }
 
-// plan 裡 label 用的濃度字串；超過 1000 nM 改寫成 µM，跟頁面的顯示規則一致。
+// The concentration string used in a plan's label; above 1000 nM it's rewritten as µM, matching the page's display rule.
 function localConcentrationLabel(nM) {
   return nM > 1000 ? `${+(nM / 1000).toFixed(3)} µM` : `${+nM.toFixed(3)} nM`;
 }
@@ -94,8 +95,8 @@ function localSampleSd(values) {
 
 // ---- 4PL -------------------------------------------------------------
 
-// 擬合時的參數向量是 [top, bottom, ln(ec50_nM), hill]：用 ln(EC50) 讓 LM 在
-// 對數尺度上走，EC50 也不會被推成負數。
+// The parameter vector during fitting is [top, bottom, ln(ec50_nM), hill]: using ln(EC50)
+// keeps LM stepping on a log scale and stops EC50 from ever being pushed negative.
 function localModel(c, p) {
   if (c <= 0) return p[1];
   const u = Math.exp(p[3] * (p[2] - Math.log(c)));
@@ -105,13 +106,13 @@ function localModel(c, p) {
 function localGradient(c, p) {
   if (c <= 0) return [0, 1, 0, 0];
   const lnRatio = p[2] - Math.log(c);
-  const s = 1 / (1 + Math.exp(p[3] * lnRatio)); // u 溢位成 Infinity 時 s = 0，仍然安全
+  const s = 1 / (1 + Math.exp(p[3] * lnRatio)); // still safe when u overflows to Infinity, giving s = 0
   const span = p[0] - p[1];
-  const ds = s * (1 - s); // = u / (1 + u)^2，數值上比直接算穩定
+  const ds = s * (1 - s); // = u / (1 + u)^2, more numerically stable than computing it directly
   return [s, 1 - s, -span * ds * p[3], -span * ds * lnRatio];
 }
 
-// ---- 線性代數（4x4 就夠） ---------------------------------------------
+// ---- Linear algebra (4x4 is enough) ---------------------------------------
 
 function localSolve(matrix, rhs) {
   const n = rhs.length;
@@ -142,7 +143,7 @@ function localInverse(matrix) {
   return Array.from({ length: n }, (_, i) => columns.map((col) => col[i]));
 }
 
-// ---- 擬合 ------------------------------------------------------------
+// ---- Fitting ------------------------------------------------------------
 
 function localGroupByConcentration(points) {
   const groups = new Map();
@@ -155,8 +156,8 @@ function localGroupByConcentration(points) {
     .map(([c, ys]) => ({ c, ys, mean: localMean(ys) }));
 }
 
-// 單次讀值的變異數模型 var(F) = a + b·F²（加成 + 比例噪音），從重複管的
-// 實際離散估出來。擬合的權重與反推 CI 都用它。
+// Variance model for a single reading, var(F) = a + b*F^2 (additive + proportional noise),
+// estimated from the actual spread across replicate tubes. Used both for fit weights and for inversion CI.
 function localNoiseModel(points) {
   const groups = localGroupByConcentration(points).filter((g) => g.ys.length >= 2);
   if (groups.length === 0) {
@@ -182,9 +183,10 @@ function localNoiseModel(points) {
   return { a, b };
 }
 
-// 加權最小平方。每管的標準差取「該管自己的讀雜訊估計」與「重複管離散模型」
-// 兩者較大者：真實裝置的 fluorescence_sd 只含讀雜訊（不含 shot noise），單獨
-// 拿來當權重會讓幾管剛好暗值很穩的點權重大到失真。
+// Weighted least squares. Each tube's standard deviation is the larger of "that tube's own
+// read-noise estimate" and "the replicate-spread model": the real device's fluorescence_sd
+// only captures read noise (no shot noise), so using it alone as the weight would let a few
+// tubes with an unusually stable dark level get distorted, oversized weight.
 function localFit4PL(points) {
   const groups = localGroupByConcentration(points);
   const bottom0 = groups[0].mean;
@@ -240,7 +242,7 @@ function localFit4PL(points) {
     if (!accepted || converged) break;
   }
 
-  // 參數共變異 = (JᵀWJ)⁻¹ · reduced χ²
+  // Parameter covariance = (J^T W J)^-1 * reduced chi^2
   const { A } = normalEquations(p);
   const inv = localInverse(A);
   const dof = points.length - 4;
@@ -249,7 +251,7 @@ function localFit4PL(points) {
   return { p, cov };
 }
 
-// 螢光 -> 濃度。只在曲線可信範圍內給點估計，範圍外只回 status，不外插。
+// Fluorescence -> concentration. Only gives a point estimate within the curve's trusted range; outside it, only status comes back, never an extrapolation.
 function localInverseCore(F, curve, priv) {
   const { top, bottom, ec50_nM, hill } = curve.params;
   if (!(F > bottom)) return { status: "below_lod" };
@@ -261,7 +263,7 @@ function localInverseCore(F, curve, priv) {
   if (c < curve.range_nM.min) return { status: "below_lod" };
   if (c > curve.range_nM.max) return { status: "above_range" };
 
-  // delta method on ln(c)：讀值本身的變異 + 參數共變異
+  // delta method on ln(c): the reading's own variance plus the parameter covariance
   const gF = (1 / hill) * (1 / (F - bottom) + 1 / (top - F));
   const gTheta = [-(1 / hill) / (top - F), -(1 / hill) / (F - bottom), 1, -lnRatio / (hill * hill)];
   let variance = gF * gF * (priv.noise.a + priv.noise.b * F * F);
@@ -276,17 +278,17 @@ function localActiveCurve(store) {
   return Object.values(store.curves).find((c) => c.is_active) ?? null;
 }
 
-// ---- 對 hardware_api.js 公開 -----------------------------------------
+// ---- Exposed to hardware_api.js -----------------------------------------
 
 const HardwareLocal = {
-  // HIGH_SCATTER 需要「同組態最近一次 blank」當基準。
+  // HIGH_SCATTER needs "the most recent blank under the same config" as its baseline.
   measurementContext(configFingerprint) {
     const value = localLoad().blank_scatter[configFingerprint];
     return { blankScatter: Number.isFinite(value) ? value : null };
   },
 
-  // 讀值剛由 HardwareProcessing.toMeasurement() 組好之後呼叫：
-  // 補上需要儲存狀態的 flag，並更新 blank 基準。
+  // Called right after HardwareProcessing.toMeasurement() has assembled a reading:
+  // adds the flags that need stored state, and updates the blank baseline.
   finalizeMeasurement(m) {
     const store = localLoad();
 
@@ -294,7 +296,7 @@ const HardwareLocal = {
       store.blank_scatter[m.config_fingerprint] = m.scatter;
     }
 
-    // unknown 的 QC：跟 active 曲線比，規則和 invert() 完全一樣。
+    // QC for unknowns: compared against the active curve, using exactly the same rule as invert().
     const active = localActiveCurve(store);
     if (m.sample_type === "unknown" && active) {
       if (active.config_fingerprint !== m.config_fingerprint) {
@@ -322,8 +324,9 @@ const HardwareLocal = {
     if (!(Number.isInteger(blanks) && blanks >= 2 && blanks <= 10)) localFail("Blanks must be an integer from 2 to 10 (LOD needs a blank SD).");
     if (!timepoint || !String(timepoint).trim()) localFail("Describe the timepoint.");
 
-    // 以「重複輪」交錯排列：每一輪先 blank，再濃度由低到高。這樣儀器漂移不會
-    // 集中在某個濃度上，單支 cuvette 從低濃度換到高濃度也比較不怕殘留。
+    // Interleaved by "replicate round": each round is a blank, then concentrations low to high.
+    // This keeps instrument drift from concentrating on any one concentration, and makes carryover
+    // less of a concern when the single cuvette moves from a low to a high concentration.
     const items = [];
     const rounds = Math.max(replicates, blanks);
     for (let r = 1; r <= rounds; r++) {
@@ -360,7 +363,7 @@ const HardwareLocal = {
     const item = plan.items.find((it) => it.slot === slot);
     if (!item) localFail(`Slot ${slot} does not exist in ${plan_id}.`);
 
-    // 單支 cuvette 必須照順序跑：只能量「下一管」，或重測已經量過的管。
+    // The single cuvette has to run in order: only the "next tube" can be measured, or an already-measured tube redone.
     const next = plan.items.find((it) => it.measurement === null);
     if (item.measurement === null && next && next.slot !== slot) {
       localFail(`Slot ${slot} is out of order; the next tube is slot ${next.slot}.`);
@@ -421,7 +424,7 @@ const HardwareLocal = {
     const params = { top, bottom, ec50_nM: Math.exp(lnEc50), hill };
     const concentrationAt = (signal) => params.ec50_nM * ((signal - bottom) / (top - signal)) ** (1 / hill);
 
-    // LOD / LOQ：blank 平均 + 3 / 10 倍 blank SD，再經曲線換成濃度。
+    // LOD / LOQ: blank mean + 3 / 10 times the blank SD, then converted to a concentration through the curve.
     const blankYs = blanks.map((pt) => pt.y);
     const blankSd = localSampleSd(blankYs) || localMean(blanks.map((pt) => pt.sd));
     const blankLevel = Math.max(localMean(blankYs), bottom);
@@ -431,8 +434,8 @@ const HardwareLocal = {
     const lod_nM = concentrationAt(lodSignal);
     const loq_nM = concentrationAt(loqSignal);
 
-    // 可信反推範圍：下限不低於 LOD 也不低於最低標準品；上限不超過最高標準品，
-    // 也不超過 95% span（再往上曲線太平）。
+    // Trusted inversion range: the lower bound is never below the LOD or the lowest standard;
+    // the upper bound never exceeds the highest standard, nor 95% of the span (beyond that the curve is too flat).
     const range_nM = {
       min: Math.max(lod_nM, standardConcs[0]),
       max: Math.min(
@@ -453,23 +456,25 @@ const HardwareLocal = {
       loq_nM,
       rmse,
       range_nM,
-      // 理由由頁面在 saveCurve 時補上；fitCurve 的簽章只收 sample id。
+      // Reasons are filled in by the page when saveCurve is called; fitCurve's own signature only takes sample ids.
       excluded: [...excluded].map((sample_id) => ({ sample_id, reason: "" })),
       config_fingerprint: plan.config_fingerprint,
       timepoint: plan.timepoint,
       is_active: false,
     };
     store.drafts[curve.curve_id] = { curve, cov, noise };
-    // 草稿只留最近 10 份，避免 localStorage 一直長大。
+    // Keeps only the last 10 drafts, so localStorage doesn't keep growing.
     const draftIds = Object.keys(store.drafts);
     for (const id of draftIds.slice(0, Math.max(0, draftIds.length - 10))) delete store.drafts[id];
     localSave(store);
     return curve;
   },
 
-  // 新曲線（草稿）：存檔並附上排除理由。已存在的曲線：只接受 is_active 的切換，
-  // 參數一律以儲存端的為準。currentFingerprint 是裝置目前的組態，設為 active
-  // 時用來確認曲線還適用；裝置連不上時為 null，這時不允許設為 active。
+  // A new curve (draft): saved along with its exclusion reasons. An existing curve: only
+  // accepts toggling is_active, and its parameters always defer to the stored version.
+  // currentFingerprint is the device's current config, used to confirm the curve still
+  // applies when setting it active; it's null when the device is unreachable, in which case
+  // setting active is not allowed.
   saveCurve(curve, currentFingerprint) {
     const store = localLoad();
     if (!curve || !curve.curve_id) localFail("curve_id is required.");
