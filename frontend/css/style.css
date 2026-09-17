@@ -294,12 +294,12 @@ canvas { max-width: 100%; }
 
 /* Landing-page live spectrum. */
 .live-card { margin-top: 20px; }
-/* The one reading keeps the width it had as one of three, on the left. */
-.live-card .sensor-stat { flex: 0 1 calc((100% - 24px) / 3); }
+/* The single F4 reading doesn't need the full row. */
+.live-card .sensor-stat { flex: 0 1 280px; }
 .live-heading-row { align-items: center; }
 .live-heading-row h2 { margin: 0; }
 .live-controls { display: flex; align-items: center; gap: 18px; }
-.live-state { display: inline-flex; align-items: center; gap: 7px; color: var(--text-dim); font-size: .88rem; font-weight: 600; }
+.live-state { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-dim); background: var(--solid); font-size: .85rem; font-weight: 600; }
 .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(138,122,106,.12); }
 .live-dot.is-streaming { background: var(--accent); box-shadow: 0 0 0 3px rgba(7,90,62,.14); }
 .live-dot.is-reconnecting { background: var(--gold); box-shadow: 0 0 0 3px rgba(201,162,39,.16); }
@@ -310,9 +310,16 @@ canvas { max-width: 100%; }
 .live-switch input:checked + .live-switch-track { background: var(--accent); }
 .live-switch input:checked + .live-switch-track span { transform: translateX(18px); }
 .live-switch input:focus-visible + .live-switch-track { outline: 3px solid var(--gold); outline-offset: 2px; }
-.live-switch:has(input:disabled) { cursor: not-allowed; opacity: .55; }
 .live-empty { display: grid; min-height: 180px; margin-top: 16px; padding: 16px; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); background: var(--solid-soft); text-align: center; }
-.live-chart-note { margin: 18px 0 6px; }
+.live-legend { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px 16px; margin: 18px 0 6px; color: var(--muted); font-size: .8rem; }
+.live-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.live-swatch { width: 10px; height: 10px; border-radius: 2px; }
+.live-swatch.is-f4 { background: var(--accent); }
+.live-description { margin: 12px 0 0; }
+.live-settings { margin-top: 8px; }
+/* No new frames arrive during a measurement: fade the last one so it doesn't read as current. */
+#live-spectrum, #live-f4 { transition: opacity .2s ease; }
+.live-card.is-paused #live-spectrum, .live-card.is-paused #live-f4 { opacity: .45; }
 
 @media (max-width: 720px) {
   .live-heading-row, .live-controls { align-items: flex-start; }

@@ -107,6 +107,27 @@ def test_viewers_hear_the_device_come_and_go():
     asyncio.run(scenario())
 
 
+def test_viewers_hear_a_device_that_goes_quiet_without_closing_its_socket():
+    async def scenario():
+        hub = DeviceHub(online_timeout_s=0.1, read_timeout_s=2)
+        live = LiveHub(hub)
+        device = FakeConnection()
+        await hub.attach_device(device)
+        await hub.handle_device_message(device, json.dumps(STATUS))
+        viewer = live.add_viewer()
+        drain(viewer)
+
+        live.check_presence()
+        assert drain(viewer) == []
+
+        await asyncio.sleep(0.2)
+        live.check_presence()
+        live.check_presence()  # every viewer's route calls it; the change goes out once
+        assert [message["online"] for message in drain(viewer)] == [False]
+
+    asyncio.run(scenario())
+
+
 def test_a_device_that_connects_while_someone_watches_starts_streaming():
     async def scenario():
         hub, live = make_hubs()

@@ -50,13 +50,13 @@
       <section class="card live-card" aria-labelledby="live-heading">
         <div class="section-heading live-heading-row">
           <div>
-            <p class="section-label">Live sensor</p>
-            <h2 id="live-heading">AS7341 spectrum</h2>
+            <p class="section-label">CAPTURE-Screen</p>
+            <h2 id="live-heading">Live spectrum</h2>
           </div>
           <div class="live-controls">
             <span class="live-state" aria-live="polite">
-              <span id="live-dot" class="live-dot is-off" aria-hidden="true"></span>
-              <span id="live-dot-label">Off</span>
+              <span id="live-dot" class="live-dot is-reconnecting" aria-hidden="true"></span>
+              <span id="live-dot-label">Connecting</span>
             </span>
             <label class="live-switch" for="live-toggle">
               <!-- autocomplete="off": a browser restoring the checked box on reload would switch the LED on unasked. -->
@@ -67,7 +67,10 @@
           </div>
         </div>
 
-        <p id="live-device" class="section-description">Connecting to the backend...</p>
+        <p class="section-description live-description">
+          Real-time raw counts from CAPTURE-Screen's ten spectral channels; F4 (515 nm) is the sfGFP band.
+          The excitation LED is on only while Live is on, to avoid heating and bleaching the sample.
+        </p>
 
         <div class="sensor-stats">
           <div class="sensor-stat">
@@ -76,17 +79,21 @@
             <span class="sensor-stat-sub">raw counts</span>
           </div>
         </div>
-        <p id="live-saturation" class="status-message error" hidden></p>
 
-        <div id="live-empty" class="live-empty">Connecting to the backend...</div>
+        <div id="live-empty" class="live-empty">Connecting to backend (up to 1 min after idle)...</div>
         <div id="live-spectrum" hidden>
-          <p class="chart-note live-chart-note">Latest frame, all ten channels. The ADC saturates at <span id="live-full-scale">--</span> counts.</p>
+          <div class="live-legend" aria-hidden="true">
+            <span><i class="live-swatch is-f4"></i>F4 · sfGFP</span>
+          </div>
+          <!-- No height attribute on the canvas: Chart.js ignores aspectRatio when the canvas carries one. -->
           <div class="chart-plate">
-            <canvas id="live-chart" aria-label="Latest AS7341 raw counts per channel"></canvas>
+            <canvas id="live-chart" role="img" aria-label="Raw counts in the latest frame for each of the ten spectral channels"></canvas>
           </div>
         </div>
+
+        <div id="live-settings" class="provenance live-settings" hidden></div>
         <p class="plan-meta">
-          Live frames are for watching only and are never stored. To record a reading, use
+          Display only: raw counts are not dark-subtracted and never stored. To record a reading, use
           <a class="text-link" href="hardware-measure.html">Measure</a>.
         </p>
       </section>

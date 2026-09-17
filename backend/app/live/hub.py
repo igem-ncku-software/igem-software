@@ -46,20 +46,25 @@ class LiveHub:
 
     def reset(self) -> None:
         self._viewers: set[Viewer] = set()
+        self._told_online = False
 
     def presence(self) -> dict[str, Any]:
-        last_seen = self.device.last_seen
-        return {
-            "mode": "presence",
-            "online": self.device.online,
-            "last_seen": last_seen.isoformat() if last_seen else None,
-            "device": self.device.status,
-        }
+        return {"mode": "presence", **self.device.snapshot().model_dump(mode="json")}
+
+    def check_presence(self) -> None:
+        """Broadcast presence if the device's online flag changed without an event.
+
+        A device that just goes quiet (Wi-Fi lost, no socket close) turns
+        DeviceHub.online false after HARDWARE_ONLINE_TIMEOUT_SECONDS without
+        telling anyone, so WS /spectrum calls this on every poll tick.
+        """
+        if self.device.online != self._told_online:
+            self._broadcast_presence()
 
     # ---- what DeviceHub tells us ---------------------------------------
 
     def on_device_changed(self) -> None:
-        self._broadcast(json.dumps(self.presence()))
+        self._broadcast_presence()
 
     def on_live(self, message: dict[str, Any]) -> None:
         try:
@@ -102,6 +107,11 @@ class LiveHub:
             return
         with contextlib.suppress(DeviceOffline):
             await self.device.command({"cmd": "live_start" if now_watched else "live_stop"})
+
+    def _broadcast_presence(self) -> None:
+        presence = self.presence()
+        self._told_online = presence["online"]
+        self._broadcast(json.dumps(presence))
 
     def _broadcast(self, text: str, watchers_only: bool = False) -> None:
         for viewer in self._viewers:

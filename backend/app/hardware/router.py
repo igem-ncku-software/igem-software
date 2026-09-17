@@ -22,7 +22,7 @@ device_hub = DeviceHub(
 @router.get("/status", response_model=HardwareStatusResponse)
 async def hardware_status() -> HardwareStatusResponse:
     """Whether CAPTURE-Screen is connected, and the last status it reported."""
-    return HardwareStatusResponse(online=device_hub.online, last_seen=device_hub.last_seen, device=device_hub.status)
+    return device_hub.snapshot()
 
 
 @router.post("/read", response_model=DeviceMeasurement, response_model_exclude_none=True)

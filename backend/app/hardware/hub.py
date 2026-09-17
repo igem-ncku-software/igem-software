@@ -23,7 +23,7 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
-from app.hardware.models import DeviceMeasurement, DeviceStatus
+from app.hardware.models import DeviceMeasurement, DeviceStatus, HardwareStatusResponse
 
 
 class Connection(Protocol):
@@ -102,6 +102,10 @@ class DeviceHub:
     def connected(self) -> bool:
         """A device socket is attached, whether or not it has reported yet."""
         return self._device is not None
+
+    def snapshot(self) -> HardwareStatusResponse:
+        """GET /status's body; app.live's presence messages carry the same fields."""
+        return HardwareStatusResponse(online=self.online, last_seen=self.last_seen, device=self.status)
 
     # ---- the device's connection ---------------------------------------
 

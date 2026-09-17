@@ -45,7 +45,7 @@ pytest
 
 Because `main.py` lives inside the `app` package, it must be run as `app.main:app` — running `python main.py` or `uvicorn main:app` directly will fail.
 
-`backend/tests/` has 104 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; device messages live in `payloads.py`), and `tests/live/` (the same split for `LiveHub` and `WS /api/live/spectrum`, reusing `tests/hardware/payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
+`backend/tests/` has 106 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_pipeline`, `test_router`) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; device messages live in `payloads.py`), and `tests/live/` (the same split for `LiveHub` and `WS /api/live/spectrum`, reusing `tests/hardware/payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
 
 ### Firmware (from the repo root)
 
@@ -90,7 +90,8 @@ A relay between the one CAPTURE-Screen device and every browser. The backend nev
 
 Live sensing: the browser side of the live spectrum, split out of `app/hardware/`. `hub.py`'s `LiveHub` keeps the watching browsers (`Viewer` outboxes), `models.py` holds `LiveFrame`, and `router.py` creates the singleton `live_hub = LiveHub(device_hub)` from `app.hardware.router`, which subscribes it at import time (so `DeviceHub.reset()` keeps listeners; tests reset both hubs).
 
-- `WS /spectrum` — browser → `{"cmd": "live_start" | "live_stop"}`; server → `mode: "presence"` on connect and on every device status, `mode: "live"` frames only while that browser watches, `mode: "watching"` acks.
+- `WS /spectrum` — browser → `{"cmd": "live_start" | "live_stop"}`; server → `mode: "presence"` on connect, on every device status or disconnect, and when the device goes quiet past `HARDWARE_ONLINE_TIMEOUT_SECONDS`; `mode: "live"` frames only while that browser watches; `mode: "watching"` acks.
+- Presence carries exactly `GET /api/hardware/status`'s fields, because both come from `DeviceHub.snapshot()`. A device that loses Wi-Fi without closing its socket turns `online` false without any event, so the `/spectrum` poll loop calls `LiveHub.check_presence()` every tick to push that change.
 - **The LED streams only while someone watches.** The hub sends `live_start` when the first browser starts watching (or when a device attaches while someone already watches) and `live_stop` when the last one stops or leaves; continuous excitation light heats and bleaches the sample in the cuvette. Keep it viewer-driven.
 - `/spectrum` waits on `receive_text()` with a 0.1 s timeout so one coroutine can also drain the viewer's outbox; a two-task version leaked tasks under `TestClient`'s teardown cancellation.
 - `/spectrum` checks `Origin` against `CORS_ORIGINS` itself, since `CORSMiddleware` doesn't cover WebSockets.
@@ -146,7 +147,26 @@ Pages are flat files rather than folders (`hardware-measure.html`, not `hardware
 
 Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The dose-response page shares nothing but the global `BACKEND_BASE_URL`. The landing page's live spectrum is standalone:
 
-- `js/device_live.js` — the landing-page spectrum. It opens `WS /api/live/spectrum` on page load so device presence shows at once, sends `live_start` only while the Live switch is on (off by default; `autocomplete="off"` keeps a reload from switching the LED on), and reconnects with backoff indefinitely, since a sleeping Render backend takes up to a minute to wake. It draws only the latest frame as a bar chart (the user removed the trend line chart; don't add one back) and flags saturated channels. Only the sfGFP channel F4 is highlighted and read out; the user removed the F3 leakage and update-rate readouts, so don't add those back either. Frames are display-only and never stored; the charts are cleared whenever the device goes offline or the socket drops, never left showing the last frame.
+- `js/device_live.js` — the landing-page spectrum.
+  - **Connection.** It opens `WS /api/live/spectrum` on page load so device presence shows at once. It reconnects with backoff indefinitely, because a sleeping Render backend takes up to a minute to wake.
+  - **When the LED streams.** It sends `live_start` only while the Live switch is on *and* the tab is visible. The switch is off by default, and `autocomplete="off"` keeps a reload from switching the LED on. A tab moved to the background sends `live_stop` and resumes on return, because nobody can see a hidden tab.
+  - **Where each fact goes.** Every fact is shown in exactly one place:
+    - The dot label and the empty-box message both come from `liveStatus()`, so they never repeat or contradict each other.
+    - The F4 tile is the only tile, kept at a fixed 280 px width. It carries the sfGFP band's raw count.
+    - The `.provenance` row under the chart carries build ID, firmware, and Wi-Fi dBm (dropped once offline), then gain, integration time, LED current, and full scale, because raw counts can't be read without them.
+    - The user removed a separate Reader tile and plain-word Wi-Fi ratings (good/weak/poor); don't add either back.
+
+    The user wants every necessary piece of information visible on the page, so don't drop any of these to declutter. The user also wants the text short and professional. The panel uses:
+    - a two-sentence description: what the chart shows, and why the LED is on only during Live;
+    - short labels;
+    - a one-item swatch legend (F4 · sfGFP) instead of a chart note;
+    - one-line status messages;
+    - a footer saying the raw counts are neither dark-subtracted nor stored.
+
+    Don't grow it back into explanatory prose, and don't strip those important sentences either.
+  - **Chart.** It draws only the latest frame as a bar chart (the user removed the trend line chart; don't add one back). F4 is green and every other channel muted. The user removed every saturation indicator (gold bars, the "Saturated" legend and warning, the gold F4 number); full scale stays only as a device value in the settings row. The y axis only grows until the chart is cleared. Below 480 px wide the chart switches to aspect ratio 1.3 with channel codes as tick labels. During a measurement the last frame is faded, not left looking current.
+  - **Removed readouts.** Only F4 is highlighted and read out. The user removed the F3 leakage and update-rate readouts, so don't add those back either.
+  - **No stored frames.** Frames are display-only and never stored. The chart is cleared whenever the device goes offline or the socket drops, never left showing the last frame.
 
 The five hardware workflow pages share a layered stack, loaded in this order after `config.js`:
 
@@ -155,7 +175,7 @@ The five hardware workflow pages share a layered stack, loaded in this order aft
 - `js/hardware_api.js` — `HardwareApi`, the only interface workflow pages use, plus JSDoc typedefs for the data contract (`HardwareConfig`, `Measurement`, `CalibrationPlan`, `CalibrationCurve`, `InverseEstimate`, `UnmixBasis`). `getDeviceStatus` / `runDarkRead` / `readSample` call `/api/hardware/status` and `/read`; `getDeviceStatus` throws with a displayable message when the device is offline, so pages treat offline and unreachable alike. Everything else goes to `hardware_local.js`. **Field names in the typedefs are a contract with the future persistence backend — don't rename them.**
 - `js/hardware_common.js` — subnav + device badge, number formatting rules (concentration 1 dp and µM above 1000 nM, fluorescence 4 significant figures since basic counts are often < 1, percent 1 dp, local time), flag chips, `setBlocked()` for disabled-with-reason buttons, and the "unmixing basis not calibrated" note for any `[data-basis-note]` element.
 
-**No mock or simulated device exists anywhere — frontend, backend, or firmware — because the user wants real data only.** Don't add one back. To exercise the pages without hardware, run a throwaway script outside the repo that speaks the `WS /api/hardware/device` protocol.
+**No mock or simulated device exists anywhere — frontend, backend, or firmware — because the user wants real data only.** Don't add one back. The user doesn't want simulated data even for verification, whether in a throwaway stand-in device script or as fake frames injected into a page. Check the no-device states locally, and check live data only with the real CAPTURE-Screen. Switching its LED on still needs the user's go-ahead.
 
 `config/unmix_basis.json` is data, not code: `method: "single_channel"` takes F4 as fluorescence and F3 as scatter. It is a placeholder until an sfGFP standard's spectrum is measured — don't invent basis values or implement least squares before then. While its `version` starts with `placeholder`, every place that shows fluorescence carries the note.
 

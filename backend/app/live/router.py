@@ -33,8 +33,9 @@ def _viewer_command(text: str) -> bool | None:
 async def live_spectrum(websocket: WebSocket) -> None:
     """Browser side of the live spectrum.
 
-    Server -> browser: {"mode": "presence", ...} on connect and whenever the
-    device reports; {"mode": "live", ...} frames while watching;
+    Server -> browser: {"mode": "presence", ...} (GET /api/hardware/status's
+    fields) on connect, whenever the device reports or disconnects, and when it
+    goes quiet past the online timeout; {"mode": "live", ...} frames while watching;
     {"mode": "watching", "watching": bool} after each command.
     Browser -> server: {"cmd": "live_start"} / {"cmd": "live_stop"}.
     """
@@ -61,6 +62,7 @@ async def live_spectrum(websocket: WebSocket) -> None:
                     await live_hub.set_watching(viewer, watching)
                     await websocket.send_json({"mode": "watching", "watching": watching})
 
+            live_hub.check_presence()
             while not viewer.outbox.empty():
                 await websocket.send_text(viewer.outbox.get_nowait())
     except WebSocketDisconnect:

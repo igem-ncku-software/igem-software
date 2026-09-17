@@ -57,6 +57,18 @@ def test_watching_switches_the_stream_and_relays_frames():
             assert browser.receive_json() == {"mode": "watching", "watching": False}
 
 
+def test_presence_carries_the_same_fields_as_hardware_status():
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json(STATUS)
+        wait_until_online()
+
+        with client.websocket_connect("/api/live/spectrum") as browser:
+            presence = browser.receive_json()
+
+        assert presence.pop("mode") == "presence"
+        assert presence == client.get("/api/hardware/status").json()
+
+
 def test_live_rejects_unknown_commands():
     with client.websocket_connect("/api/live/spectrum") as browser:
         browser.receive_json()
