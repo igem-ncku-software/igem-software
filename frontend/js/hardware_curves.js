@@ -11,7 +11,7 @@ let curvesBusy = false;
 const openCurveDetails = new Set();
 
 const CURVE_STATUS_CHIP = { active: "ok", available: "", stale: "error" };
-const CURVES_COLUMN_COUNT = 8;
+const CURVES_COLUMN_COUNT = 9;
 
 // Stale takes priority: a curve with a mismatched config can't be used even if is_active.
 function curveStatus(curve) {
@@ -87,6 +87,7 @@ function renderCurves() {
     const row = hwEl("tr");
     row.append(
       hwEl("td", null, curve.curve_id),
+      hwEl("td", null, curve.source === "manual" ? "Manual entry" : "Instrument readings"),
       hwEl("td", null, formatLocalTime(curve.fitted_at)),
       hwEl("td", null, formatConcentration(curve.params.ec50_nM)),
       hwEl("td", null, formatConcentration(curve.lod_nM)),

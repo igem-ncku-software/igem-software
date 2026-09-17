@@ -1,6 +1,7 @@
 // =========================================================
-// Backs hardware-calibration-fit.html: fits a 4PL curve from a completed calibration plan,
-// excludes individual tubes (always with a reason), and asks whether to make it active on save.
+// Backs hardware-calibration-fit.html: fits a 4PL curve from a completed calibration plan (a
+// device run or a manual dataset), excludes individual tubes (always with a reason), and asks
+// whether to make it active on save.
 //
 // State machine:
 //   unfitted -> only Fit is enabled, Save disabled
@@ -130,19 +131,26 @@ function renderFitSource() {
 
   const total = fitPlan.items.length;
   const read = fitPlan.items.filter((it) => it.measurement).length;
+  const manual = fitPlan.source === "manual";
   const tbody = document.getElementById("fit-source-body");
   tbody.innerHTML = "";
   appendKvRow(tbody, "Plan", fitPlan.plan_id);
+  appendKvRow(tbody, "Source", manual ? "Manual entry" : "Instrument readings");
   appendKvRow(tbody, "Timepoint", fitPlan.timepoint);
+  if (manual) appendKvRow(tbody, "Measured on", fitPlan.measured_on);
   appendKvRow(tbody, "Config fingerprint", hwFingerprint(fitPlan.config_fingerprint));
-  appendKvRow(tbody, "Created", formatLocalTime(fitPlan.created_at));
-  const tubes = hwEl("span", null, `${read} / ${total} read `);
+  appendKvRow(tbody, manual ? "Entered" : "Created", formatLocalTime(fitPlan.created_at));
+  const tubes = hwEl("span", null, manual ? `${total} entered` : `${read} / ${total} read `);
   if (read < total) tubes.appendChild(hwLink(`hardware-calibration.html?plan=${encodeURIComponent(fitPlan.plan_id)}`, "Back to the run →"));
   appendKvRow(tbody, "Tubes", tubes);
 
   const warning = document.getElementById("fit-config-warning");
   warning.hidden = fitDeviceFingerprint === fitPlan.config_fingerprint;
-  if (!warning.hidden) {
+  if (fitDeviceFingerprint === null) {
+    setHardwareStatus(warning,
+      "The instrument is unreachable, so its config can't be checked against this plan. Setting a curve as active needs it online.",
+      "warn");
+  } else if (!warning.hidden) {
     setHardwareStatus(warning,
       `The instrument now runs config ${fitDeviceFingerprint}, but this plan was read under ${fitPlan.config_fingerprint}. `
       + `A curve fitted from it stays bound to ${fitPlan.config_fingerprint} and cannot be set as active under the current config.`,
@@ -522,16 +530,17 @@ async function initFitPage() {
     return;
   }
 
-  try {
-    const [loaded, status] = await Promise.all([HardwareApi.getCalibrationPlan(planId), HardwareApi.getDeviceStatus()]);
-    fitPlan = loaded;
-    fitDeviceFingerprint = status.config.fingerprint;
-    if (!hardwareQueryParam("plan")) history.replaceState(null, "", `?plan=${encodeURIComponent(planId)}`);
-  } catch (err) {
-    console.error("Failed to load plan:", err);
-    setHardwareStatus(loadEl, `Could not load plan ${planId}: ${err.message}`, "error");
+  // Plans, fitting, and saving all live in the browser, so the page works with the instrument
+  // unreachable; only setting a curve as active checks its config.
+  const [planResult, statusResult] = await Promise.allSettled([HardwareApi.getCalibrationPlan(planId), HardwareApi.getDeviceStatus()]);
+  if (planResult.status === "rejected") {
+    console.error("Failed to load plan:", planResult.reason);
+    setHardwareStatus(loadEl, `Could not load plan ${planId}: ${planResult.reason.message}`, "error");
     return;
   }
+  fitPlan = planResult.value;
+  fitDeviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  if (!hardwareQueryParam("plan")) history.replaceState(null, "", `?plan=${encodeURIComponent(planId)}`);
 
   loadEl.hidden = true;
   renderFitSource();

@@ -229,6 +229,7 @@ const HardwareProcessing = (() => {
       flags,
       config_fingerprint: toHardwareConfig(reading).fingerprint,
       raw: toContractChannels(normalized),
+      source: "device",
     };
   }
 
@@ -258,6 +259,7 @@ const HardwareProcessing = (() => {
       flags: paired ? [] : ["NO_DARK_PAIR"],
       config_fingerprint: toHardwareConfig(reading).fingerprint,
       raw: toContractChannels(normalized),
+      source: "device",
     };
   }
 

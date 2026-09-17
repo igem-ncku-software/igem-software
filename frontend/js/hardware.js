@@ -121,6 +121,7 @@ function renderActiveCurveSummary(curve, config) {
 
   const meta = hwEl("p", "plan-meta");
   meta.append(`Fitted ${formatLocalTime(curve.fitted_at)} · ${curve.timepoint} · config `, hwFingerprint(curve.config_fingerprint));
+  if (curve.source === "manual") meta.append(" · manual entry");
 
   const stats = hwEl("div", "sensor-stats");
   stats.append(

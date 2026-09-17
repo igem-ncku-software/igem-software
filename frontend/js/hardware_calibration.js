@@ -1,8 +1,9 @@
 // =========================================================
-// Backs hardware-calibration.html: creates a calibration plan and measures each tube in slot order.
+// Backs hardware-calibration.html: creates a calibration plan and measures each tube in slot
+// order, or takes readings recorded earlier as a manual dataset.
 //
 // State machine (derived from the plan data, not stored separately):
-//   no_plan      -> shows only the create form (no ?plan= in the URL)
+//   no_plan      -> shows only the create form and the recorded-data form (no ?plan= in the URL)
 //   plan_created -> list, progress 0/N, Read enabled
 //   running      -> progress n/N, Read enabled, Go to fit disabled
 //   complete     -> everything measured, Go to fit enabled
@@ -11,9 +12,12 @@
 // block at the top of the page; pressing Read measures the "next tube", records it
 // automatically, and advances to the next one. An already-measured tube can be redone with Re-read.
 //
-// Target elements: #plan-create-card / #plan-form / #plan-* family, see the HTML
+// A manual dataset has every slot filled at creation and can't be re-read, so it never shows
+// here: creating one, or opening one by ?plan=, goes straight to the fit page.
+//
+// Target elements: #plan-create-card / #plan-form / #plan-* family, #manual-* family, see the HTML
 // Backing API: createCalibrationPlan / getCalibrationPlan / recordPlanMeasurement /
-//   readSample / getDeviceStatus
+//   readSample / getDeviceStatus / createManualDataset / fingerprintConfig
 // =========================================================
 
 let plan = null;
@@ -64,7 +68,9 @@ async function showCreateForm(errorText) {
   plan = null;
   document.getElementById("plan-run-card").hidden = true;
   document.getElementById("plan-create-card").hidden = false;
+  document.getElementById("manual-card").hidden = false;
   updatePlanPreview();
+  startManualEntry();
   if (errorText) setHardwareStatus(document.getElementById("plan-create-status"), errorText, "error");
 
   // The last plan worked on in this browser: offer a link to resume it, but don't jump there automatically.
@@ -75,8 +81,13 @@ async function showCreateForm(errorText) {
     const read = last.items.filter((it) => it.measurement).length;
     const resume = document.getElementById("plan-resume");
     resume.textContent = "";
-    resume.append(`Last run in this browser: ${read} / ${last.items.length} tubes read. `,
-      hwLink(`hardware-calibration.html?plan=${encodeURIComponent(last.plan_id)}`, `Resume ${last.plan_id} →`));
+    if (last.source === "manual") {
+      resume.append(`Last dataset in this browser: ${last.items.length} tubes entered. `,
+        hwLink(`hardware-calibration-fit.html?plan=${encodeURIComponent(last.plan_id)}`, `Open ${last.plan_id} in Fit →`));
+    } else {
+      resume.append(`Last run in this browser: ${read} / ${last.items.length} tubes read. `,
+        hwLink(`hardware-calibration.html?plan=${encodeURIComponent(last.plan_id)}`, `Resume ${last.plan_id} →`));
+    }
     resume.hidden = false;
   } catch (err) {
     hardwareRemember(HARDWARE_LAST_PLAN_KEY, null);
@@ -115,6 +126,8 @@ async function createPlan(event) {
 
 async function openPlan(planId, alreadyLoaded) {
   document.getElementById("plan-create-card").hidden = true;
+  document.getElementById("manual-card").hidden = true;
+  stopManualEntry();
   const runCard = document.getElementById("plan-run-card");
 
   // The plan lives in the browser: it still opens when the device is unreachable, just without a config check.
@@ -129,6 +142,10 @@ async function openPlan(planId, alreadyLoaded) {
     return;
   }
 
+  if (planResult.value.source === "manual") {
+    window.location.replace(`hardware-calibration-fit.html?plan=${encodeURIComponent(planId)}`);
+    return;
+  }
   plan = planResult.value;
   planDeviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
   hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
@@ -285,7 +302,301 @@ async function readPlanTarget() {
   }
 }
 
+// ---- no_plan: readings recorded earlier, entered by hand ------------------
+
+// Two blanks and four standards, the fewest a dataset can hold. Only the types are set, never values.
+const MANUAL_START_ROWS = ["blank", "blank", "standard", "standard", "standard", "standard"];
+
+const manualRows = []; // { sample_type, concentration, signal }, the last two as typed
+let manualDeviceState = "checking"; // checking | online | offline
+let manualDeviceFingerprint = null;
+let manualPollTimer = null;
+let manualCreating = false;
+
+function manualToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+// Number("") is 0, so an empty cell has to be caught before converting.
+function manualNumber(text) {
+  const trimmed = String(text).trim();
+  return trimmed === "" ? NaN : Number(trimmed);
+}
+
+function manualPlural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+function manualConfigMode() {
+  return document.querySelector('input[name="manual-config-mode"]:checked').value;
+}
+
+function manualConfigValues() {
+  const value = (id) => document.getElementById(id).value.trim();
+  return {
+    led_current_mA: manualNumber(value("manual-led")),
+    gain: manualNumber(value("manual-gain")),
+    atime: manualNumber(value("manual-atime")),
+    astep: manualNumber(value("manual-astep")),
+    build_id: value("manual-build"),
+    firmware_version: value("manual-firmware"),
+  };
+}
+
+// { fingerprint } when the config is known, otherwise { error } saying why not.
+function manualConfig() {
+  if (manualConfigMode() === "current") {
+    if (manualDeviceState === "checking") return { error: "Checking the instrument's config..." };
+    if (manualDeviceState === "offline") {
+      return { error: "Instrument unreachable, so its current config is unknown. Enter the config manually." };
+    }
+    return { fingerprint: manualDeviceFingerprint };
+  }
+  try {
+    return { fingerprint: HardwareApi.fingerprintConfig(manualConfigValues()) };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+function manualCellProblem(row, field) {
+  const text = row[field].trim();
+  const value = manualNumber(text);
+  if (field === "concentration") {
+    if (row.sample_type !== "standard") return null;
+    if (!text) return "enter the concentration.";
+    return Number.isFinite(value) && value > 0 ? null : "concentration must be a positive number.";
+  }
+  if (!text) return "enter the signal.";
+  return Number.isFinite(value) && value >= 0 ? null : "signal must be a number ≥ 0.";
+}
+
+function manualCounts() {
+  const concentrations = new Set(manualRows
+    .filter((row) => row.sample_type === "standard" && !manualCellProblem(row, "concentration"))
+    .map((row) => manualNumber(row.concentration)));
+  return {
+    tubes: manualRows.length,
+    concentrations: concentrations.size,
+    blanks: manualRows.filter((row) => row.sample_type === "blank").length,
+  };
+}
+
+function manualProblem(config) {
+  if (!document.getElementById("manual-timepoint").value.trim()) return "Describe the timepoint.";
+  const measuredOn = document.getElementById("manual-measured-on").value;
+  if (!measuredOn) return "Enter the date the readings were taken.";
+  if (measuredOn > manualToday()) return "The measurement date is in the future.";
+  if (config.error) return config.error;
+  for (const [i, row] of manualRows.entries()) {
+    const problem = manualCellProblem(row, "concentration") ?? manualCellProblem(row, "signal");
+    if (problem) return `Row ${i + 1}: ${problem}`;
+  }
+  const { concentrations, blanks } = manualCounts();
+  if (concentrations < 4) return "A 4PL fit needs at least 4 distinct concentrations.";
+  if (blanks < 2) return "Enter at least 2 blanks: LOD needs a blank SD.";
+  return null;
+}
+
+function updateManualControls() {
+  const config = manualConfig();
+  const { tubes, concentrations, blanks } = manualCounts();
+  document.getElementById("manual-summary").textContent =
+    `${manualPlural(tubes, "tube")}: ${manualPlural(concentrations, "concentration")}, ${manualPlural(blanks, "blank")}`;
+
+  const fingerprintEl = document.getElementById("manual-fingerprint");
+  fingerprintEl.textContent = "";
+  if (config.fingerprint) {
+    fingerprintEl.append("Config fingerprint ", hwFingerprint(config.fingerprint));
+    if (manualConfigMode() === "manual" && manualDeviceFingerprint) {
+      if (config.fingerprint === manualDeviceFingerprint) {
+        fingerprintEl.append(" · matches the instrument now");
+      } else {
+        fingerprintEl.append(" · the instrument now runs ", hwFingerprint(manualDeviceFingerprint),
+          ", so a curve from this dataset can't be set as active until they match");
+      }
+    }
+  }
+
+  const button = document.getElementById("manual-create-button");
+  setBlocked(button, document.getElementById("manual-create-reason"), manualProblem(config));
+  if (manualCreating) button.disabled = true;
+}
+
+async function refreshManualDevice() {
+  try {
+    manualDeviceFingerprint = (await HardwareApi.getDeviceStatus()).config.fingerprint;
+    manualDeviceState = "online";
+  } catch (err) {
+    manualDeviceFingerprint = null;
+    manualDeviceState = "offline";
+  }
+  updateManualControls();
+}
+
+function focusManualSignal(index) {
+  document.querySelector(`[data-manual-signal="${index}"]`)?.focus();
+}
+
+// A new row copies the previous row's type and concentration, since replicates are entered one
+// after another; its signal always starts empty.
+function addManualRow() {
+  const last = manualRows[manualRows.length - 1];
+  manualRows.push({ sample_type: last?.sample_type ?? "standard", concentration: last?.concentration ?? "", signal: "" });
+  renderManualRows();
+  updateManualControls();
+  focusManualSignal(manualRows.length - 1);
+}
+
+function manualInput(row, field, index, label) {
+  const input = hwEl("input", "table-input");
+  input.type = "text";
+  input.inputMode = "decimal";
+  input.autocomplete = "off";
+  input.value = row[field];
+  input.setAttribute("aria-label", label);
+
+  const mark = () => {
+    const invalid = row[field].trim() !== "" && manualCellProblem(row, field) !== null;
+    input.classList.toggle("is-missing", invalid);
+    input.setAttribute("aria-invalid", String(invalid));
+  };
+  mark();
+  input.addEventListener("input", () => {
+    row[field] = input.value;
+    mark();
+  });
+  // Enter moves down a row instead of submitting the form.
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (index === manualRows.length - 1) addManualRow();
+    else focusManualSignal(index + 1);
+  });
+  return { input, mark };
+}
+
+function renderManualRows() {
+  const tbody = document.getElementById("manual-table-body");
+  tbody.innerHTML = "";
+
+  manualRows.forEach((row, i) => {
+    const n = i + 1;
+    const cell = (child, className) => {
+      const td = hwEl("td", className);
+      td.appendChild(child);
+      return td;
+    };
+
+    const concentration = manualInput(row, "concentration", i, `Row ${n} concentration (nM)`);
+    const signal = manualInput(row, "signal", i, `Row ${n} sfGFP signal (basic counts)`);
+    signal.input.dataset.manualSignal = String(i);
+    const setType = () => {
+      const blank = row.sample_type === "blank";
+      concentration.input.disabled = blank;
+      concentration.input.placeholder = blank ? "0" : "";
+      concentration.mark();
+    };
+
+    const type = hwEl("select", "table-input");
+    for (const [value, text] of [["blank", "Blank"], ["standard", "Standard"]]) {
+      const option = hwEl("option", null, text);
+      option.value = value;
+      type.appendChild(option);
+    }
+    type.value = row.sample_type;
+    type.setAttribute("aria-label", `Row ${n} type`);
+    type.addEventListener("change", () => {
+      row.sample_type = type.value;
+      row.concentration = "";
+      concentration.input.value = "";
+      setType();
+    });
+    setType();
+
+    const remove = hwEl("button", "btn-secondary table-button", "Remove");
+    remove.type = "button";
+    remove.disabled = manualRows.length === 1;
+    remove.setAttribute("aria-label", `Remove row ${n}`);
+    remove.addEventListener("click", () => {
+      manualRows.splice(i, 1);
+      renderManualRows();
+      updateManualControls();
+    });
+
+    const tr = hwEl("tr");
+    tr.append(
+      hwEl("td", null, String(n)),
+      cell(type),
+      cell(concentration.input),
+      cell(signal.input),
+      cell(remove, "action-cell"),
+    );
+    tbody.appendChild(tr);
+  });
+}
+
+function startManualEntry() {
+  if (manualPollTimer !== null) return;
+  if (manualRows.length === 0) {
+    for (const type of MANUAL_START_ROWS) manualRows.push({ sample_type: type, concentration: "", signal: "" });
+  }
+  document.getElementById("manual-measured-on").max = manualToday();
+  renderManualRows();
+  updateManualControls();
+  refreshManualDevice();
+  manualPollTimer = setInterval(refreshManualDevice, DEVICE_STATUS_POLL_INTERVAL_MS);
+}
+
+function stopManualEntry() {
+  clearInterval(manualPollTimer);
+  manualPollTimer = null;
+}
+
+async function createManualDataset(event) {
+  event.preventDefault();
+  const button = document.getElementById("manual-create-button");
+  const statusEl = document.getElementById("manual-create-status");
+  if (button.disabled) return;
+
+  manualCreating = true;
+  updateManualControls();
+  setHardwareStatus(statusEl, "Creating dataset...", null);
+
+  try {
+    const created = await HardwareApi.createManualDataset({
+      timepoint: document.getElementById("manual-timepoint").value,
+      measured_on: document.getElementById("manual-measured-on").value,
+      config: manualConfigMode() === "manual" ? manualConfigValues() : null,
+      rows: manualRows.map((row) => ({
+        sample_type: row.sample_type,
+        concentration_nM: row.sample_type === "standard" ? manualNumber(row.concentration) : null,
+        fluorescence: manualNumber(row.signal),
+      })),
+    });
+    hardwareRemember(HARDWARE_LAST_PLAN_KEY, created.plan_id);
+    window.location.href = `hardware-calibration-fit.html?plan=${encodeURIComponent(created.plan_id)}`;
+  } catch (err) {
+    console.error("Dataset creation failed:", err);
+    manualCreating = false;
+    updateManualControls();
+    setHardwareStatus(statusEl, `Could not create dataset: ${err.message}`, "error");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  const manualForm = document.getElementById("manual-form");
+  manualForm.addEventListener("submit", createManualDataset);
+  manualForm.addEventListener("input", updateManualControls);
+  manualForm.addEventListener("change", (event) => {
+    if (event.target.name === "manual-config-mode") {
+      document.getElementById("manual-config-fields").hidden = manualConfigMode() !== "manual";
+    }
+    updateManualControls();
+  });
+  document.getElementById("manual-add-row").addEventListener("click", addManualRow);
+
   const form = document.getElementById("plan-form");
   form.addEventListener("submit", createPlan);
   form.addEventListener("input", updatePlanPreview);

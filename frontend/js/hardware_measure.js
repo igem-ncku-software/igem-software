@@ -54,7 +54,7 @@ function renderCurveChip(curve, config) {
 
   el.append(
     hwEl("strong", null, curve.curve_id),
-    hwEl("span", null, `Fitted ${formatLocalTime(curve.fitted_at)}`),
+    hwEl("span", null, `Fitted ${formatLocalTime(curve.fitted_at)}${curve.source === "manual" ? " · manual entry" : ""}`),
     bound,
   );
 }

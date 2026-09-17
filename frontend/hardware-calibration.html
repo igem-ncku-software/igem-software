@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Calibration Run · CAPTURE-Screen · LasReader</title>
-  <meta name="description" content="Build a calibration tube list and read the standards one cuvette at a time on the CAPTURE-Screen reader." />
+  <meta name="description" content="Build a calibration tube list and read the standards one cuvette at a time on the CAPTURE-Screen reader, or enter readings recorded earlier." />
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" type="image/png" href="assets/images/favicon.png" />
   <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
@@ -62,6 +62,91 @@
         </form>
 
         <p class="status-message" id="plan-create-status" aria-live="polite"></p>
+      </section>
+
+      <!-- State no_plan: readings recorded earlier, entered by hand. Creating the dataset
+           opens it on the fit page, since every slot is already filled. -->
+      <section class="card" id="manual-card" hidden>
+        <p class="section-label">Recorded data</p>
+        <p class="section-description">
+          Enter CAPTURE-Screen readings recorded earlier, one row per tube, and fit them like a run.
+        </p>
+
+        <form id="manual-form">
+          <div class="form-grid">
+            <div class="field">
+              <label for="manual-timepoint">Timepoint</label>
+              <input type="text" id="manual-timepoint" placeholder="t=6h endpoint" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="manual-measured-on">Measured on</label>
+              <input type="date" id="manual-measured-on" />
+            </div>
+          </div>
+
+          <fieldset class="plain-fieldset">
+            <legend>Instrument config</legend>
+            <div class="radio-row">
+              <label class="check-field">
+                <input type="radio" name="manual-config-mode" value="current" checked />
+                Same as the instrument now
+              </label>
+              <label class="check-field">
+                <input type="radio" name="manual-config-mode" value="manual" />
+                Enter manually
+              </label>
+            </div>
+            <div class="form-grid" id="manual-config-fields" hidden>
+              <div class="field">
+                <label for="manual-led">LED current (mA)</label>
+                <input type="text" id="manual-led" inputmode="decimal" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="manual-gain">Gain (×)</label>
+                <input type="text" id="manual-gain" inputmode="decimal" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="manual-atime">ATIME</label>
+                <input type="text" id="manual-atime" inputmode="numeric" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="manual-astep">ASTEP</label>
+                <input type="text" id="manual-astep" inputmode="numeric" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="manual-build">Build ID</label>
+                <input type="text" id="manual-build" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="manual-firmware">Firmware version</label>
+                <input type="text" id="manual-firmware" autocomplete="off" />
+              </div>
+            </div>
+          </fieldset>
+          <p class="plan-meta" id="manual-fingerprint" aria-live="polite"></p>
+
+          <div class="table-wrapper table-spaced">
+            <table class="manual-table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Concentration (nM)</th>
+                  <th scope="col">sfGFP signal (basic counts)</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="manual-table-body"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn-secondary" id="manual-add-row">Add row</button>
+
+          <p class="plan-meta" id="manual-summary" aria-live="polite"></p>
+          <button type="submit" id="manual-create-button">Create dataset</button>
+          <p class="blocked-reason" id="manual-create-reason" hidden></p>
+        </form>
+
+        <p class="status-message" id="manual-create-status" aria-live="polite"></p>
       </section>
 
       <!-- States plan_created / running / complete. -->

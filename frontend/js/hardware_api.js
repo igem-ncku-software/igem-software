@@ -7,7 +7,7 @@
 //   GET  /api/hardware/status  whether the device is online, and its config
 //   POST /api/hardware/read    takes one measurement, returning the device's raw reading,
 //                              which js/hardware_processing.js then converts to a Measurement
-// plan / curve / fit / invert: js/hardware_local.js (the browser-side stand-in storage).
+// plan / manual dataset / curve / fit / invert: js/hardware_local.js (the browser-side stand-in storage).
 // Once the backend has storage, swapping those functions for fetch calls is enough — pages
 // don't need to change.
 //
@@ -38,15 +38,16 @@
 /**
  * @typedef {Object} Measurement
  * @property {string} sample_id
- * @property {string} timestamp_utc
+ * @property {string} timestamp_utc      ISO time of the read; a manual entry carries only its date (YYYY-MM-DD)
  * @property {"blank" | "standard" | "unknown"} sample_type
  * @property {number | null} known_concentration_nM  only set when sample_type is standard
  * @property {number} fluorescence       the unmixed sfGFP signal, basic counts
- * @property {number} fluorescence_sd    estimated standard deviation of read noise (from the two dark frames), basic counts
- * @property {number} scatter            the scatter component, an interference indicator, basic counts
+ * @property {number | null} fluorescence_sd  estimated standard deviation of read noise (from the two dark frames), basic counts; null for a manual entry
+ * @property {number | null} scatter     the scatter component, an interference indicator, basic counts; null for a manual entry
  * @property {QCFlag[]} flags
  * @property {string} config_fingerprint
- * @property {Record<string, number>} raw  F1..F8, Clear, NIR — dark-subtracted basic counts
+ * @property {Record<string, number> | null} raw  F1..F8, Clear, NIR — dark-subtracted basic counts; null for a manual entry
+ * @property {"device" | "manual"} source  read by the instrument, or recorded earlier and entered by hand
  */
 
 /**
@@ -62,6 +63,8 @@
  * @typedef {Object} CalibrationPlan
  * @property {string} plan_id
  * @property {string} created_at
+ * @property {"device" | "manual"} source  a run read on the instrument, or a dataset entered by hand (every slot already filled)
+ * @property {string | null} measured_on  manual datasets only: the date the readings were taken (YYYY-MM-DD)
  * @property {string} config_fingerprint
  * @property {string} timepoint          e.g. "t=6h endpoint"
  * @property {CalibrationPlanItem[]} items
@@ -71,6 +74,7 @@
  * @typedef {Object} CalibrationCurve
  * @property {string} curve_id
  * @property {string} fitted_at
+ * @property {"device" | "manual"} source  the source of the plan it was fitted from
  * @property {"4PL"} model
  * @property {{top: number, bottom: number, ec50_nM: number, hill: number}} params
  * @property {number} lod_nM
@@ -236,6 +240,39 @@ const HardwareApi = {
   async createCalibrationPlan(input) {
     const status = await HardwareApi.getDeviceStatus();
     return hardwareLocalCall(HardwareLocal.createCalibrationPlan, input, status.config.fingerprint);
+  },
+
+  /**
+   * Fingerprint of a config entered by hand. Throws a displayable message for the first invalid field.
+   * @param {{led_current_mA: number, gain: number, atime: number, astep: number, build_id: string, firmware_version: string}} config
+   * @returns {string}
+   */
+  fingerprintConfig(config) {
+    const { led_current_mA, gain, atime, astep } = config ?? {};
+    const build_id = String(config?.build_id ?? "").trim();
+    const firmware_version = String(config?.firmware_version ?? "").trim();
+    if (!(Number.isFinite(led_current_mA) && led_current_mA >= 0)) throw new Error("LED current must be a number ≥ 0.");
+    if (!(Number.isFinite(gain) && gain > 0)) throw new Error("Gain must be a positive number.");
+    if (!(Number.isInteger(atime) && atime >= 0)) throw new Error("ATIME must be an integer ≥ 0.");
+    if (!(Number.isInteger(astep) && astep >= 0)) throw new Error("ASTEP must be an integer ≥ 0.");
+    if (!build_id) throw new Error("Enter the build ID.");
+    if (!firmware_version) throw new Error("Enter the firmware version.");
+    return HardwareProcessing.configFingerprint({ led_current_mA, gain, atime, astep, build_id, firmware_version });
+  },
+
+  /**
+   * Readings recorded earlier, entered by hand. config null binds the dataset to the instrument's
+   * current config (so the device must be online); otherwise the entered config is fingerprinted.
+   * @param {{timepoint: string, measured_on: string,
+   *   config: {led_current_mA: number, gain: number, atime: number, astep: number, build_id: string, firmware_version: string} | null,
+   *   rows: {sample_type: "blank" | "standard", concentration_nM: number | null, fluorescence: number}[]}} input
+   * @returns {Promise<CalibrationPlan>}
+   */
+  async createManualDataset(input) {
+    const fingerprint = input?.config
+      ? HardwareApi.fingerprintConfig(input.config)
+      : (await HardwareApi.getDeviceStatus()).config.fingerprint;
+    return hardwareLocalCall(HardwareLocal.createManualDataset, input, fingerprint);
   },
 
   /** @param {string} plan_id @returns {Promise<CalibrationPlan>} */

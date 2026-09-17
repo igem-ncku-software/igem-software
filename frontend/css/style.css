@@ -337,12 +337,14 @@ canvas { max-width: 100%; }
    already in :root: accent = OK or actionable, gold = caution,
    error = unusable, muted = neutral. */
 
-input[type="text"], select {
+input[type="text"], input[type="date"], select {
   width: 100%; padding: 11px 12px;
   border: 1px solid var(--border); border-radius: 10px;
   color: var(--text); background: var(--solid);
 }
 select:focus { outline: 3px solid var(--gold); outline-offset: 2px; border-color: var(--text-dim); }
+/* The date picker's inner field is taller than a text line; this keeps it level with the text box beside it. */
+input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
@@ -389,6 +391,9 @@ button.is-blocked:disabled { cursor: not-allowed; }
 .field { display: flex; flex-direction: column; gap: 8px; }
 .check-field { display: flex; align-items: center; gap: 8px; }
 .check-field input, td input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.plain-fieldset { min-width: 0; margin: 12px 0 0; padding: 0; border: 0; }
+.plain-fieldset legend { padding: 0; color: var(--text); font-size: .9rem; font-weight: 600; }
+.radio-row { display: flex; flex-wrap: wrap; gap: 0 28px; }
 
 .table-heading { margin: 26px 0 12px; }
 .table-spaced { margin-top: 16px; }
@@ -465,6 +470,12 @@ td.group-cell { vertical-align: top; color: var(--text); background: var(--solid
 .table-button { width: auto; min-height: 34px; margin: 0 6px 0 0; padding: 5px 12px; font-size: .85rem; }
 .table-input { min-width: 200px; padding: 6px 10px; }
 .table-input.is-missing { border-color: var(--error); }
+/* Recorded-data entry: narrower than the result tables, one compact control per cell. */
+.manual-table { min-width: 500px; }
+.manual-table th { white-space: normal; }
+.manual-table td { padding-top: 8px; padding-bottom: 8px; }
+.manual-table input.table-input, .manual-table select.table-input { min-width: 96px; padding: 6px 10px; }
+.manual-table input.table-input:disabled { background: var(--solid-soft); }
 tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(--solid-soft); }
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px 20px; }
 .detail-value { display: block; margin-top: 2px; color: var(--text); font-variant-numeric: tabular-nums; }

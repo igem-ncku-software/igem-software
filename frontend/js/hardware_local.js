@@ -8,8 +8,8 @@
 // now (falling back to memory if reads/writes fail). Once the backend has storage, this
 // whole file gets replaced by HTTP calls.
 //
-// Only accepts Measurements converted from a mode "measurement" reading; live-stream data
-// never can and never should reach this.
+// Holds only Measurements converted from a mode "measurement" reading, or readings recorded
+// earlier and entered by hand (source "manual"); live-stream data never can and never should reach this.
 //
 // Pages never call this directly — only through js/hardware_api.js.
 // =========================================================
@@ -81,6 +81,14 @@ function localFail(message) {
 // The concentration string used in a plan's label; above 1000 nM it's rewritten as µM, matching the page's display rule.
 function localConcentrationLabel(nM) {
   return nM > 1000 ? `${+(nM / 1000).toFixed(3)} µM` : `${+nM.toFixed(3)} nM`;
+}
+
+// A YYYY-MM-DD calendar date that exists and isn't after today (local time).
+function localIsPastDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d && date <= new Date();
 }
 
 function localMean(values) {
@@ -341,11 +349,82 @@ const HardwareLocal = {
     const plan = {
       plan_id: localId("PLAN"),
       created_at: new Date().toISOString(),
+      source: "device",
+      measured_on: null,
       config_fingerprint: configFingerprint,
       timepoint: String(timepoint).trim(),
       items: items.map((item, i) => ({ slot: i + 1, ...item, measurement: null })),
     };
     store.plans[plan.plan_id] = plan;
+    localSave(store);
+    return plan;
+  },
+
+  // Readings recorded earlier and entered by hand, stored as a plan whose every slot is already
+  // filled, so fitting, exclusions, and saving run exactly as they do for a device run. Slots
+  // keep the order the rows were entered in. Nothing that wasn't recorded (read-noise SD,
+  // scatter, channels) is filled in: those fields stay null.
+  createManualDataset(input, configFingerprint) {
+    const store = localLoad();
+    const { timepoint, measured_on, rows } = input ?? {};
+    if (!/^[0-9a-f]{6}$/.test(String(configFingerprint))) localFail("Instrument config unknown: a dataset must be bound to a config.");
+    if (!timepoint || !String(timepoint).trim()) localFail("Describe the timepoint.");
+    if (!localIsPastDate(measured_on)) localFail("Measured on must be a date no later than today.");
+    if (!Array.isArray(rows) || rows.length === 0) localFail("Enter at least one row.");
+
+    rows.forEach((row, i) => {
+      if (row?.sample_type === "standard") {
+        if (!(Number.isFinite(row.concentration_nM) && row.concentration_nM > 0)) {
+          localFail(`Row ${i + 1}: concentration must be a positive number.`);
+        }
+      } else if (row?.sample_type !== "blank") {
+        localFail(`Row ${i + 1}: type must be blank or standard.`);
+      }
+      if (!(Number.isFinite(row.fluorescence) && row.fluorescence >= 0)) localFail(`Row ${i + 1}: signal must be a number ≥ 0.`);
+    });
+    const concentrations = new Set(rows.filter((row) => row.sample_type === "standard").map((row) => row.concentration_nM));
+    if (concentrations.size < 4) localFail("A 4PL fit needs at least 4 distinct concentrations.");
+    if (rows.filter((row) => row.sample_type === "blank").length < 2) localFail("Enter at least 2 blanks: LOD needs a blank SD.");
+
+    const plan_id = localId("PLAN");
+    const replicateCount = new Map();
+    const items = rows.map((row, i) => {
+      const slot = i + 1;
+      const blank = row.sample_type === "blank";
+      const key = blank ? "blank" : row.concentration_nM;
+      const replicate = (replicateCount.get(key) ?? 0) + 1;
+      replicateCount.set(key, replicate);
+      return {
+        slot,
+        label: blank ? `blank r${replicate}` : `${localConcentrationLabel(row.concentration_nM)} r${replicate}`,
+        sample_type: row.sample_type,
+        concentration_nM: blank ? null : row.concentration_nM,
+        measurement: {
+          sample_id: `${plan_id}-${String(slot).padStart(2, "0")}`,
+          timestamp_utc: measured_on,
+          sample_type: row.sample_type,
+          known_concentration_nM: blank ? null : row.concentration_nM,
+          fluorescence: row.fluorescence,
+          fluorescence_sd: null,
+          scatter: null,
+          flags: [],
+          config_fingerprint: configFingerprint,
+          raw: null,
+          source: "manual",
+        },
+      };
+    });
+
+    const plan = {
+      plan_id,
+      created_at: new Date().toISOString(),
+      source: "manual",
+      measured_on,
+      config_fingerprint: configFingerprint,
+      timepoint: String(timepoint).trim(),
+      items,
+    };
+    store.plans[plan_id] = plan;
     localSave(store);
     return plan;
   },
@@ -360,6 +439,7 @@ const HardwareLocal = {
     const store = localLoad();
     const plan = store.plans[plan_id];
     if (!plan) localFail(`Plan ${plan_id} not found.`);
+    if (plan.source === "manual") localFail(`${plan_id} holds entered data; its values can't be replaced.`);
     const item = plan.items.find((it) => it.slot === slot);
     if (!item) localFail(`Slot ${slot} does not exist in ${plan_id}.`);
 
@@ -402,7 +482,7 @@ const HardwareLocal = {
     const points = included.map((it) => ({
       c: it.sample_type === "blank" ? 0 : it.concentration_nM,
       y: it.measurement.fluorescence,
-      sd: it.measurement.fluorescence_sd,
+      sd: it.measurement.fluorescence_sd ?? 0, // manual entries carry no read-noise estimate
     }));
     const blanks = points.filter((pt) => pt.c === 0);
     const standardConcs = [...new Set(points.filter((pt) => pt.c > 0).map((pt) => pt.c))].sort((a, b) => a - b);
@@ -410,10 +490,13 @@ const HardwareLocal = {
     if (standardConcs.length < 4) localFail("Keep at least 4 distinct standard concentrations for a 4PL fit.");
 
     const noise = localNoiseModel(points);
+    // No replicate spread and no read-noise estimate to weight by (manual entries, one tube per
+    // concentration): fit unweighted, and take the reading variance for the CI from the residuals.
+    const unweighted = noise.a === 0 && noise.b === 0 && points.every((pt) => pt.sd === 0);
     const spanScale = Math.max(...points.map((pt) => Math.abs(pt.y)), 1e-12);
     for (const pt of points) {
       const modelSd = Math.sqrt(noise.a + noise.b * pt.y * pt.y);
-      pt.sd = Math.max(pt.sd, modelSd, spanScale * 1e-9);
+      pt.sd = unweighted ? 1 : Math.max(pt.sd, modelSd, spanScale * 1e-9);
     }
 
     const { p, cov } = localFit4PL(points);
@@ -423,10 +506,12 @@ const HardwareLocal = {
 
     const params = { top, bottom, ec50_nM: Math.exp(lnEc50), hill };
     const concentrationAt = (signal) => params.ec50_nM * ((signal - bottom) / (top - signal)) ** (1 / hill);
+    const residualSs = points.reduce((acc, pt) => acc + (pt.y - localModel(pt.c, p)) ** 2, 0);
+    const readingNoise = unweighted ? { a: residualSs / (points.length - 4), b: 0 } : noise;
 
     // LOD / LOQ: blank mean + 3 / 10 times the blank SD, then converted to a concentration through the curve.
     const blankYs = blanks.map((pt) => pt.y);
-    const blankSd = localSampleSd(blankYs) || localMean(blanks.map((pt) => pt.sd));
+    const blankSd = localSampleSd(blankYs) || (unweighted ? Math.sqrt(readingNoise.a) : localMean(blanks.map((pt) => pt.sd)));
     const blankLevel = Math.max(localMean(blankYs), bottom);
     const lodSignal = blankLevel + 3 * blankSd;
     const loqSignal = blankLevel + 10 * blankSd;
@@ -445,11 +530,12 @@ const HardwareLocal = {
     };
     if (!(range_nM.min < range_nM.max)) localFail("No usable range: LOD is above the curve's upper limit.");
 
-    const rmse = Math.sqrt(localMean(points.map((pt) => (pt.y - localModel(pt.c, p)) ** 2)));
+    const rmse = Math.sqrt(residualSs / points.length);
 
     const curve = {
       curve_id: localId("CURVE"),
       fitted_at: new Date().toISOString(),
+      source: plan.source === "manual" ? "manual" : "device",
       model: "4PL",
       params,
       lod_nM,
@@ -462,7 +548,7 @@ const HardwareLocal = {
       timepoint: plan.timepoint,
       is_active: false,
     };
-    store.drafts[curve.curve_id] = { curve, cov, noise };
+    store.drafts[curve.curve_id] = { curve, cov, noise: readingNoise };
     // Keeps only the last 10 drafts, so localStorage doesn't keep growing.
     const draftIds = Object.keys(store.drafts);
     for (const id of draftIds.slice(0, Math.max(0, draftIds.length - 10))) delete store.drafts[id];
