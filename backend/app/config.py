@@ -19,6 +19,10 @@ class Settings:
         for origin in os.getenv(
             "CORS_ORIGINS",
             "https://igem-ncku-software.github.io,"
+            # The team wiki's Software page embeds the live spectrum (local wiki dev runs on 8080).
+            "https://2026.igem.wiki,"
+            "http://localhost:8080,"
+            "http://127.0.0.1:8080,"
             "http://localhost:5500,"
             "http://127.0.0.1:5500,"
             "http://localhost:8000,"
