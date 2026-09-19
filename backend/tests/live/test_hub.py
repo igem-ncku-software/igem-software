@@ -2,7 +2,8 @@ import asyncio
 import json
 
 from app.hardware.hub import DeviceHub
-from app.live.hub import LiveHub
+from app.live import hub as live_hub_module
+from app.live.hub import VIEWER_OUTBOX_SIZE, LiveHub
 from tests.hardware.payloads import LIVE, STATUS
 
 
@@ -34,9 +35,8 @@ async def connected_hubs():
 
 
 def drain(viewer):
-    messages = []
-    while not viewer.outbox.empty():
-        messages.append(json.loads(viewer.outbox.get_nowait()))
+    messages = [json.loads(text) for _, text in viewer.outbox]
+    viewer.outbox.clear()
     return messages
 
 
@@ -138,5 +138,42 @@ def test_a_device_that_connects_while_someone_watches_starts_streaming():
         await hub.attach_device(device)
 
         assert device.sent == [{"cmd": "live_start"}]
+
+    asyncio.run(scenario())
+
+
+def test_a_browser_that_falls_behind_loses_frames_but_not_presence():
+    async def scenario():
+        hub, live, device = await connected_hubs()
+        viewer = live.add_viewer()
+        await live.set_watching(viewer, True)
+        drain(viewer)
+
+        for _ in range(VIEWER_OUTBOX_SIZE * 2):
+            await hub.handle_device_message(device, json.dumps(LIVE))
+        await hub.detach_device(device)  # the one message check_presence() would never resend
+
+        messages = drain(viewer)
+        assert len(messages) == VIEWER_OUTBOX_SIZE
+        assert [message["mode"] for message in messages].count("live") == VIEWER_OUTBOX_SIZE - 1
+        assert messages[-1]["mode"] == "presence" and messages[-1]["online"] is False
+
+    asyncio.run(scenario())
+
+
+def test_presence_repeats_as_a_keepalive_when_nothing_else_is_sent(monkeypatch):
+    monkeypatch.setattr(live_hub_module, "PRESENCE_HEARTBEAT_SECONDS", 0.05)
+
+    async def scenario():
+        _, live = make_hubs()  # no device: presence is the only thing this browser ever hears
+        viewer = live.add_viewer()
+        drain(viewer)
+
+        live.check_presence()
+        assert drain(viewer) == []  # nothing changed and the heartbeat isn't due
+
+        await asyncio.sleep(0.06)
+        live.check_presence()
+        assert [message["mode"] for message in drain(viewer)] == ["presence"]
 
     asyncio.run(scenario())

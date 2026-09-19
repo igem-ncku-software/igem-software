@@ -50,6 +50,11 @@ class DeviceStatus(DeviceIdentity):
     state: Literal["IDLE", "LIVE", "MEASURING"]
     uptime_ms: int = Field(ge=0)
     wifi_rssi: int
+    # Whether the AS7341 answered at boot. Optional, not required: a device still running a
+    # firmware from before this field would fail validation outright, and a status that
+    # doesn't validate leaves the hub with no status at all, i.e. permanently offline.
+    # None therefore means "this firmware doesn't say", not "the sensor is fine".
+    sensor_ok: bool | None = None
     config: DeviceConfig
 
 

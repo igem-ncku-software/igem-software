@@ -25,7 +25,9 @@
 //      none) ----
 // Device -> backend
 //   {"mode":"status", ...}       on connect, on every state change, and
-//                                 every 5 s after that
+//                                 every 5 s after that; carries sensor_ok, so
+//                                 a page can tell "the AS7341 never answered"
+//                                 apart from "the stream hasn't started yet"
 //   {"mode":"live", ...}         one frame after another while someone is
 //                                 watching the live spectrum
 //   {"mode":"measurement", ...}  after a "read": one dark_1 -> light ->
@@ -171,7 +173,9 @@ uint16_t ASTEP_VAL  = 999;
 // ---- Timing ----
 const unsigned long DARK_SETTLE_MS      = 50;     // how long to wait after turning the LED off
 const unsigned long LIGHT_SETTLE_MS     = 100;    // how long to wait after turning the LED on to settle
-const unsigned long LIVE_INTERVAL_MS    = 300;    // gap between live frames, leaving room for ws.loop()
+const unsigned long LIVE_PERIOD_MS      = 500;    // minimum time from one live frame to the next; a
+                                                  // full read already takes ~452 ms, so this only bites
+                                                  // once ATIME/ASTEP are lowered from Serial
 const unsigned long STATUS_INTERVAL_MS  = 5000;   // the backend marks the device offline after 15 s of silence
 const unsigned long WIFI_BOOT_WAIT_MS   = 10000;  // max time to wait for Wi-Fi at boot before continuing in loop()
 const unsigned long RECONNECT_MS        = 5000;
@@ -180,6 +184,7 @@ const unsigned long WS_PONG_TIMEOUT_MS  = 10000;  // pump() runs during a measur
 const uint8_t       WS_MISSED_PONGS     = 2;
 const unsigned long WAITING_LOG_MS      = 10000;  // how often to log while stuck waiting for the backend
 const unsigned long OLED_REFRESH_MS     = 1000;   // idle-screen redraw interval
+const unsigned long SENSOR_CHECK_MS     = 2000;   // how often to re-confirm the AS7341 is still on the bus
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -214,7 +219,7 @@ bool readPending = false;        // a "read" arrived and hasn't been taken yet
 char readRequestId[40] = "";
 
 uint32_t liveSeq = 0;
-unsigned long liveStartedMs = 0, lastLiveFrameMs = 0, lastStatusMs = 0;
+unsigned long liveStartedMs = 0, lastLiveFrameMs = 0, lastStatusMs = 0, lastSensorCheckMs = 0;
 
 // =========================================================
 // 3. Sensor settings
@@ -259,6 +264,32 @@ void drawIdleScreen();
 bool i2cPresent(uint8_t addr) {
   Wire.beginTransmission(addr);
   return Wire.endTransmission() == 0;
+}
+
+// sensorOk has to keep meaning "the AS7341 is answering now", not "it answered at boot":
+// a cuvette holder knocked loose mid-session would otherwise leave every page saying the
+// sensor is fine while each read returns nonsense. The ACK is cheap, so it runs on a timer
+// and around every read. A sensor that comes back is re-begun and re-configured, because a
+// power-cycled AS7341 wakes up with its registers at defaults, not with ours.
+void checkSensor() {
+  lastSensorCheckMs = millis();
+  bool present = i2cPresent(AS7341_ADDR);
+  if (present == sensorOk) return;
+
+  sensorOk = present;
+  if (sensorOk) {
+    as7341.begin();
+    applySettings();
+    Serial.println("# AS7341 back on the bus, re-configured");
+  } else {
+    Serial.println("# AS7341 stopped responding");
+  }
+  if (!sensorOk && state != STATE_IDLE) {   // syncLive() can't light an LED for a sensor that isn't there
+    digitalWrite(LED_PIN, LOW);
+    setState(STATE_IDLE);
+  } else {
+    sendStatus();                           // setState() sends one itself; don't send two
+  }
 }
 
 void i2cScan() {
@@ -398,9 +429,12 @@ void sendStatus() {
   JsonDocument doc;
   doc["mode"] = "status";
   addIdentity(doc);
-  doc["state"]     = stateName();
-  doc["uptime_ms"] = millis();
-  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["state"]      = stateName();
+  doc["uptime_ms"]  = millis();
+  doc["wifi_rssi"]  = WiFi.RSSI();
+  // Without this a dead sensor is silent: syncLive() just never streams, and the page
+  // waits for a first frame that can't come.
+  doc["sensor_ok"]  = sensorOk;
   addConfig(doc["config"].to<JsonObject>());
   sendJson(doc);
 }
@@ -488,8 +522,8 @@ void syncLive() {
 void streamLiveFrame() {
   unsigned long now = millis();
   if (now - liveStartedMs < LIGHT_SETTLE_MS) return;
-  if (now - lastLiveFrameMs < LIVE_INTERVAL_MS) return;
-  lastLiveFrameMs = now;
+  if (now - lastLiveFrameMs < LIVE_PERIOD_MS) return;
+  lastLiveFrameMs = now;   // stamped before the read, so the constant is a period, not a gap
 
   Frame f;
   readOnce(f);
@@ -768,9 +802,19 @@ void loop() {
 
   // callback only records; the actual measurement happens here. Serial
   // comes after, so it never competes with a measurement.
-  if (readPending) { readPending = false; measureForWeb(readRequestId); }
+  if (readPending) {
+    readPending = false;
+    // measureForWeb() doesn't check the sensor itself, and the command handler's check is as
+    // old as the command: confirm here, or a sensor lost since then yields a frame of nonsense.
+    checkSensor();
+    if (sensorOk) measureForWeb(readRequestId);
+    else          sendError(readRequestId, "sensor_offline");
+  }
 
   handleSerial();
+
+  // Between whole reads, never inside one: loop() is sequential, so no I2C is in flight here.
+  if (state != STATE_MEASURING && millis() - lastSensorCheckMs >= SENSOR_CHECK_MS) checkSensor();
 
   syncLive();
   if (state == STATE_LIVE) streamLiveFrame();

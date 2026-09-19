@@ -4,7 +4,7 @@
 //   #status-load / #status-body / #status-connection / #status-heartbeat
 //   #status-fingerprint / #status-curve-count / #status-dark-alert / #status-config-body
 //   #status-active-curve
-//   #dark-read-button / #blank-read-button / #check-status / #check-result
+//   #dark-read-button / #blank-read-button / #check-reason / #check-status / #check-result
 // Backing API (js/hardware_api.js): getDeviceStatus / listCurves / getActiveCurve /
 //   runDarkRead / readSample
 // =========================================================
@@ -15,6 +15,14 @@ const DARK_READ_STALE_MINUTES = 60;
 // tolerated, in "raw" ADC counts converted to basic counts using the device's gain / ATIME / ASTEP.
 const DARK_READ_TOLERANCE_COUNTS = 2;
 const DARK_READ_ALERT_REFRESH_MS = 30000;
+
+// Both checks are blocked by the same thing, so they share one reason element. sensorReading()
+// is in hardware_common.js: Measure and Calibration block their reads on the same rule.
+function applySensorBlock(sensorOk) {
+  const { blocks } = sensorReading(sensorOk);
+  setBlocked(document.getElementById("dark-read-button"), document.getElementById("check-reason"), blocks);
+  setBlocked(document.getElementById("blank-read-button"), null, blocks);
+}
 
 function formatUptime(ms) {
   const minutes = Math.floor(ms / 60000);
@@ -47,6 +55,7 @@ async function loadInstrumentStatus() {
   }
 
   renderInstrument(statusResult.value, curvesResult.status === "fulfilled" ? curvesResult.value : null);
+  applySensorBlock(statusResult.value.sensor_ok);
   loadEl.hidden = true;
   document.getElementById("status-body").hidden = false;
 }
@@ -54,9 +63,12 @@ async function loadInstrumentStatus() {
 function renderInstrument(status, curves) {
   const { config } = status;
 
+  const sensor = sensorReading(status.sensor_ok);
   const connection = document.getElementById("status-connection");
-  connection.textContent = status.online ? "Online" : "Offline";
-  connection.classList.toggle("is-error", !status.online);
+  // A device whose sensor is dead is still connected, but calling that plain "Online" would
+  // read as ready to measure, which it isn't.
+  connection.textContent = status.online ? (sensor.tone === "error" ? "Online · sensor offline" : "Online") : "Offline";
+  connection.classList.toggle("is-error", !status.online || sensor.tone === "error");
   document.getElementById("status-heartbeat").textContent =
     `Last heartbeat ${formatLocalTime(status.last_seen)} (${formatAgo(status.last_seen)})`;
 
@@ -68,6 +80,7 @@ function renderInstrument(status, curves) {
   const tbody = document.getElementById("status-config-body");
   tbody.innerHTML = "";
   appendKvRow(tbody, "Device", `${status.device_id} · ${status.state}`);
+  appendKvRow(tbody, "AS7341 sensor", sensor.text);
   appendKvRow(tbody, "Wi-Fi signal", `${status.wifi_rssi} dBm`);
   appendKvRow(tbody, "Uptime", formatUptime(status.uptime_ms));
   appendKvRow(tbody, "LED current", `${config.led_current_mA} mA`);
@@ -154,6 +167,7 @@ async function runInstrumentCheck(kind) {
   const result = document.getElementById("check-result");
   const name = kind === "dark" ? "Dark read" : "Blank read";
 
+  let sensorOk;
   buttons.forEach((button) => { button.disabled = true; });
   result.hidden = true;
   setHardwareStatus(statusEl, kind === "dark" ? "Running dark read..." : "Reading blank...", null);
@@ -165,6 +179,7 @@ async function runInstrumentCheck(kind) {
         : HardwareApi.readSample({ sample_id: `BLANK-CHECK-${Date.now()}`, sample_type: "blank" }),
       HardwareApi.getDeviceStatus(),
     ]);
+    sensorOk = status.sensor_ok;
 
     result.innerHTML = "";
     result.hidden = false;
@@ -181,6 +196,9 @@ async function runInstrumentCheck(kind) {
     setHardwareStatus(statusEl, `${name} failed: ${err.message}`, "error");
   } finally {
     buttons.forEach((button) => { button.disabled = false; });
+    // The status fetched alongside the read may have changed the answer. A failed check tells
+    // us nothing about the sensor, so it leaves the buttons usable for a retry.
+    if (sensorOk !== undefined) applySensorBlock(sensorOk);
   }
 }
 

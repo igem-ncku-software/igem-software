@@ -22,6 +22,7 @@
 
 let plan = null;
 let planDeviceFingerprint = null; // null = device unreachable, config can't be confirmed
+let planDeviceSensorOk = null;    // DeviceStatus.sensor_ok; null = unreachable or a firmware that doesn't report it
 let rereadSlot = null; // the slot the user pressed Re-read on; null means measure the "next tube"
 let planReading = false;
 
@@ -148,6 +149,7 @@ async function openPlan(planId, alreadyLoaded) {
   }
   plan = planResult.value;
   planDeviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  planDeviceSensorOk = statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null;
   hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
   runCard.hidden = false;
   renderPlan();
@@ -212,8 +214,10 @@ function renderPlan() {
 
   const readButton = document.getElementById("plan-read-button");
   readButton.textContent = target ? `Read ${target.label}` : "Read";
+  // A dead AS7341 outranks "nothing left to read": neither can be read, but only one is a fault.
+  const sensorBlock = sensorReading(planDeviceSensorOk).blocks;
   setBlocked(readButton, document.getElementById("plan-read-reason"),
-    target ? null : "Every tube has been read. Use Re-read on a row to replace a reading.");
+    sensorBlock || (target ? null : "Every tube has been read. Use Re-read on a row to replace a reading."));
   if (planReading) readButton.disabled = true;
 
   const fitButton = document.getElementById("plan-fit-button");
@@ -284,6 +288,7 @@ async function readPlanTarget() {
 
     const [m, status] = await Promise.all([HardwareApi.readSample(input), HardwareApi.getDeviceStatus()]);
     planDeviceFingerprint = status.config.fingerprint;
+    planDeviceSensorOk = status.sensor_ok;
     plan = await HardwareApi.recordPlanMeasurement(plan.plan_id, item.slot, m);
     rereadSlot = null;
 

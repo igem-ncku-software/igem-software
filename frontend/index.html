@@ -80,7 +80,8 @@
           </div>
         </div>
 
-        <div id="live-empty" class="live-empty">Connecting to backend (up to 1 min after idle)...</div>
+        <!-- aria-live: the dot label names the state, this line is the only place its detail is given. -->
+        <div id="live-empty" class="live-empty" aria-live="polite">Connecting to backend (up to 1 min after idle)...</div>
         <div id="live-spectrum" hidden>
           <div class="live-legend" aria-hidden="true">
             <span><i class="live-swatch is-f4"></i>F4 · sfGFP</span>

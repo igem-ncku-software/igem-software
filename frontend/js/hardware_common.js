@@ -1,7 +1,7 @@
 // =========================================================
 // Shared across all five hardware pages: the subnav + the instrument connection badge in the
 // top right, number formatting, QC flag chips, the AS7341 channel table, disabled-button
-// reason text, and the unmixing-basis note.
+// reason text, sensor health, and the unmixing-basis note.
 // Target elements: #hardware-subnav (data-page marks the current page), [data-basis-note]
 // Depends on js/hardware_api.js's HardwareApi, so this must load after it and before every page's own script.
 // =========================================================
@@ -141,6 +141,20 @@ function setBlocked(button, reasonEl, reason) {
     reasonEl.textContent = reason || "";
     reasonEl.hidden = !reason;
   }
+}
+
+// DeviceStatus.sensor_ok -> what to show and whether reading is possible at all. Every page
+// that reads uses this, so the wording and the rule stay in one place.
+//   false  the AS7341 isn't answering the bus; every read would come back sensor_offline
+//   true   it answered within the last couple of seconds (the firmware re-checks on a timer)
+//   null   a firmware older than the field: unknown, never "fine". Nothing is blocked, since
+//          that is the state every device was in before, and a failed read still says so.
+function sensorReading(sensorOk) {
+  if (sensorOk === false) {
+    return { text: "Not responding", tone: "error", blocks: "The AS7341 is not responding, so no reading can be taken." };
+  }
+  if (sensorOk === true) return { text: "Responding", tone: null, blocks: null };
+  return { text: "Not reported by this firmware", tone: null, blocks: null };
 }
 
 function renderFlagChips(flags) {

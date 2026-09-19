@@ -311,6 +311,10 @@ canvas { max-width: 100%; }
 .live-switch input:checked + .live-switch-track span { transform: translateX(18px); }
 .live-switch input:focus-visible + .live-switch-track { outline: 3px solid var(--gold); outline-offset: 2px; }
 .live-empty { display: grid; min-height: 180px; margin-top: 16px; padding: 16px; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); background: var(--solid-soft); text-align: center; }
+/* With the chart up the box carries the message as one line above it, not as a stand-in for the chart. */
+.live-empty.is-inline { display: block; min-height: 1.5em; margin-top: 14px; padding: 0; border: 0; background: none; font-size: .88rem; text-align: left; }
+/* Held in the layout, not removed from it: a measurement's note must not push the chart down and back. */
+.live-empty.is-silent { visibility: hidden; }
 .live-legend { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px 16px; margin: 18px 0 6px; color: var(--muted); font-size: .8rem; }
 .live-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .live-swatch { width: 10px; height: 10px; border-radius: 2px; }

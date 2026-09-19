@@ -15,10 +15,12 @@
 //
 // Every fact lives in exactly one place:
 //   the word next to the dot       current status (liveStatus())
-//   the box where the chart sits   details and next step (liveStatus())
-//   the settings row under the chart   which device, firmware, Wi-Fi (the last-reported
-//                      device and no Wi-Fi once offline), plus gain, integration time,
-//                      LED current, and full scale — without these the raw counts can't be interpreted
+//   the message box                details and next step (liveStatus()): it stands in for
+//                      the chart when there is none, and shrinks to one line above the
+//                      chart when there is one, so no message is written out of sight
+//   the settings row under the chart   gain, integration time, LED current, and full scale
+//                      — the measurement configuration a raw count can't be read without.
+//                      Device identity and Wi-Fi were removed: they don't affect that reading.
 //
 // Rules:
 //   - Live data is only ever drawn; it's never written to storage, added to a plan, or fitted
@@ -26,15 +28,18 @@
 //   - The chart is cleared whenever the device goes offline or the connection drops — the last
 //     frame is never left showing as if it were current
 //   - Reconnects automatically on disconnect (a sleeping Render backend can take tens of
-//     seconds to wake), no page reload needed
+//     seconds to wake), no page reload needed — except when the backend rejects this page's
+//     origin, which no retry can fix, so it stops and says so
+//   - "Waiting for first frame" has an end: sensor_ok false names a dead AS7341, and
+//     LIVE_FIRST_FRAME_MS names a device that accepted Live and then sent nothing
 // =========================================================
 
 const LIVE_URL = `${BACKEND_BASE_URL.replace(/^http/, "ws")}/api/live/spectrum`;
 const LIVE_RECONNECT_MIN_MS = 1000;
 const LIVE_RECONNECT_MAX_MS = 15000;
-// The backend pushes offline on its own once the device goes silent; but while online it
-// sends a presence message every 5 s, so going this long without one means the browser-to-backend
-// connection has quietly dropped.
+// The backend pushes offline on its own once the device goes silent, and sends presence at
+// least every 10 s in every state (app/live/hub.py's PRESENCE_HEARTBEAT_SECONDS), so going
+// this long without one means the browser-to-backend connection has quietly dropped.
 const LIVE_PRESENCE_STALE_MS = 20000;
 // Once a second: the reconnect countdown and "last seen … ago" need to keep advancing.
 const LIVE_TICK_MS = 1000;
@@ -42,6 +47,9 @@ const LIVE_TICK_MS = 1000;
 // steps, 2.78 µs each, with the ADC saturating at min(65535, (ATIME+1)(ASTEP+1)).
 const LIVE_ADC_MAX_COUNTS = 65535;
 const LIVE_ASTEP_UNIT_MS = 2.78e-3;
+// A first frame needs the LED settle plus one read (~0.6 s), or ~2 s if a measurement was
+// already running. Past this, Live was accepted but nothing is coming.
+const LIVE_FIRST_FRAME_MS = 8000;
 // Below this chart width (mobile), a 2.4 aspect ratio leaves only ~100 px of height and no
 // room for ten axis labels: switch to a near-square ratio with channel codes only as labels.
 const LIVE_NARROW_CHART_PX = 480;
@@ -70,6 +78,8 @@ let liveDevice = null;      // the device's most recently reported status
 let liveLastSeen = null;
 let liveLastPresenceMs = 0;
 let liveStreaming = false;  // at least one frame has arrived since Live was turned on, and the chart is showing it
+let liveWatchStartedMs = 0; // when the device was last asked to stream, for the first-frame timeout
+let liveFatal = null;       // a rejection no reconnect can fix, so the retry loop stops
 let liveChart = null;
 
 // ---- Small helpers ----------------------------------------------------------
@@ -126,6 +136,9 @@ function liveWatching() {
 // ---- Status ------------------------------------------------------------
 
 function liveStatus() {
+  if (liveFatal) {
+    return { dot: "off", label: "Blocked", message: liveFatal };
+  }
   if (liveSocket?.readyState !== WebSocket.OPEN) {
     const retryS = Math.ceil((liveRetryAt - Date.now()) / 1000);
     return {
@@ -144,6 +157,10 @@ function liveStatus() {
       message: liveDevice && liveLastSeen ? `Last seen ${liveAgo(liveLastSeen)}` : "Waiting for CAPTURE-Screen to connect",
     };
   }
+  // The firmware refuses to stream without the AS7341, and says nothing further about it.
+  if (liveDevice?.sensor_ok === false) {
+    return { dot: "off", label: "Sensor offline", message: "Connected, but the AS7341 is not responding" };
+  }
   const measuring = liveDevice?.state === "MEASURING";
   if (!liveWanted) {
     return { dot: "off", label: measuring ? "Measuring" : "Online", message: "Turn on Live to switch on the LED and stream" };
@@ -152,6 +169,9 @@ function liveStatus() {
     return { dot: "reconnecting", label: "Measuring", message: "Stream starts after the measurement" };
   }
   if (!liveStreaming) {
+    if (Date.now() - liveWatchStartedMs > LIVE_FIRST_FRAME_MS) {
+      return { dot: "off", label: "No frames", message: "Live is on; the device has not sent a frame" };
+    }
     return { dot: "reconnecting", label: "Starting", message: "Waiting for first frame..." };
   }
   return { dot: "streaming", label: "Streaming", message: "" };
@@ -162,12 +182,10 @@ function renderSettings() {
   el.hidden = !liveDevice;
   if (!liveDevice) return;
 
+  // Device identity and Wi-Fi strength were dropped at the user's request: they don't
+  // change how a raw count should be read, unlike the four below.
   const { config } = liveDevice;
   const items = [
-    ["Build", liveDevice.build_id],
-    ["Firmware", liveDevice.firmware_version],
-    // Wi-Fi strength is stale once offline, so it's left out.
-    ...(liveOnline ? [["Wi-Fi", `${liveDevice.wifi_rssi} dBm`]] : []),
     ["Gain", `${config.gain}×`],
     ["Integration", `${liveIntegrationMs(config).toFixed(2)} ms`],
     ["LED", `${config.led_current_mA} mA`],
@@ -189,7 +207,17 @@ function renderLive() {
   const { dot, label, message } = liveStatus();
   liveEl("live-dot").className = `live-dot is-${dot}`;
   setLiveText("live-dot-label", label);
+
+  // The box carries every message there is. With the chart up it shrinks to a single line
+  // above it instead of standing in for it, so a measurement's "the stream comes back on
+  // its own" reaches the user rather than being written into a hidden element.
+  const empty = liveEl("live-empty");
   setLiveText("live-empty", message);
+  empty.classList.toggle("is-inline", liveStreaming);
+  // While the chart is up the line keeps its space whether or not it has something to say,
+  // so the message a measurement brings doesn't shift the chart down and back two seconds later.
+  empty.classList.toggle("is-silent", liveStreaming && !message);
+  empty.hidden = !message && !liveStreaming;
   // No new frames arrive during a measurement: the chart and F4 fade, so the last frame doesn't look like a current value.
   liveEl("live-spectrum").closest(".live-card").classList.toggle("is-paused", liveStreaming && liveDevice?.state === "MEASURING");
   renderSettings();
@@ -202,7 +230,7 @@ function clearLiveChart() {
 
   liveEl("live-spectrum").hidden = true;
   liveEl("live-f4").textContent = "--";
-  liveEl("live-empty").hidden = false;
+  // renderLive() owns the message box; every caller here reaches it before the next paint.
 }
 
 // ---- Chart ------------------------------------------------------------
@@ -216,6 +244,7 @@ function ensureLiveChart() {
   const muted = liveCssVar("--muted");
   const ink = liveCssVar("--text");
   const rule = liveCssVar("--border");
+  const accent = liveCssVar("--accent");
   const ticks = { color: muted, font: { size: 10 } };
   const canvas = liveEl("live-chart");
 
@@ -223,7 +252,13 @@ function ensureLiveChart() {
     type: "bar",
     data: {
       labels: LIVE_CHANNELS.map(liveChannelLines),
-      datasets: [{ label: "Raw counts", data: LIVE_CHANNELS.map(() => 0), borderRadius: 3 }],
+      datasets: [{
+        label: "Raw counts",
+        data: LIVE_CHANNELS.map(() => 0),
+        // Set once here, not per frame: only F4 is ever called out, and the palette can't change under us.
+        backgroundColor: LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : muted)),
+        borderRadius: 3,
+      }],
     },
     options: {
       responsive: true,
@@ -271,13 +306,8 @@ function ensureLiveChart() {
 }
 
 function drawLiveFrame(raw) {
-  const accent = liveCssVar("--accent");
-  const muted = liveCssVar("--muted");
-
   const values = LIVE_CHANNELS.map(({ key }) => raw[key]);
-  const dataset = liveChart.data.datasets[0];
-  dataset.data = values;
-  dataset.backgroundColor = LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : muted));
+  liveChart.data.datasets[0].data = values;
   // Grows only, never shrinks, so the bars don't keep jumping around with the highest channel; resets when the chart is cleared.
   const y = liveChart.options.scales.y;
   y.suggestedMax = Math.max(y.suggestedMax ?? 0, ...values);
@@ -289,10 +319,17 @@ function drawLiveFrame(raw) {
 // ---- Messages ------------------------------------------------------------
 
 function onLivePresence(message) {
+  const wasOnline = liveOnline;
   liveOnline = message.online === true;
-  if (message.device) liveDevice = message.device;
-  if (message.last_seen) liveLastSeen = message.last_seen;
+  // Assigned outright, not only when set: the backend clears `device` the moment a new
+  // socket attaches (a new session isn't vouched for until it reports), and keeping the
+  // old one would show the previous device's build and config as if they were current.
+  liveDevice = message.device ?? null;
+  liveLastSeen = message.last_seen ?? null;
   liveLastPresenceMs = Date.now();
+  // Restart the first-frame clock rather than let a legitimate gap run it out: a measurement
+  // pauses the stream, and the backend re-sends live_start itself when a device comes back.
+  if (liveDevice?.state === "MEASURING" || (liveOnline && !wasOnline)) liveWatchStartedMs = Date.now();
 
   if (!liveOnline) clearLiveChart();
   renderLive();
@@ -310,18 +347,30 @@ function onLiveFrame(message) {
 
   // Show before building the chart: Chart.js needs to measure the container's width to pick the right aspect ratio.
   liveStreaming = true;
-  liveEl("live-empty").hidden = true;
   liveEl("live-spectrum").hidden = false;
   ensureLiveChart();
   drawLiveFrame(raw);
   renderLive();
 }
 
+function onLiveError(message) {
+  if (message.error === "origin_not_allowed") {
+    // Only the backend's CORS_ORIGINS can fix this, so retrying is pointless: say so and stop.
+    liveFatal = "Backend does not allow this page's origin";
+    console.error(`The live backend rejected this page's origin (${location.origin}). Add it to the backend's CORS_ORIGINS.`);
+    renderLive();
+    return;
+  }
+  console.error("The live backend rejected a command:", message);
+}
+
 // ---- Connection ------------------------------------------------------------
 
 function sendLiveCommand() {
   if (liveSocket?.readyState === WebSocket.OPEN) {
-    liveSocket.send(JSON.stringify({ cmd: liveWatching() ? "live_start" : "live_stop" }));
+    const watching = liveWatching();
+    liveWatchStartedMs = watching ? Date.now() : 0;
+    liveSocket.send(JSON.stringify({ cmd: watching ? "live_start" : "live_stop" }));
   }
 }
 
@@ -335,6 +384,7 @@ function openLiveSocket() {
   socket.onopen = () => {
     if (socket !== liveSocket) return;
     liveReconnectMs = LIVE_RECONNECT_MIN_MS;
+    liveLastPresenceMs = Date.now();  // the staleness clock starts when the socket opens
     if (liveWatching()) sendLiveCommand();
     renderLive();
   };
@@ -350,7 +400,7 @@ function openLiveSocket() {
     }
     if (message.mode === "presence") onLivePresence(message);
     else if (message.mode === "live") onLiveFrame(message);
-    else if (message.mode === "error") console.error("The live backend rejected a command:", message);
+    else if (message.mode === "error") onLiveError(message);
   };
 
   socket.onclose = () => {
@@ -358,6 +408,10 @@ function openLiveSocket() {
     liveSocket = null;
     liveOnline = false;
     clearLiveChart();
+    if (liveFatal) {
+      renderLive();
+      return;
+    }
     liveRetryAt = Date.now() + liveReconnectMs;
     liveReconnectTimer = setTimeout(openLiveSocket, liveReconnectMs);
     liveReconnectMs = Math.min(liveReconnectMs * 2, LIVE_RECONNECT_MAX_MS);
@@ -373,9 +427,11 @@ function setLiveWanted(wanted) {
 }
 
 function tickLive() {
-  if (liveOnline && Date.now() - liveLastPresenceMs > LIVE_PRESENCE_STALE_MS) {
-    liveOnline = false;
-    clearLiveChart();
+  // Presence arrives at least every 10 s whether or not a device is attached, so a longer
+  // silence on an open socket means it died without a close frame. Closing it hands the
+  // work to onclose, which clears the chart and starts the reconnect countdown.
+  if (liveSocket?.readyState === WebSocket.OPEN && Date.now() - liveLastPresenceMs > LIVE_PRESENCE_STALE_MS) {
+    liveSocket.close();
   }
   renderLive();
 }

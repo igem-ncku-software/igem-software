@@ -11,9 +11,10 @@ Everything is in memory, so this assumes one backend process, like DeviceHub.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
+import time
+from collections import deque
 from typing import Any
 
 from pydantic import ValidationError
@@ -22,20 +23,49 @@ from app.hardware.hub import DeviceHub, DeviceOffline
 from app.live.models import LiveFrame
 
 VIEWER_OUTBOX_SIZE = 8
+# Presence is the only thing a browser hears while no device is attached, so it doubles as
+# the keepalive that proves the socket (and every proxy on the way) is still there. Shorter
+# than device_live.js's staleness timeout, so one missed beat isn't enough to trip it.
+PRESENCE_HEARTBEAT_SECONDS = 10.0
 
 
 class Viewer:
-    """One browser on WS /spectrum. The hub fills its outbox; the route drains it."""
+    """One browser on WS /spectrum. The hub fills its outbox; the route drains it in order.
+
+    A deque rather than a Queue: the route polls the outbox on its own tick and never
+    awaits on it.
+    """
 
     def __init__(self) -> None:
-        self.outbox: asyncio.Queue[str] = asyncio.Queue(maxsize=VIEWER_OUTBOX_SIZE)
+        self.outbox: deque[tuple[bool, str]] = deque()  # (is a live frame, text)
         self.watching = False
 
-    def post(self, text: str) -> None:
-        # A slow browser loses its oldest message instead of holding up the device.
-        if self.outbox.full():
-            self.outbox.get_nowait()
-        self.outbox.put_nowait(text)
+    def post_presence(self, text: str) -> None:
+        self._post(False, text)
+
+    def post_frame(self, text: str) -> None:
+        self._post(True, text)
+
+    def _post(self, is_frame: bool, text: str) -> None:
+        """Queue one message; a browser that falls behind loses its oldest live frame.
+
+        Presence is never dropped for a frame: check_presence() only resends while the
+        online flag still disagrees, so a lost presence message would leave that one
+        browser showing a device state nothing ever corrects. Order is kept either way,
+        so an offline presence can't overtake the frames that came before it.
+        """
+        if len(self.outbox) >= VIEWER_OUTBOX_SIZE and not self._drop_oldest_frame():
+            if is_frame:
+                return  # nothing droppable left, and a frame is the disposable one
+            self.outbox.popleft()
+        self.outbox.append((is_frame, text))
+
+    def _drop_oldest_frame(self) -> bool:
+        for index, (is_frame, _) in enumerate(self.outbox):
+            if is_frame:
+                del self.outbox[index]
+                return True
+        return False
 
 
 class LiveHub:
@@ -47,18 +77,24 @@ class LiveHub:
     def reset(self) -> None:
         self._viewers: set[Viewer] = set()
         self._told_online = False
+        self._told_at = time.monotonic()
 
     def presence(self) -> dict[str, Any]:
         return {"mode": "presence", **self.device.snapshot().model_dump(mode="json")}
 
     def check_presence(self) -> None:
-        """Broadcast presence if the device's online flag changed without an event.
+        """Broadcast presence if it changed unannounced, and at least every heartbeat.
 
         A device that just goes quiet (Wi-Fi lost, no socket close) turns
         DeviceHub.online false after HARDWARE_ONLINE_TIMEOUT_SECONDS without
-        telling anyone, so WS /spectrum calls this on every poll tick.
+        telling anyone, so WS /spectrum calls this on every poll tick. The same
+        call carries the keepalive: a device reporting every 5 s is its own
+        heartbeat, but with none attached this is all a browser ever hears.
         """
-        if self.device.online != self._told_online:
+        if (
+            self.device.online != self._told_online
+            or time.monotonic() - self._told_at >= PRESENCE_HEARTBEAT_SECONDS
+        ):
             self._broadcast_presence()
 
     # ---- what DeviceHub tells us ---------------------------------------
@@ -71,7 +107,9 @@ class LiveHub:
             text = LiveFrame.model_validate(message).model_dump_json()
         except ValidationError:
             return
-        self._broadcast(text, watchers_only=True)
+        for viewer in self._viewers:
+            if viewer.watching:
+                viewer.post_frame(text)
 
     async def on_device_attached(self) -> None:
         # A device that (re)connects while someone is already watching must start streaming.
@@ -84,7 +122,7 @@ class LiveHub:
     def add_viewer(self) -> Viewer:
         viewer = Viewer()
         self._viewers.add(viewer)
-        viewer.post(json.dumps(self.presence()))
+        viewer.post_presence(json.dumps(self.presence()))
         return viewer
 
     async def set_watching(self, viewer: Viewer, watching: bool) -> None:
@@ -111,9 +149,7 @@ class LiveHub:
     def _broadcast_presence(self) -> None:
         presence = self.presence()
         self._told_online = presence["online"]
-        self._broadcast(json.dumps(presence))
-
-    def _broadcast(self, text: str, watchers_only: bool = False) -> None:
+        self._told_at = time.monotonic()
+        text = json.dumps(presence)
         for viewer in self._viewers:
-            if viewer.watching or not watchers_only:
-                viewer.post(text)
+            viewer.post_presence(text)

@@ -179,7 +179,9 @@ async function hardwareCurrentFingerprint() {
 const HardwareApi = {
   /**
    * Throws when the device is offline (with a message that can be shown as-is); pages should treat it as unreachable either way.
-   * @returns {Promise<{online: true, last_seen: string, config: HardwareConfig,
+   * sensor_ok is null when the firmware predates the field: unknown, not healthy. It stays out
+   * of HardwareConfig on purpose — sensor health must never reach the config fingerprint.
+   * @returns {Promise<{online: true, last_seen: string, config: HardwareConfig, sensor_ok: boolean | null,
    *   device_id: string, state: "IDLE" | "LIVE" | "MEASURING", wifi_rssi: number, uptime_ms: number}>}
    */
   async getDeviceStatus() {
@@ -199,6 +201,7 @@ const HardwareApi = {
       online: true,
       last_seen: body.last_seen,
       config: HardwareProcessing.toHardwareConfig(device),
+      sensor_ok: device.sensor_ok ?? null,
       device_id: device.device_id,
       state: device.state,
       wifi_rssi: device.wifi_rssi,

@@ -4,10 +4,11 @@ STATUS = {
     "mode": "status",
     "device_id": "capture-screen-p1",
     "build_id": "P1-PROTO-01",
-    "firmware_version": "5.2.0",
+    "firmware_version": "6.0.0",
     "state": "IDLE",
     "uptime_ms": 1234,
     "wifi_rssi": -47,
+    "sensor_ok": True,
     "config": {"led_current_mA": 5.553, "gain": 512, "atime": 59, "astep": 999},
 }
 

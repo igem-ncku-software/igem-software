@@ -59,12 +59,21 @@ function renderCurveChip(curve, config) {
   );
 }
 
+// Blocked with a reason rather than left to fail: without the AS7341 every read comes back
+// sensor_offline. An unreachable device leaves sensor_ok unknown, which blocks nothing.
+function applySensorBlock(sensorOk) {
+  setBlocked(document.getElementById("measure-read-button"),
+    document.getElementById("measure-read-reason"), sensorReading(sensorOk).blocks);
+}
+
 // The curve itself should still show when the device is unreachable, just without a stale check.
 async function refreshCurveChip() {
   const [curveResult, statusResult] = await Promise.allSettled([
     HardwareApi.getActiveCurve(),
     HardwareApi.getDeviceStatus(),
   ]);
+  // Before the curve: whether reading is possible doesn't depend on there being a curve.
+  applySensorBlock(statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null);
   if (curveResult.status === "rejected") {
     document.getElementById("measure-curve").textContent = `Curve unavailable: ${curveResult.reason.message}`;
     return;
@@ -233,6 +242,7 @@ async function readMeasureSample(event) {
     input.known_concentration_nM = known;
   }
 
+  let sensorOk;
   button.disabled = true;
   // Hide the previous tube's result first: if this read fails, the old numbers can't be left on screen looking like they belong to this one.
   document.getElementById("measure-result").hidden = true;
@@ -240,6 +250,7 @@ async function readMeasureSample(event) {
 
   try {
     const [m, status] = await Promise.all([HardwareApi.readSample(input), HardwareApi.getDeviceStatus()]);
+    sensorOk = status.sensor_ok;
     const [estimate, curve] = await Promise.all([
       HardwareApi.invert(m.fluorescence, m.config_fingerprint),
       HardwareApi.getActiveCurve(),
@@ -270,6 +281,8 @@ async function readMeasureSample(event) {
     setHardwareStatus(statusEl, `Read failed: ${err.message}`, "error");
   } finally {
     button.disabled = false;
+    // A failed read says nothing about the sensor, so it leaves the button usable for a retry.
+    if (sensorOk !== undefined) applySensorBlock(sensorOk);
   }
 }
 

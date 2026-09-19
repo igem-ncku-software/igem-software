@@ -111,7 +111,10 @@ class DeviceHub:
 
     async def attach_device(self, conn: Connection) -> None:
         previous, self._device = self._device, conn
-        # A new session: don't vouch for it until it reports its own status.
+        # A new session: don't vouch for it until it reports its own status. _last_seen is
+        # deliberately kept: it answers "when did we last hear anything", which is still
+        # true of the old session, and snapshot() reports device=None alongside it, so the
+        # pair can never claim a time for a device it isn't showing.
         self._status = None
         self._fail_pending(DeviceOffline("CAPTURE-Screen reconnected before answering."))
         if previous is not None:

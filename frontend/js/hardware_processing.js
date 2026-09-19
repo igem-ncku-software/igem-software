@@ -100,6 +100,11 @@ const HardwareProcessing = (() => {
     const identity = validateIdentity(body);
     if (identity) return identity;
     if (!["IDLE", "LIVE", "MEASURING"].includes(body.state)) return `unknown state ${body.state}`;
+    // Optional: a firmware older than the field reports no sensor health at all, and that must
+    // not cost the device its whole status. Absent means "unknown", never "fine".
+    if (!(body.sensor_ok === undefined || body.sensor_ok === null || typeof body.sensor_ok === "boolean")) {
+      return "sensor_ok must be a boolean when present";
+    }
     return validateDeviceConfig(body.config);
   }
 
