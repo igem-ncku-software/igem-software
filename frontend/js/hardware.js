@@ -247,9 +247,133 @@ function renderBlankResult(m, container, statusEl) {
   fillBasisNotes(container);
 }
 
+// ---- Backup ---------------------------------------------------------------
+// The whole hardware section's data in one file. Deliberately one file and not three: a curve
+// means nothing without the run it was fitted from, and it took only forgetting one of two
+// downloads to end up with exactly that.
+
+const BACKUP_SECTIONS = [["run", "plans"], ["curve", "curves"], ["reading", "measurements"]];
+
+function backupCount(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+async function refreshBackupSummary() {
+  const summaryEl = document.getElementById("backup-summary");
+  try {
+    const payload = await HardwareApi.exportBackup();
+    const counts = BACKUP_SECTIONS.map(([word, key]) => backupCount(payload[key].length, word));
+    const total = BACKUP_SECTIONS.reduce((sum, [, key]) => sum + payload[key].length, 0);
+    summaryEl.textContent = counts.join(" · ");
+    setBlocked(document.getElementById("backup-export-button"), document.getElementById("backup-export-reason"),
+      total === 0 ? "Nothing stored in this browser yet." : null);
+  } catch (err) {
+    console.error("Could not read what is stored:", err);
+    summaryEl.textContent = `Could not read what is stored: ${err.message}`;
+  }
+}
+
+async function exportBackup() {
+  const button = document.getElementById("backup-export-button");
+  const statusEl = document.getElementById("backup-export-status");
+  if (button.disabled) return;
+
+  button.disabled = true;
+  try {
+    const payload = await HardwareApi.exportBackup();
+    const total = BACKUP_SECTIONS.reduce((sum, [, key]) => sum + payload[key].length, 0);
+    if (total === 0) {
+      setHardwareStatus(statusEl, "Nothing stored in this browser yet.", "warn");
+      return;
+    }
+    hwDownloadJson(`lasreader-backup-${hwFileStamp()}.json`, payload);
+    // The readings are in a file now, so the Measure page's unexported count has to agree.
+    await HardwareApi.markMeasurementsExported(payload.measurements.map((record) => record.record_id));
+    setHardwareStatus(statusEl,
+      `Exported ${BACKUP_SECTIONS.map(([word, key]) => backupCount(payload[key].length, word)).join(", ")}. `
+      + "Check the download completed before relying on it.", "success");
+  } catch (err) {
+    console.error("Backup export failed:", err);
+    setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function backupImportFile() {
+  return document.getElementById("backup-import-file").files?.[0] ?? null;
+}
+
+function updateBackupImportControls() {
+  setBlocked(document.getElementById("backup-import-button"), document.getElementById("backup-import-reason"),
+    backupImportFile() ? null : "Choose a backup file first.");
+}
+
+async function importBackup(event) {
+  event.preventDefault();
+  const button = document.getElementById("backup-import-button");
+  const statusEl = document.getElementById("backup-import-status");
+  const detail = document.getElementById("backup-import-detail");
+  if (button.disabled) return;
+
+  const file = backupImportFile();
+  detail.innerHTML = "";
+  detail.hidden = true;
+  button.disabled = true;
+  setHardwareStatus(statusEl, `Reading ${file.name}...`, null);
+
+  try {
+    let payload;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch (err) {
+      // JSON.parse's own message names a byte offset, which tells the user nothing useful.
+      throw new Error("That file is not valid JSON.");
+    }
+    const result = await HardwareApi.importBackup(payload);
+
+    // A section the file didn't carry is left out of the count entirely, rather than reported as
+    // zero: an older curves-only export restoring "0 runs" would read like the runs were lost.
+    const present = BACKUP_SECTIONS.filter(([, key]) => result[key] !== null);
+    const parts = [`Imported ${present.map(([word, key]) => backupCount(result[key].imported.length, word)).join(", ")}.`];
+    const skipped = present.reduce((sum, [, key]) => sum + result[key].skipped.length, 0);
+    const rejected = present.flatMap(([word, key]) => result[key].rejected.map((item) => ({ ...item, word })));
+    const dropped = result.measurements?.dropped ?? 0;
+    if (skipped > 0) parts.push(`${skipped} already here, left as they were.`);
+    if (rejected.length > 0) parts.push(`${rejected.length} rejected.`);
+    // The one case where an import can cost you something that was already here.
+    if (dropped > 0) parts.push(`${dropped} of the oldest readings fell past the reading-log limit.`);
+    setHardwareStatus(statusEl, parts.join(" "),
+      rejected.length > 0 || dropped > 0 ? "warn" : "success");
+
+    for (const { word, id, reason } of rejected) {
+      const item = hwEl("li");
+      item.append(hwEl("b", null, `${word} ${id}`), `: ${reason}`);
+      detail.appendChild(item);
+    }
+    detail.hidden = rejected.length === 0;
+
+    await refreshBackupSummary();
+    // A restored curve can change what the active-curve card says.
+    loadInstrumentStatus();
+  } catch (err) {
+    console.error("Backup import failed:", err);
+    setHardwareStatus(statusEl, `Import failed: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+    updateBackupImportControls();
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadInstrumentStatus();
   setInterval(renderDarkReadAlert, DARK_READ_ALERT_REFRESH_MS);
   document.getElementById("dark-read-button").addEventListener("click", () => runInstrumentCheck("dark"));
   document.getElementById("blank-read-button").addEventListener("click", () => runInstrumentCheck("blank"));
+
+  refreshBackupSummary();
+  updateBackupImportControls();
+  document.getElementById("backup-export-button").addEventListener("click", exportBackup);
+  document.getElementById("backup-import-form").addEventListener("submit", importBackup);
+  document.getElementById("backup-import-file").addEventListener("change", updateBackupImportControls);
 });

@@ -203,6 +203,45 @@
           </table>
         </div>
       </section>
+
+      <!-- Always visible: the only way to reach a run other than the last one, and where an
+           imported run shows up. -->
+      <section class="card">
+        <p class="section-label">Saved runs</p>
+        <p class="section-description">
+          Every run in this browser. These are the readings a curve was fitted from, so without a
+          copy a fit can never be redone or checked.
+        </p>
+
+        <p class="status-message" id="runs-status" aria-live="polite">Loading runs...</p>
+
+        <div class="empty-state" id="runs-empty" hidden>
+          <p>No saved runs yet.</p>
+        </div>
+
+        <div class="table-wrapper table-spaced" id="runs-table-wrapper" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Run</th>
+                <th scope="col">Created</th>
+                <th scope="col">Timepoint</th>
+                <th scope="col">Source</th>
+                <th scope="col">Config</th>
+                <th scope="col">Progress</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="runs-table-body"></tbody>
+          </table>
+        </div>
+
+        <p class="status-message" id="runs-export-status" aria-live="polite"></p>
+        <p class="plan-meta">
+          Runs are kept in this browser only.
+          <a class="text-link" href="hardware.html">Back them up on the Status page &rarr;</a>
+        </p>
+      </section>
     </main>
 
     <footer class="site-footer">

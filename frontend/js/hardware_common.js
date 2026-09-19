@@ -215,6 +215,47 @@ function hardwareQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+// ---- File download ----------------------------------------------------------
+// Everything a page holds lives in this browser until the backend has storage, and site data can
+// be cleared at any time, so both readings and curves have to be writable to a file. CSV is for
+// reading and analysing, JSON for keeping a complete copy; either way the file carries full
+// precision, not the display formatting above — it is the record, not the view.
+
+function hwDownloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = hwEl("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function hwCsvCell(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// CRLF and a UTF-8 BOM, both for Excel: without the BOM it decodes the file as the system
+// codepage, which mangles any non-ASCII sample ID.
+function hwDownloadCsv(filename, headers, rows) {
+  const text = [headers, ...rows].map((row) => row.map(hwCsvCell).join(",")).join("\r\n");
+  hwDownloadBlob(filename, new Blob([`﻿${text}\r\n`], { type: "text/csv;charset=utf-8" }));
+}
+
+function hwDownloadJson(filename, data) {
+  hwDownloadBlob(filename, new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: "application/json" }));
+}
+
+// YYYYMMDD-HHMM in local time, to date a download's filename.
+function hwFileStamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
 // ---- Unmixing-basis note ---------------------------------------------------
 // A basis version starting with "placeholder" means it hasn't been calibrated with an sfGFP
 // standard yet: every place that shows fluorescence must carry this note. Pages place an

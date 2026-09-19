@@ -16,6 +16,25 @@
 
 // Upper bound on the inversion range: past 95% of the 4PL span the curve is too flat, and inversion error blows up.
 const LOCAL_RANGE_SPAN_FRACTION = 0.95;
+// How many Measure readings the log keeps. It has to be capped: localSave() swallows a
+// QuotaExceededError, so a log left to grow would eventually fill the origin's storage quota and
+// silently stop plans and curves persisting too — not just itself. A reading is ~600 bytes, so
+// this is well under any browser's budget, and a CSV export is the copy that actually lasts.
+const LOCAL_MEASUREMENT_LIMIT = 500;
+// The curve export file's shape. Named inside the file so an import can tell one of ours from any
+// other JSON, and versioned so a build that predates a format change refuses it instead of
+// guessing. Both the writer and the reader live here, so the two can't drift apart.
+const LOCAL_CURVES_EXPORT_FORMAT = "lasreader.hardware.curves";
+const LOCAL_CURVES_EXPORT_VERSION = 1;
+// Calibration runs get their own file: they are the raw readings a curve was fitted from, and
+// losing them means the fit can never be redone or checked, only trusted.
+const LOCAL_PLANS_EXPORT_FORMAT = "lasreader.hardware.plans";
+const LOCAL_PLANS_EXPORT_VERSION = 1;
+// One file holding everything, so a restore can't quietly bring back half of it. Curves and runs
+// used to be exported separately, and it took only forgetting one file to end up with a curve
+// whose calibration data was gone; importBackup() still reads those older single-section files.
+const LOCAL_BACKUP_FORMAT = "lasreader.hardware.backup";
+const LOCAL_BACKUP_VERSION = 1;
 const LOCAL_STORE_KEY = "lasreader.hardware.local.v2";
 // Everything before v2 came from the now-removed simulated device: clear it on load so
 // simulated plans, curves, and dark-read records never mix in with real measurements.
@@ -42,6 +61,7 @@ function localDefaultStore() {
     curves: {},        // curve_id -> CalibrationCurve: saved
     curve_private: {}, // curve_id -> { cov, noise }: needed for inversion CI, but not part of the data contract
     blank_scatter: {}, // config fingerprint -> scatter of the most recent passing blank (the HIGH_SCATTER baseline)
+    measurements: [],  // the Measure page's reading log, oldest first, capped at LOCAL_MEASUREMENT_LIMIT
   };
 }
 
@@ -286,6 +306,258 @@ function localActiveCurve(store) {
   return Object.values(store.curves).find((c) => c.is_active) ?? null;
 }
 
+// ---- Importing into a store -----------------------------------------------
+// One implementation per section, taking the store so a combined backup can restore all three in
+// a single load/save. Each section is independent: a rejected curve must not cost you the runs in
+// the same file. Everything here follows the same two rules — an id already stored is kept rather
+// than replaced (what is here was produced on this machine; the file is a copy of something older),
+// and whatever fails validation is reported with a reason instead of vanishing.
+
+function localImportPlansInto(store, entries) {
+  const imported = [];
+  const skipped = [];
+  const rejected = [];
+  for (const entry of entries) {
+    const plan_id = typeof entry?.plan_id === "string" && entry.plan_id.trim() ? entry.plan_id : "(no plan_id)";
+    const problem = localPlanProblem(entry);
+    if (problem) {
+      rejected.push({ id: plan_id, reason: problem });
+    } else if (store.plans[entry.plan_id]) {
+      skipped.push(entry.plan_id);
+    } else {
+      // Slot order is what the run walks through, and a hand-edited file could have reordered it.
+      store.plans[entry.plan_id] = { ...entry, items: [...entry.items].sort((a, b) => a.slot - b.slot) };
+      imported.push(entry.plan_id);
+    }
+  }
+  return { imported, skipped, rejected };
+}
+
+function localImportCurvesInto(store, entries) {
+  const imported = [];
+  const skipped = [];
+  const rejected = [];
+  for (const entry of entries) {
+    const curve_id = typeof entry?.curve_id === "string" && entry.curve_id.trim() ? entry.curve_id : "(no curve_id)";
+    const problem = localCurveProblem(entry);
+    if (problem) {
+      rejected.push({ id: curve_id, reason: problem });
+    } else if (store.curves[entry.curve_id]) {
+      skipped.push(entry.curve_id);
+    } else {
+      const { private: priv, ...curve } = entry;
+      // is_active is always cleared: making a curve active has to go through saveCurve()'s check
+      // against the config the instrument is running right now.
+      store.curves[curve.curve_id] = { ...curve, is_active: false };
+      store.curve_private[curve.curve_id] = { cov: priv.cov, noise: priv.noise };
+      imported.push(curve.curve_id);
+    }
+  }
+  return { imported, skipped, rejected };
+}
+
+function localImportMeasurementsInto(store, entries) {
+  const existing = new Set(store.measurements.map((record) => record.record_id));
+  const imported = [];
+  const skipped = [];
+  const rejected = [];
+  for (const entry of entries) {
+    const record_id = typeof entry?.record_id === "string" && entry.record_id.trim() ? entry.record_id : "(no record_id)";
+    const problem = localMeasurementRecordProblem(entry);
+    if (problem) {
+      rejected.push({ id: record_id, reason: problem });
+    } else if (existing.has(entry.record_id)) {
+      skipped.push(entry.record_id);
+    } else {
+      store.measurements.push(entry);
+      existing.add(entry.record_id);
+      imported.push(entry.record_id);
+    }
+  }
+  // Back into time order before capping: an import can easily push the log past the limit, and
+  // what survives has to be the newest readings, not whatever order the file happened to hold.
+  // The count that fell off is returned rather than swallowed — this is the one place an import
+  // can lose a reading that was already here.
+  store.measurements.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
+  const dropped = Math.max(0, store.measurements.length - LOCAL_MEASUREMENT_LIMIT);
+  if (dropped > 0) store.measurements = store.measurements.slice(-LOCAL_MEASUREMENT_LIMIT);
+  return { imported, skipped, rejected, dropped };
+}
+
+// One stored reading out of an import file. item is the plan slot it claims to fill, or null for a
+// standalone Measure record. A plan is what fitCurve() reads, so anything wrong here ends up
+// inside a curve, and then inside every reading that curve converts.
+function localMeasurementProblem(m, item) {
+  const finite = (value) => Number.isFinite(value);
+  const nullOrFinite = (value) => value === null || finite(value);
+  if (!m || typeof m !== "object") return "measurement is not an object";
+  if (typeof m.sample_id !== "string" || !m.sample_id.trim()) return "measurement.sample_id is missing";
+  if (typeof m.timestamp_utc !== "string" || Number.isNaN(Date.parse(m.timestamp_utc))) {
+    return "measurement.timestamp_utc is not a date";
+  }
+  if (item) {
+    if (m.sample_type !== item.sample_type) {
+      return `measurement.sample_type "${m.sample_type}" is not the slot's "${item.sample_type}"`;
+    }
+    if (item.sample_type === "standard" && m.known_concentration_nM !== item.concentration_nM) {
+      return "measurement.known_concentration_nM does not match the slot";
+    }
+  } else {
+    // A Measure record has no slot to agree with, so the type and its concentration are checked
+    // against each other instead: only a standard knows what it should read.
+    if (!["blank", "standard", "unknown"].includes(m.sample_type)) {
+      return `unknown measurement.sample_type "${m.sample_type}"`;
+    }
+    if (m.sample_type === "standard") {
+      if (!(finite(m.known_concentration_nM) && m.known_concentration_nM >= 0)) {
+        return "a standard needs known_concentration_nM ≥ 0";
+      }
+    } else if (m.known_concentration_nM !== null) {
+      return "only a standard may carry known_concentration_nM";
+    }
+  }
+  if (!finite(m.fluorescence)) return "measurement.fluorescence is not a number";
+  // Null on both: a manual entry records neither read noise nor scatter.
+  if (!nullOrFinite(m.fluorescence_sd)) return "measurement.fluorescence_sd is neither a number nor null";
+  if (!nullOrFinite(m.scatter)) return "measurement.scatter is neither a number nor null";
+  if (!Array.isArray(m.flags) || !m.flags.every((flag) => typeof flag === "string")) return "measurement.flags is malformed";
+  if (!/^[0-9a-f]{6}$/.test(String(m.config_fingerprint))) return "measurement.config_fingerprint is malformed";
+  if (!["device", "manual"].includes(m.source)) return `unknown measurement.source "${m.source}"`;
+  // raw is only ever displayed and exported, never computed from, so it is checked loosely:
+  // the fit reads fluorescence alone.
+  if (m.raw !== null) {
+    if (!m.raw || typeof m.raw !== "object") return "measurement.raw is neither an object nor null";
+    if (!Object.values(m.raw).every(finite)) return "measurement.raw holds a non-number";
+  }
+  return null;
+}
+
+// One calibration run out of an import file: an error message, or null if it is sound.
+function localPlanProblem(entry) {
+  if (!entry || typeof entry !== "object") return "not an object";
+  if (typeof entry.plan_id !== "string" || !entry.plan_id.trim()) return "plan_id is missing";
+  if (typeof entry.created_at !== "string" || Number.isNaN(Date.parse(entry.created_at))) return "created_at is not a date";
+  if (!["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
+  if (entry.measured_on !== null && !localIsPastDate(entry.measured_on)) return "measured_on is neither a past date nor null";
+  if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
+  if (typeof entry.timepoint !== "string" || !entry.timepoint.trim()) return "timepoint is missing";
+  if (!Array.isArray(entry.items) || entry.items.length === 0) return "items is missing";
+
+  const slots = new Set();
+  for (const item of entry.items) {
+    if (!item || typeof item !== "object") return "an item is not an object";
+    if (!Number.isInteger(item.slot) || item.slot < 1) return "an item has a bad slot number";
+    // Duplicate slots would make targetItem() and recordPlanMeasurement() disagree about which
+    // tube is next, and the run would never finish.
+    if (slots.has(item.slot)) return `slot ${item.slot} appears twice`;
+    slots.add(item.slot);
+    if (typeof item.label !== "string" || !item.label.trim()) return `slot ${item.slot}: label is missing`;
+    if (!["blank", "standard"].includes(item.sample_type)) return `slot ${item.slot}: unknown sample_type`;
+    if (item.sample_type === "blank") {
+      if (item.concentration_nM !== null) return `slot ${item.slot}: a blank must carry concentration_nM null`;
+    } else if (!(Number.isFinite(item.concentration_nM) && item.concentration_nM > 0)) {
+      return `slot ${item.slot}: concentration_nM must be positive`;
+    }
+    if (item.measurement !== null) {
+      const problem = localMeasurementProblem(item.measurement, item);
+      if (problem) return `slot ${item.slot}: ${problem}`;
+    }
+  }
+  // A manual dataset is defined by having every slot already filled, and recordPlanMeasurement()
+  // refuses to fill one, so a gap here would be a run that can never be completed.
+  if (entry.source === "manual" && entry.items.some((item) => item.measurement === null)) {
+    return "a manual dataset cannot have an unread slot";
+  }
+  return null;
+}
+
+// One Measure reading-log entry out of an import file. The estimate is checked as strictly as the
+// measurement: a restored row that claims a concentration outside the "ok" status would read as a
+// result the curve never gave.
+function localMeasurementRecordProblem(entry) {
+  const finite = (value) => Number.isFinite(value);
+  const isDate = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
+  if (!entry || typeof entry !== "object") return "not an object";
+  if (typeof entry.record_id !== "string" || !entry.record_id.trim()) return "record_id is missing";
+  if (!isDate(entry.recorded_at)) return "recorded_at is not a date";
+  if (!(entry.exported_at === null || isDate(entry.exported_at))) return "exported_at is neither a date nor null";
+
+  const problem = localMeasurementProblem(entry.measurement, null);
+  if (problem) return problem;
+
+  const estimate = entry.estimate;
+  if (!estimate || typeof estimate !== "object") return "estimate is missing";
+  if (!["ok", "below_lod", "above_range", "no_curve", "config_mismatch"].includes(estimate.status)) {
+    return `unknown estimate.status "${estimate.status}"`;
+  }
+  if (estimate.status === "ok") {
+    if (!finite(estimate.concentration_nM)) return "estimate.concentration_nM is not a number";
+    if (!Array.isArray(estimate.ci95_nM) || estimate.ci95_nM.length !== 2 || !estimate.ci95_nM.every(finite)) {
+      return "estimate.ci95_nM is malformed";
+    }
+  } else if (estimate.concentration_nM !== null) {
+    return 'only an "ok" estimate may carry a concentration';
+  }
+  if (!(estimate.curve_id === null || typeof estimate.curve_id === "string")) {
+    return "estimate.curve_id is neither a string nor null";
+  }
+
+  if (entry.curve !== null) {
+    const curve = entry.curve;
+    if (!curve || typeof curve !== "object") return "curve snapshot is neither an object nor null";
+    if (typeof curve.curve_id !== "string" || !curve.curve_id.trim()) return "curve snapshot: curve_id is missing";
+    if (typeof curve.timepoint !== "string") return "curve snapshot: timepoint is missing";
+    if (!finite(curve.lod_nM)) return "curve snapshot: lod_nM is not a number";
+    if (!curve.range_nM || !finite(curve.range_nM.min) || !finite(curve.range_nM.max)) {
+      return "curve snapshot: range_nM is malformed";
+    }
+  }
+  return null;
+}
+
+// One curve out of an import file: an error message naming what is wrong, or null if it is sound.
+// A curve that gets past this will convert real readings into concentrations, so every field a
+// later calculation touches is checked here rather than trusted. is_active is deliberately not
+// checked: localImportCurvesInto() overrides it either way.
+function localCurveProblem(entry) {
+  const finite = (value) => Number.isFinite(value);
+  if (!entry || typeof entry !== "object") return "not an object";
+  if (typeof entry.curve_id !== "string" || !entry.curve_id.trim()) return "curve_id is missing";
+  if (entry.model !== "4PL") return `unsupported model "${entry.model}"`;
+  if (typeof entry.fitted_at !== "string" || Number.isNaN(Date.parse(entry.fitted_at))) return "fitted_at is not a date";
+  if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
+  if (typeof entry.timepoint !== "string" || !entry.timepoint.trim()) return "timepoint is missing";
+  if (entry.source !== undefined && !["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
+
+  const params = entry.params;
+  if (!params || typeof params !== "object") return "params is missing";
+  if (![params.top, params.bottom, params.ec50_nM, params.hill].every(finite)) return "params are not all numbers";
+  // The same invariants fitCurve() enforces: without them the 4PL cannot be inverted sensibly.
+  if (!(params.top > params.bottom)) return "params.top is not above params.bottom";
+  if (!(params.ec50_nM > 0)) return "params.ec50_nM is not positive";
+  if (!(params.hill > 0)) return "params.hill is not positive";
+
+  if (![entry.lod_nM, entry.loq_nM, entry.rmse].every(finite)) return "lod_nM / loq_nM / rmse are not all numbers";
+  const range = entry.range_nM;
+  if (!range || !finite(range.min) || !finite(range.max) || !(range.min < range.max)) return "range_nM is malformed";
+
+  if (!Array.isArray(entry.excluded)) return "excluded is missing";
+  for (const item of entry.excluded) {
+    if (!item || typeof item.sample_id !== "string" || typeof item.reason !== "string") return "an excluded entry is malformed";
+  }
+
+  // localInverseCore() reaches straight into these, so a curve without them would not merely lose
+  // its confidence interval — the first inversion would throw.
+  const priv = entry.private;
+  if (!priv || typeof priv !== "object") return "fit internals are missing";
+  if (!priv.noise || !finite(priv.noise.a) || !finite(priv.noise.b)) return "fit internals: the noise model is malformed";
+  if (!Array.isArray(priv.cov) || priv.cov.length !== 4) return "fit internals: the covariance is not 4x4";
+  for (const row of priv.cov) {
+    if (!Array.isArray(row) || row.length !== 4 || !row.every(finite)) return "fit internals: the covariance is not 4x4";
+  }
+  return null;
+}
+
 // ---- Exposed to hardware_api.js -----------------------------------------
 
 const HardwareLocal = {
@@ -439,6 +711,24 @@ const HardwareLocal = {
     if (!plan) localFail(`Plan ${plan_id} not found.`);
     return plan;
   },
+
+  // Newest first. Only what a list needs, so a page doesn't have to hold every reading in memory
+  // to show a row per run.
+  listCalibrationPlans() {
+    return Object.values(localLoad().plans)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((plan) => ({
+        plan_id: plan.plan_id,
+        created_at: plan.created_at,
+        source: plan.source,
+        measured_on: plan.measured_on,
+        config_fingerprint: plan.config_fingerprint,
+        timepoint: plan.timepoint,
+        total: plan.items.length,
+        read: plan.items.filter((item) => item.measurement !== null).length,
+      }));
+  },
+
 
   recordPlanMeasurement(plan_id, slot, m) {
     const store = localLoad();
@@ -612,6 +902,7 @@ const HardwareLocal = {
     return Object.values(localLoad().curves).sort((a, b) => b.fitted_at.localeCompare(a.fitted_at));
   },
 
+
   getActiveCurve() {
     return localActiveCurve(localLoad());
   },
@@ -631,5 +922,114 @@ const HardwareLocal = {
       status: result.status,
       curve_id: active.curve_id,
     };
+  },
+
+  // ---- The Measure page's reading log -------------------------------------
+  // Measure otherwise shows one reading and then overwrites it, which is no way to keep data that
+  // took a wet-lab run to produce. This is the working copy only: a browser's storage is one
+  // "clear site data" away from empty, so a CSV export is what actually preserves a reading.
+
+  // The estimate is stored as it was reported, never recomputed later: the active curve can be
+  // swapped, restricted or deleted afterwards, and the record has to keep the number that was
+  // actually read off the screen together with the curve it came from. The same goes for the
+  // curve's own limits, so an exported row can be read without still having the curve.
+  recordMeasurement(m, estimate, curve) {
+    const store = localLoad();
+    const record = {
+      record_id: localId("READ"),
+      recorded_at: new Date().toISOString(),
+      measurement: m,
+      estimate,
+      curve: curve
+        ? { curve_id: curve.curve_id, timepoint: curve.timepoint, lod_nM: curve.lod_nM, range_nM: curve.range_nM }
+        : null,
+      exported_at: null,
+    };
+    store.measurements.push(record);
+    // Drops the oldest, which is why the page keeps the unexported count in front of the user.
+    if (store.measurements.length > LOCAL_MEASUREMENT_LIMIT) {
+      store.measurements = store.measurements.slice(-LOCAL_MEASUREMENT_LIMIT);
+    }
+    localSave(store);
+    return record;
+  },
+
+  listMeasurements() {
+    return localLoad().measurements;
+  },
+
+  // Called once the rows have been handed to the browser as a file, so the page can keep saying
+  // how many readings still exist nowhere but here.
+  markMeasurementsExported(record_ids) {
+    const store = localLoad();
+    const ids = new Set(record_ids ?? []);
+    const at = new Date().toISOString();
+    for (const record of store.measurements) {
+      if (ids.has(record.record_id)) record.exported_at = at;
+    }
+    localSave(store);
+    return store.measurements;
+  },
+
+  // ---- Backup -------------------------------------------------------------
+
+  // Everything this browser holds, in one file. Deliberately one file and not three: a curve is
+  // meaningless without the run it was fitted from, and it took only forgetting one of two
+  // downloads to end up with exactly that.
+  //
+  // blank_scatter is left out on purpose. It is not data but derived state — the scatter of the
+  // last blank read — and the next blank re-establishes it. Restoring a stale one from another
+  // machine or another session would start flagging perfectly good samples as HIGH_SCATTER.
+  exportBackup() {
+    const store = localLoad();
+    return {
+      format: LOCAL_BACKUP_FORMAT,
+      version: LOCAL_BACKUP_VERSION,
+      exported_at: new Date().toISOString(),
+      plans: Object.values(store.plans).sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      curves: Object.values(store.curves)
+        .sort((a, b) => b.fitted_at.localeCompare(a.fitted_at))
+        // curve_private rides along: the covariance and noise model are not part of the data
+        // contract, but without them a restored curve inverts and never gives a interval.
+        .map((curve) => ({ ...curve, private: store.curve_private[curve.curve_id] ?? null })),
+      measurements: [...store.measurements],
+    };
+  },
+
+  // Restores a backup. The file is untrusted throughout — hand-edited, from another build, or not
+  // ours at all — so every entry is validated before it is stored. Sections are independent: one
+  // bad curve must not cost you the runs in the same file. A section missing from the file comes
+  // back as null, which is not the same as one that was present and empty.
+  importBackup(payload) {
+    if (!payload || typeof payload !== "object") localFail("That file is not a LasReader backup.");
+
+    // Curves and runs were exported separately before the combined backup existed; those files
+    // still restore, so an earlier download never becomes unreadable.
+    const legacy = {
+      [LOCAL_CURVES_EXPORT_FORMAT]: { key: "curves", max: LOCAL_CURVES_EXPORT_VERSION },
+      [LOCAL_PLANS_EXPORT_FORMAT]: { key: "plans", max: LOCAL_PLANS_EXPORT_VERSION },
+    }[payload.format];
+    const { key, max } = legacy ?? { key: null, max: LOCAL_BACKUP_VERSION };
+    if (!legacy && payload.format !== LOCAL_BACKUP_FORMAT) localFail("That file is not a LasReader backup.");
+
+    // A missing version is a malformed file, not a newer one; saying "newer" would send the user
+    // looking for a build that doesn't exist.
+    if (!Number.isInteger(payload.version)) localFail("That file carries no version number.");
+    if (payload.version > max) localFail(`That file is version ${payload.version}, newer than this build understands.`);
+
+    const section = (name) => (key === null || key === name) && Array.isArray(payload[name]) ? payload[name] : null;
+    const plans = section("plans");
+    const curves = section("curves");
+    const measurements = section("measurements");
+    if (!plans?.length && !curves?.length && !measurements?.length) localFail("That file holds nothing to restore.");
+
+    const store = localLoad();
+    const result = {
+      plans: plans ? localImportPlansInto(store, plans) : null,
+      curves: curves ? localImportCurvesInto(store, curves) : null,
+      measurements: measurements ? localImportMeasurementsInto(store, measurements) : null,
+    };
+    localSave(store);
+    return result;
   },
 };

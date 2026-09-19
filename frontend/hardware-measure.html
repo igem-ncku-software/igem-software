@@ -55,6 +55,9 @@
             </div>
           </div>
 
+          <!-- Filled by applySampleType(): a sample type whose effect outlasts this one reading has to say so. -->
+          <p class="plan-meta" id="measure-type-note" hidden></p>
+
           <button type="submit" id="measure-read-button">Read</button>
           <p class="blocked-reason" id="measure-read-reason" hidden></p>
         </form>
@@ -90,6 +93,47 @@
           </div>
 
           <div class="provenance" id="measure-provenance"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Readings</p>
+            <h2>Reading log</h2>
+          </div>
+          <span class="flag-chip" id="log-count" aria-live="polite">--</span>
+        </div>
+        <p class="section-description">
+          Kept in this browser only, newest 500. Clearing site data deletes them, so export a copy.
+        </p>
+
+        <div class="button-row">
+          <button type="button" id="log-export-button">Export CSV</button>
+        </div>
+        <p class="blocked-reason" id="log-export-reason" hidden></p>
+        <p class="status-message" id="log-status" aria-live="polite"></p>
+
+        <div class="empty-state" id="log-empty" hidden>
+          <p>No readings yet.</p>
+        </div>
+
+        <div class="table-wrapper table-spaced" id="log-table-wrapper" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Read at</th>
+                <th scope="col">Sample</th>
+                <th scope="col">Type</th>
+                <th scope="col">sfGFP signal</th>
+                <th scope="col">Inferred AHL</th>
+                <th scope="col">Curve</th>
+                <th scope="col">QC</th>
+                <th scope="col">Exported</th>
+              </tr>
+            </thead>
+            <tbody id="log-table-body"></tbody>
+          </table>
         </div>
       </section>
     </main>

@@ -15,9 +15,15 @@
 // A manual dataset has every slot filled at creation and can't be re-read, so it never shows
 // here: creating one, or opening one by ?plan=, goes straight to the fit page.
 //
-// Target elements: #plan-create-card / #plan-form / #plan-* family, #manual-* family, see the HTML
+// Target elements: #plan-create-card / #plan-form / #plan-* family, #manual-* family,
+//   #runs-* family (the saved-run list and its per-run CSV), see the HTML
 // Backing API: createCalibrationPlan / getCalibrationPlan / recordPlanMeasurement /
-//   readSample / getDeviceStatus / createManualDataset / fingerprintConfig
+//   readSample / getDeviceStatus / createManualDataset / fingerprintConfig /
+//   listCalibrationPlans
+//
+// The saved-run list at the bottom stays visible in every state: it is the only way to reach a run
+// other than the last one, and the only place a run restored from a backup shows up. Backing runs
+// up is the Status page's job, in one file with the curves and readings.
 // =========================================================
 
 let plan = null;
@@ -153,6 +159,7 @@ async function openPlan(planId, alreadyLoaded) {
   hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
   runCard.hidden = false;
   renderPlan();
+  refreshRuns();
   if (statusResult.status === "rejected") {
     setHardwareStatus(document.getElementById("plan-read-status"), `Read unavailable: ${statusResult.reason.message}`, "error");
   }
@@ -303,6 +310,8 @@ async function readPlanTarget() {
   } finally {
     planReading = false;
     renderPlan();
+    // Keeps the run list's progress column from contradicting the run card right above it.
+    refreshRuns();
     document.getElementById("plan-read-button").focus();
   }
 }
@@ -590,6 +599,100 @@ async function createManualDataset(event) {
   }
 }
 
+// ---- Saved runs: the list, a CSV per run, and the JSON backup ------------------
+// A run holds the readings a curve was fitted from, and until the backend stores anything they
+// exist only in this browser. This list is also the only way to reach a run other than the last
+// one, and the only place a run restored on the Status page shows up. The CSV here is for reading
+// and analysing one run; the backup that protects them all is on the Status page.
+
+const RUNS_CSV_HEADERS = [
+  "plan_id", "plan_source", "plan_timepoint", "plan_config_fingerprint", "plan_measured_on",
+  "slot", "label", "sample_type", "concentration_nM",
+  "sample_id", "timestamp_utc", "fluorescence", "fluorescence_sd", "scatter",
+  "flags", "config_fingerprint", "source",
+  ...HARDWARE_CHANNELS.map(({ key }) => key),
+];
+
+// One row per tube, read or not: an unread slot is part of what happened to the run.
+function runCsvRows(plan) {
+  return plan.items.map((item) => {
+    const m = item.measurement;
+    const raw = m?.raw ?? {};
+    return [
+      plan.plan_id, plan.source, plan.timepoint, plan.config_fingerprint, plan.measured_on,
+      item.slot, item.label, item.sample_type, item.concentration_nM,
+      m?.sample_id ?? null, m?.timestamp_utc ?? null, m?.fluorescence ?? null,
+      m?.fluorescence_sd ?? null, m?.scatter ?? null,
+      m ? m.flags.join(";") : null, m?.config_fingerprint ?? null, m?.source ?? null,
+      ...HARDWARE_CHANNELS.map(({ key }) => raw[key] ?? null),
+    ];
+  });
+}
+
+function renderRuns(plans) {
+  document.getElementById("runs-empty").hidden = plans.length > 0;
+  document.getElementById("runs-table-wrapper").hidden = plans.length === 0;
+  const tbody = document.getElementById("runs-table-body");
+  tbody.innerHTML = "";
+
+  for (const summary of plans) {
+    // A manual dataset can't be re-read, so it opens straight on the fit page — the same place
+    // openPlan() would forward it to anyway.
+    const href = summary.source === "manual"
+      ? `hardware-calibration-fit.html?plan=${encodeURIComponent(summary.plan_id)}`
+      : `hardware-calibration.html?plan=${encodeURIComponent(summary.plan_id)}`;
+
+    const csv = hwEl("button", "btn-secondary table-button", "CSV");
+    csv.type = "button";
+    csv.setAttribute("aria-label", `Export run ${summary.plan_id} as CSV`);
+    csv.addEventListener("click", () => exportRunCsv(summary.plan_id, csv));
+
+    const actions = hwEl("td", "action-cell");
+    actions.append(hwLink(href, "Open"), csv);
+
+    const config = hwEl("td");
+    config.appendChild(hwFingerprint(summary.config_fingerprint));
+
+    const row = hwEl("tr");
+    row.append(
+      hwEl("td", null, summary.plan_id),
+      hwEl("td", null, formatLocalTime(summary.created_at)),
+      hwEl("td", null, summary.timepoint),
+      hwEl("td", null, summary.source === "manual" ? "Manual entry" : "Instrument readings"),
+      config,
+      hwEl("td", null, `${summary.read} / ${summary.total}`),
+      actions,
+    );
+    tbody.appendChild(row);
+  }
+}
+
+async function refreshRuns() {
+  const statusEl = document.getElementById("runs-status");
+  try {
+    renderRuns(await HardwareApi.listCalibrationPlans());
+    setHardwareStatus(statusEl, "", null);
+  } catch (err) {
+    console.error("Could not load saved runs:", err);
+    setHardwareStatus(statusEl, `Could not load saved runs: ${err.message}`, "error");
+  }
+}
+
+async function exportRunCsv(plan_id, button) {
+  const statusEl = document.getElementById("runs-export-status");
+  button.disabled = true;
+  try {
+    const exported = await HardwareApi.getCalibrationPlan(plan_id);
+    hwDownloadCsv(`lasreader-${plan_id}-${hwFileStamp()}.csv`, RUNS_CSV_HEADERS, runCsvRows(exported));
+    setHardwareStatus(statusEl, `Exported ${plan_id}: ${exported.items.length} tubes.`, "success");
+  } catch (err) {
+    console.error("Run CSV export failed:", err);
+    setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const manualForm = document.getElementById("manual-form");
   manualForm.addEventListener("submit", createManualDataset);
@@ -615,6 +718,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("plan-fit-button").addEventListener("click", () => {
     window.location.href = `hardware-calibration-fit.html?plan=${encodeURIComponent(plan.plan_id)}`;
   });
+
+  refreshRuns();
 
   const planId = hardwareQueryParam("plan");
   if (planId) openPlan(planId);

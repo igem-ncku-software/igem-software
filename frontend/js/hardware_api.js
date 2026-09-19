@@ -96,6 +96,18 @@
  */
 
 /**
+ * One entry in the Measure page's reading log. The estimate and the curve's limits are kept as
+ * they were at the time, so an exported row still means what it meant when it was read.
+ * @typedef {Object} MeasurementRecord
+ * @property {string} record_id
+ * @property {string} recorded_at
+ * @property {Measurement} measurement
+ * @property {InverseEstimate} estimate  exactly as reported, never recomputed against a later curve
+ * @property {{curve_id: string, timepoint: string, lod_nM: number, range_nM: {min: number, max: number}} | null} curve
+ * @property {string | null} exported_at  when it was written to a file; null while it exists only in this browser
+ */
+
+/**
  * Unmixing basis (config/unmix_basis.json).
  * @typedef {Object} UnmixBasis
  * @property {string} version            starting with "placeholder" means it's not calibrated yet
@@ -301,6 +313,15 @@ const HardwareApi = {
   getCalibrationPlan: (plan_id) => hardwareLocalCall(HardwareLocal.getCalibrationPlan, plan_id),
 
   /**
+   * Every saved run, newest first, summarised for a list (no readings).
+   * @returns {Promise<{plan_id: string, created_at: string, source: "device" | "manual",
+   *   measured_on: string | null, config_fingerprint: string, timepoint: string,
+   *   total: number, read: number}[]>}
+   */
+  listCalibrationPlans: () => hardwareLocalCall(HardwareLocal.listCalibrationPlans),
+
+
+  /**
    * @param {string} plan_id @param {number} slot @param {Measurement} m
    * @returns {Promise<CalibrationPlan>}
    */
@@ -329,10 +350,45 @@ const HardwareApi = {
   getActiveCurve: () => hardwareLocalCall(HardwareLocal.getActiveCurve),
 
   /**
+   * Everything this browser holds, as one backup file: runs, curves (with the fit internals
+   * listCurves() leaves out) and the Measure reading log.
+   * @returns {Promise<{format: string, version: number, exported_at: string,
+   *   plans: CalibrationPlan[], curves: CalibrationCurve[], measurements: MeasurementRecord[]}>}
+   */
+  exportBackup: () => hardwareLocalCall(HardwareLocal.exportBackup),
+
+  /**
+   * Restores a parsed backup file, and still reads the older curves-only and runs-only exports.
+   * The payload is untrusted and validated entry by entry; an id already stored is skipped rather
+   * than replaced, and no curve is ever restored as active. A section absent from the file comes
+   * back as null. Throws with a displayable message when the file itself isn't one of ours.
+   * @param {unknown} payload
+   * @returns {Promise<{
+   *   plans: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[]} | null,
+   *   curves: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[]} | null,
+   *   measurements: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[], dropped: number} | null}>}
+   */
+  importBackup: (payload) => hardwareLocalCall(HardwareLocal.importBackup, payload),
+
+  /**
    * @param {number} fluorescence @param {string} config_fingerprint
    * @returns {Promise<InverseEstimate>}
    */
   invert: (fluorescence, config_fingerprint) => hardwareLocalCall(HardwareLocal.invert, fluorescence, config_fingerprint),
+
+  /**
+   * Appends one Measure reading to the browser-local log. curve is the curve the estimate actually
+   * came from, or null; its limits are copied into the record so an exported row stays readable.
+   * @param {Measurement} m @param {InverseEstimate} estimate @param {CalibrationCurve | null} curve
+   * @returns {Promise<MeasurementRecord>}
+   */
+  recordMeasurement: (m, estimate, curve) => hardwareLocalCall(HardwareLocal.recordMeasurement, m, estimate, curve),
+
+  /** Oldest first. @returns {Promise<MeasurementRecord[]>} */
+  listMeasurements: () => hardwareLocalCall(HardwareLocal.listMeasurements),
+
+  /** @param {string[]} record_ids @returns {Promise<MeasurementRecord[]>} */
+  markMeasurementsExported: (record_ids) => hardwareLocalCall(HardwareLocal.markMeasurementsExported, record_ids),
 
   /** @returns {Promise<UnmixBasis>} */
   getUnmixBasis: () => loadUnmixBasis(),

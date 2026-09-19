@@ -83,6 +83,34 @@
         <p class="status-message" id="check-status" aria-live="polite"></p>
         <div class="result-block" id="check-result" hidden></div>
       </section>
+
+      <!-- One backup for the whole section. Runs, curves and readings used to export separately,
+           and forgetting one file left a curve whose calibration data was gone. -->
+      <section class="card">
+        <p class="section-label">Backup</p>
+        <p class="section-description">
+          Calibration runs, curves, and the Measure reading log are kept in this browser only.
+          One file holds all three, so a restore can't bring back half of them.
+        </p>
+
+        <p class="plan-meta" id="backup-summary" aria-live="polite">Counting...</p>
+
+        <div class="button-row">
+          <button type="button" id="backup-export-button">Export everything (JSON)</button>
+        </div>
+        <p class="blocked-reason" id="backup-export-reason" hidden></p>
+        <p class="status-message" id="backup-export-status" aria-live="polite"></p>
+
+        <form id="backup-import-form">
+          <label for="backup-import-file">Import a backup file</label>
+          <input type="file" id="backup-import-file" accept=".json,application/json" />
+          <button type="submit" id="backup-import-button">Import</button>
+          <p class="blocked-reason" id="backup-import-reason" hidden></p>
+        </form>
+        <p class="plan-meta">An ID already here is kept, never replaced. No curve is restored as active.</p>
+        <p class="status-message" id="backup-import-status" aria-live="polite"></p>
+        <ul class="excluded-list" id="backup-import-detail" hidden></ul>
+      </section>
     </main>
 
     <footer class="site-footer">

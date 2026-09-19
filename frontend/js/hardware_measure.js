@@ -7,13 +7,28 @@
 //   #measure-known-field / #measure-known-concentration / #measure-read-button
 //   #measure-status / #measure-result / #measure-signal(-sub)
 //   #measure-concentration(-sub) / #measure-flags / #measure-channel-chart / #measure-provenance
-// Backing API: getActiveCurve / getDeviceStatus / readSample / invert
+//   #log-count / #log-export-button(-reason) / #log-status / #log-empty
+//   #log-table-wrapper / #log-table-body
+// Backing API: getActiveCurve / getDeviceStatus / readSample / invert /
+//   recordMeasurement / listMeasurements / markMeasurementsExported
 //
 // The inverse estimate only shows a numeric concentration when status === "ok". Every other
 // status gets no point estimate at all, and nothing is ever extrapolated outside the curve's range.
+//
+// Every reading is appended to the browser-local log before it is drawn, so a rendering fault
+// can't cost a tube. The log is the working copy; the CSV export is the one that survives a
+// cleared browser, which is why the unexported count sits in front of the user at all times.
 // =========================================================
 
 let channelChart = null;
+
+// Picking a sample type does more than label the row, and only Blank's effect outlives the
+// reading: it becomes the scatter baseline every later tube under this config is judged against.
+// Unknown and Standard change only how this one reading is treated, which the page already shows
+// (the known-concentration field, the QC flags), so neither needs a note here.
+const SAMPLE_TYPE_NOTE = {
+  blank: "Sets the scatter baseline for this instrument config: later readings above twice this tube's scatter are flagged HIGH_SCATTER.",
+};
 
 // Draws a text label above the F4 / F3 bars. Chart.js has no built-in annotation support,
 // and the plugin would be a new dependency, so this draws it manually.
@@ -84,6 +99,15 @@ async function refreshCurveChip() {
   renderCurveChip(curveResult.value, statusResult.status === "fulfilled" ? statusResult.value.config : null);
 }
 
+// Recovery = inferred / known: the one number that says whether the curve still reads true on a
+// tube whose answer is already known. Needs a point estimate, so only status "ok" qualifies, and a
+// 0 nM standard has nothing to divide by.
+function recoveryPercent(measurement, estimate) {
+  if (measurement.sample_type !== "standard" || estimate.status !== "ok") return null;
+  if (!(measurement.known_concentration_nM > 0)) return null;
+  return formatPercent(estimate.concentration_nM / measurement.known_concentration_nM);
+}
+
 function renderEstimate(estimate, curve, measurement) {
   const value = document.getElementById("measure-concentration");
   const sub = document.getElementById("measure-concentration-sub");
@@ -122,7 +146,9 @@ function renderEstimate(estimate, curve, measurement) {
   }
 
   if (measurement.sample_type === "standard") {
-    const known = hwEl("span", "sensor-stat-sub", `Known: ${formatConcentration(measurement.known_concentration_nM)}`);
+    const recovery = recoveryPercent(measurement, estimate);
+    const known = hwEl("span", "sensor-stat-sub",
+      `Known: ${formatConcentration(measurement.known_concentration_nM)}${recovery ? ` · recovery ${recovery}` : ""}`);
     known.id = "measure-known-sub";
     sub.after(known);
   }
@@ -219,6 +245,136 @@ function nextSampleId(id) {
   return match[1] + String(Number(match[2]) + 1).padStart(match[2].length, "0");
 }
 
+// ---- Reading log ---------------------------------------------------------
+
+const LOG_TYPE_LABEL = { unknown: "Unknown", standard: "Standard", blank: "Blank" };
+
+// One row per reading, holding everything needed to read it back without this browser: the
+// signal, the estimate as reported, the curve's limits at the time, and every raw channel.
+const LOG_CSV_HEADERS = [
+  "record_id", "sample_id", "timestamp_utc", "sample_type", "known_concentration_nM",
+  "fluorescence", "fluorescence_sd", "scatter",
+  "estimate_status", "inferred_nM", "ci95_low_nM", "ci95_high_nM",
+  "curve_id", "curve_timepoint", "curve_lod_nM", "curve_range_min_nM", "curve_range_max_nM",
+  "flags", "config_fingerprint", "source",
+  ...HARDWARE_CHANNELS.map(({ key }) => key),
+];
+
+// Same rule as the result card: a number only for "ok", and never an extrapolation.
+function logEstimateText(record) {
+  const { estimate, curve } = record;
+  switch (estimate.status) {
+    case "ok": return formatConcentration(estimate.concentration_nM);
+    case "below_lod": return curve ? `< ${formatConcentration(curve.range_nM.min)}` : "< LOD";
+    case "above_range": return curve ? `> ${formatConcentration(curve.range_nM.max)}` : "> range";
+    case "no_curve": return "No curve";
+    case "config_mismatch": return "Config changed";
+    default: return "--";
+  }
+}
+
+// Full precision on purpose: the file is the record, the table is the view.
+function logCsvRow(record) {
+  const { measurement: m, estimate, curve } = record;
+  const raw = m.raw ?? {};
+  return [
+    record.record_id, m.sample_id, m.timestamp_utc, m.sample_type, m.known_concentration_nM,
+    m.fluorescence, m.fluorescence_sd, m.scatter,
+    estimate.status, estimate.concentration_nM,
+    estimate.ci95_nM?.[0] ?? null, estimate.ci95_nM?.[1] ?? null,
+    estimate.curve_id, curve?.timepoint ?? null, curve?.lod_nM ?? null,
+    curve?.range_nM.min ?? null, curve?.range_nM.max ?? null,
+    m.flags.join(";"), m.config_fingerprint, m.source,
+    ...HARDWARE_CHANNELS.map(({ key }) => raw[key] ?? null),
+  ];
+}
+
+function renderLog(records) {
+  const unexported = records.filter((record) => !record.exported_at).length;
+
+  const chip = document.getElementById("log-count");
+  chip.textContent = records.length === 0
+    ? "Empty"
+    : `${records.length} reading${records.length === 1 ? "" : "s"} · ${unexported} not exported`;
+  chip.className = `flag-chip ${unexported > 0 ? "warn" : records.length > 0 ? "ok" : ""}`.trim();
+
+  setBlocked(document.getElementById("log-export-button"), document.getElementById("log-export-reason"),
+    records.length === 0 ? "No readings to export yet." : null);
+
+  document.getElementById("log-empty").hidden = records.length > 0;
+  document.getElementById("log-table-wrapper").hidden = records.length === 0;
+
+  const tbody = document.getElementById("log-table-body");
+  tbody.innerHTML = "";
+  // Newest first: the tube just read is the one being looked at.
+  for (const record of [...records].reverse()) {
+    const m = record.measurement;
+    const qc = hwEl("td");
+    qc.appendChild(renderFlagChips(m.flags));
+
+    const type = m.sample_type === "standard"
+      ? `Standard (${formatConcentration(m.known_concentration_nM)})`
+      : LOG_TYPE_LABEL[m.sample_type] ?? m.sample_type;
+
+    // Recovery belongs in the table too: checking the curve usually means reading several
+    // standards and comparing them, not looking at one result card.
+    const inferred = hwEl("td", null, logEstimateText(record));
+    const recovery = recoveryPercent(m, record.estimate);
+    if (recovery) inferred.append(" ", hwEl("span", "cell-note", recovery));
+
+    const row = hwEl("tr");
+    row.append(
+      hwEl("td", null, formatLocalTime(m.timestamp_utc)),
+      hwEl("td", null, m.sample_id),
+      hwEl("td", null, type),
+      hwEl("td", null, formatFluorescence(m.fluorescence)),
+      inferred,
+      hwEl("td", null, record.estimate.curve_id ?? "--"),
+      qc,
+      hwEl("td", null, record.exported_at ? formatLocalTime(record.exported_at) : "Not yet"),
+    );
+    tbody.appendChild(row);
+  }
+}
+
+async function refreshLog() {
+  try {
+    renderLog(await HardwareApi.listMeasurements());
+  } catch (err) {
+    console.error("Could not load the reading log:", err);
+    setHardwareStatus(document.getElementById("log-status"), `Could not load the log: ${err.message}`, "error");
+  }
+}
+
+async function exportLog() {
+  const button = document.getElementById("log-export-button");
+  const statusEl = document.getElementById("log-status");
+  if (button.disabled) return;
+
+  button.disabled = true;
+  try {
+    // Everything every time: overlapping files are cheap, a missing reading is not.
+    const records = await HardwareApi.listMeasurements();
+    if (records.length === 0) {
+      setHardwareStatus(statusEl, "Nothing to export yet.", "warn");
+      return;
+    }
+    hwDownloadCsv(`lasreader-measurements-${hwFileStamp()}.csv`, LOG_CSV_HEADERS, records.map(logCsvRow));
+    // Only marked once the file has actually been handed to the browser: if anything above threw,
+    // every reading must stay counted as unexported.
+    await HardwareApi.markMeasurementsExported(records.map((record) => record.record_id));
+    setHardwareStatus(statusEl,
+      `Exported ${records.length} reading${records.length === 1 ? "" : "s"}. Check the download completed before relying on it.`,
+      "success");
+    await refreshLog();
+  } catch (err) {
+    console.error("Export failed:", err);
+    setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function readMeasureSample(event) {
   event.preventDefault();
 
@@ -261,6 +417,10 @@ async function readMeasureSample(event) {
     // The active curve could be swapped between the two calls; if they don't match, don't use its LOD / range for display.
     const matchingCurve = curve && curve.curve_id === estimate.curve_id ? curve : null;
 
+    // Recorded before anything is drawn: the tube is already spent, so the reading must be kept
+    // even if rendering it fails.
+    await HardwareApi.recordMeasurement(m, estimate, matchingCurve);
+
     renderCurveChip(curve, status.config);
 
     document.getElementById("measure-result").hidden = false;
@@ -279,6 +439,7 @@ async function readMeasureSample(event) {
 
     setHardwareStatus(statusEl, `Read ${m.sample_id} at ${formatLocalTime(m.timestamp_utc)}.`, m.flags.length ? "warn" : "success");
     idInput.value = nextSampleId(sampleId);
+    await refreshLog();
   } catch (err) {
     console.error("Measurement failed:", err);
     setHardwareStatus(statusEl, `Read failed: ${err.message}`, "error");
@@ -289,13 +450,24 @@ async function readMeasureSample(event) {
   }
 }
 
+function applySampleType() {
+  const type = document.getElementById("measure-sample-type").value;
+  document.getElementById("measure-known-field").hidden = type !== "standard";
+
+  const note = document.getElementById("measure-type-note");
+  note.textContent = SAMPLE_TYPE_NOTE[type] ?? "";
+  note.hidden = !note.textContent;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   refreshCurveChip();
+  refreshLog();
 
-  const typeSelect = document.getElementById("measure-sample-type");
-  typeSelect.addEventListener("change", () => {
-    document.getElementById("measure-known-field").hidden = typeSelect.value !== "standard";
-  });
+  // Called on load as well as on change: a browser restoring the select on reload would otherwise
+  // leave the page showing Unknown's fields under a different selection.
+  applySampleType();
+  document.getElementById("measure-sample-type").addEventListener("change", applySampleType);
 
   document.getElementById("measure-form").addEventListener("submit", readMeasureSample);
+  document.getElementById("log-export-button").addEventListener("click", exportLog);
 });

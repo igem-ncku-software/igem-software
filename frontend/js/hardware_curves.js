@@ -3,6 +3,10 @@
 // active / available / stale, and lets you switch the active one or expand details.
 // Target elements: #curves-status / #curves-empty / #curves-table-wrapper / #curves-table-body
 // Backing API: listCurves / getDeviceStatus / saveCurve (to toggle is_active)
+//
+// Curves exist only in this browser until the backend has storage. Backing them up is the Status
+// page's job and happens there, in one file with the runs and readings — a curve exported on its
+// own is a curve whose calibration data can still go missing.
 // =========================================================
 
 let curvesList = [];
