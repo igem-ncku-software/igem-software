@@ -6,7 +6,7 @@
 //   #status-active-curve
 //   #dark-read-button / #blank-read-button / #check-reason / #check-status / #check-result
 // Backing API (js/hardware_api.js): getDeviceStatus / listCurves / getActiveCurve /
-//   runDarkRead / readSample
+//   runDarkRead / runBlankCheck
 // =========================================================
 
 // Prompt to redo a dark read after this long: ambient light and temperature both drift the dark level.
@@ -174,9 +174,8 @@ async function runInstrumentCheck(kind) {
 
   try {
     const [m, status] = await Promise.all([
-      kind === "dark"
-        ? HardwareApi.runDarkRead()
-        : HardwareApi.readSample({ sample_id: `BLANK-CHECK-${Date.now()}`, sample_type: "blank" }),
+      // Both checks are display-only: neither is stored, and neither touches the blank-scatter baseline.
+      kind === "dark" ? HardwareApi.runDarkRead() : HardwareApi.runBlankCheck(),
       HardwareApi.getDeviceStatus(),
     ]);
     sensorOk = status.sensor_ok;

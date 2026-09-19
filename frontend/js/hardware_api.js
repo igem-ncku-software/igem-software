@@ -216,6 +216,25 @@ const HardwareApi = {
   },
 
   /**
+   * Instrument check: one blank cuvette through the whole measurement path, shown once and then
+   * discarded. Deliberately not readSample({sample_type: "blank"}) — the status page's blank is a
+   * buffer-only cuvette, while HIGH_SCATTER's baseline has to come from a calibration blank (cells
+   * at the standards' OD, no AHL). Going through readSample would let a buffer check run after a
+   * calibration drop the baseline to a cell-free cuvette and flag every sample read afterwards.
+   * So this never reaches HardwareLocal: the baseline is neither read nor written, and nothing is stored.
+   * @returns {Promise<Measurement>}
+   */
+  async runBlankCheck() {
+    const basis = await loadUnmixBasis();
+    const reading = hardwareReading(await hardwareRequest("/read", { method: "POST" }));
+    return HardwareProcessing.toMeasurement(
+      reading,
+      { sample_id: `BLANK-CHECK-${Date.now()}`, sample_type: "blank" },
+      { basis, blankScatter: null, timestampUtc: new Date().toISOString() },
+    );
+  },
+
+  /**
    * @param {{sample_id: string, sample_type: "blank" | "standard" | "unknown", known_concentration_nM?: number}} input
    * @returns {Promise<Measurement>}
    */

@@ -55,6 +55,9 @@ function renderCurveChip(curve, config) {
   el.append(
     hwEl("strong", null, curve.curve_id),
     hwEl("span", null, `Fitted ${formatLocalTime(curve.fitted_at)}${curve.source === "manual" ? " · manual entry" : ""}`),
+    // The curve only applies to a sample grown to the same timepoint, so it belongs next to the
+    // config the curve is bound to, not only on the Curves page.
+    hwEl("span", null, `Timepoint ${curve.timepoint}`),
     bound,
   );
 }

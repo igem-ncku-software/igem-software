@@ -296,10 +296,15 @@ const HardwareLocal = {
   },
 
   // Called right after HardwareProcessing.toMeasurement() has assembled a reading:
-  // adds the flags that need stored state, and updates the blank baseline.
+  // adds the flags that need stored state, and updates the blank baseline. Only sample reads go
+  // through here (Measure and a calibration run); the status page's instrument check goes through
+  // HardwareApi.runBlankCheck(), which skips this entirely.
   finalizeMeasurement(m) {
     const store = localLoad();
 
+    // The HIGH_SCATTER baseline, and so what counts as "too cloudy", is whatever blank was read
+    // last. That must be a calibration blank — cells at the standards' OD, no AHL. A buffer-only
+    // cuvette would set it far below any real sample and flag everything read after it.
     if (m.sample_type === "blank" && !m.flags.some((f) => ["HIGH_SCATTER", "NO_DARK_PAIR", "SATURATED"].includes(f))) {
       store.blank_scatter[m.config_fingerprint] = m.scatter;
     }
