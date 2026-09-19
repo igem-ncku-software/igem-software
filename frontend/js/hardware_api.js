@@ -350,6 +350,21 @@ const HardwareApi = {
   getActiveCurve: () => hardwareLocalCall(HardwareLocal.getActiveCurve),
 
   /**
+   * What a reset would delete, for showing before the user confirms. Deletes nothing.
+   * @returns {Promise<{runs: number, curves: number, readings: number, unexported_readings: number,
+   *   keys: number, in_memory: boolean}>}
+   */
+  getResetPreview: () => hardwareLocalCall(HardwareLocal.resetPreview),
+
+  /**
+   * Deletes everything this software stores in the browser and restores the defaults. IRREVERSIBLE:
+   * call it only after the user has confirmed. Reports what is still there afterwards rather than
+   * assuming the removal worked.
+   * @returns {Promise<{removed: string[], remaining: string[], storage_unavailable: boolean}>}
+   */
+  resetAll: () => hardwareLocalCall(HardwareLocal.resetAll),
+
+  /**
    * Everything this browser holds, as one backup file: runs, curves (with the fit internals
    * listCurves() leaves out) and the Measure reading log.
    * @returns {Promise<{format: string, version: number, exported_at: string,

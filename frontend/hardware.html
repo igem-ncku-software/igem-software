@@ -111,6 +111,42 @@
         <p class="status-message" id="backup-import-status" aria-live="polite"></p>
         <ul class="excluded-list" id="backup-import-detail" hidden></ul>
       </section>
+
+      <!-- Irreversible, so it takes two deliberate steps: open the panel, then type the word. The
+           panel shows exactly what goes and whether it was ever backed up, and offers the backup
+           right there. -->
+      <section class="card">
+        <p class="section-label">Reset</p>
+        <p class="section-description">
+          Deletes every calibration run, curve, and reading stored in this browser and restores the
+          defaults. Files you have downloaded are not affected. This cannot be undone.
+        </p>
+
+        <div class="button-row">
+          <button type="button" class="btn-danger" id="reset-open-button">Delete all data&hellip;</button>
+        </div>
+        <p class="blocked-reason" id="reset-open-reason" hidden></p>
+
+        <div id="reset-panel" hidden>
+          <p class="plan-meta" id="reset-summary" aria-live="polite"></p>
+          <p class="status-message warn" id="reset-warning"></p>
+
+          <div class="button-row">
+            <button type="button" class="btn-secondary" id="reset-export-button">Export everything first</button>
+          </div>
+
+          <label for="reset-confirm-input">Type DELETE to confirm</label>
+          <input type="text" id="reset-confirm-input" autocomplete="off" spellcheck="false" />
+
+          <div class="button-row">
+            <button type="button" class="btn-danger" id="reset-confirm-button">Delete everything</button>
+            <button type="button" class="btn-secondary" id="reset-cancel-button">Cancel</button>
+          </div>
+          <p class="blocked-reason" id="reset-confirm-reason" hidden></p>
+        </div>
+
+        <p class="status-message" id="reset-status" aria-live="polite"></p>
+      </section>
     </main>
 
     <footer class="site-footer">

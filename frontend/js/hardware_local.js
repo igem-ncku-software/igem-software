@@ -67,6 +67,19 @@ function localDefaultStore() {
 
 let localMemoryStore = null;
 
+// Every key this software has ever written starts with this. Reset matches on the prefix instead
+// of a list of names so nothing the software writes later can be left behind, and — since an
+// origin's storage is shared by everything served from it (igem-ncku-software.github.io hosts
+// more than this one site) — so that nothing belonging to anyone else is touched.
+const LOCAL_KEY_PREFIX = "lasreader.";
+
+// A reset in another tab has to reach this tab's memory copy too. localLoad() falls back to that
+// copy whenever the key is missing, so a tab that kept its own would put the deleted data straight
+// back on its next save. key is null when the whole storage was cleared.
+window.addEventListener("storage", (event) => {
+  if (event.key === null || event.key === LOCAL_STORE_KEY) localMemoryStore = null;
+});
+
 function localLoad() {
   try {
     const raw = localStorage.getItem(LOCAL_STORE_KEY);
@@ -87,6 +100,17 @@ function localSave(store) {
 }
 
 // ---- Small helpers ----------------------------------------------------------
+
+// Collected before anything is removed: removing while walking localStorage by index skips keys,
+// because each removal shifts the ones after it.
+function localStoredKeys() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key !== null && key.startsWith(LOCAL_KEY_PREFIX)) keys.push(key);
+  }
+  return keys;
+}
 
 function localId(prefix) {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -969,6 +993,50 @@ const HardwareLocal = {
     }
     localSave(store);
     return store.measurements;
+  },
+
+  // ---- Reset ----------------------------------------------------------------
+
+  // What resetAll() would remove, so the page can show it before anything is deleted. `keys` counts
+  // what is in browser storage; the memory copy is counted separately because it is all there is
+  // when storage is unavailable (private mode), and a reset has to clear it either way.
+  resetPreview() {
+    const store = localLoad();
+    let keys = 0;
+    try {
+      keys = localStoredKeys().length;
+    } catch (err) {
+      // Storage is unavailable, so nothing is persisted; only the memory copy can hold data.
+    }
+    return {
+      runs: Object.keys(store.plans).length,
+      curves: Object.keys(store.curves).length,
+      readings: store.measurements.length,
+      unexported_readings: store.measurements.filter((record) => !record.exported_at).length,
+      keys,
+      in_memory: localMemoryStore !== null,
+    };
+  },
+
+  // Deletes everything this software stores in the browser and restores the defaults. Irreversible,
+  // and only ever called after the page has had the user confirm. It re-reads storage afterwards
+  // and reports what is still there instead of assuming removeItem worked: a delete that silently
+  // failed and said "done" is the worst outcome this feature can have.
+  resetAll() {
+    // The memory copy first: localLoad() would otherwise hand it back the moment storage is empty.
+    localMemoryStore = null;
+
+    let storageUnavailable = false;
+    let removed = [];
+    let remaining = [];
+    try {
+      removed = localStoredKeys();
+      for (const key of removed) localStorage.removeItem(key);
+      remaining = localStoredKeys();
+    } catch (err) {
+      storageUnavailable = true;
+    }
+    return { removed, remaining, storage_unavailable: storageUnavailable };
   },
 
   // ---- Backup -------------------------------------------------------------

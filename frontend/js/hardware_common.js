@@ -299,6 +299,10 @@ async function fillBasisNotes(root = document) {
 const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v2.lastPlanId";
 // The data contract has no "last dark read time" field yet, so the frontend remembers it for now; switch to the API once the backend adds the field.
 const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v2.lastDarkReadUtc";
+// When "Export everything" last produced a file in this browser. Only the Reset card and the
+// Backup card read it, to say whether what is about to be deleted was ever backed up. Like the two
+// above it starts with "lasreader.", so a reset removes it along with everything else.
+const HARDWARE_LAST_BACKUP_KEY = "lasreader.hardware.v2.lastBackupUtc";
 
 function hardwareRemember(key, value) {
   try {

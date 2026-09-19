@@ -207,6 +207,12 @@ button.btn-secondary {
 }
 button.btn-secondary:hover { color: var(--text); background: rgba(255,253,247,.72); }
 
+/* Only for what cannot be undone. Same glass pane as the other buttons, with the error colour on
+   the text and border, so it reads as different without becoming a solid red block. */
+button.btn-danger { color: var(--error); border-color: var(--error); }
+button.btn-danger:hover { color: var(--error); background: rgba(255,253,247,.9); }
+button.btn-danger:active { color: var(--error); }
+
 .status-message { min-height: 1.4em; margin: 16px 0 0; color: var(--text-dim); font-size: .92rem; }
 
 /* The wiki's notice box: paper, hairline border, one coloured bar. */
