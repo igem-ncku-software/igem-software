@@ -53,9 +53,8 @@ const LIVE_FIRST_FRAME_MS = 8000;
 // room for ten axis labels: switch to a near-square ratio with channel codes only as labels.
 const LIVE_NARROW_CHART_PX = 480;
 // Where the y axis starts. A bar above it steps the axis up to the next 1/2/5 × 10^n, and it
-// stays there until the chart is cleared. Placeholder: set it just above a real sample's F4
-// once one has been read.
-const LIVE_Y_BASE_COUNTS = 10000;
+// stays there until the chart is cleared. 5,000 was chosen by the user.
+const LIVE_Y_BASE_COUNTS = 5000;
 
 // The landing page doesn't load hardware_common.js, so channel names are defined again here on their own.
 const LIVE_CHANNELS = [
