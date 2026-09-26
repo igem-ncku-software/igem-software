@@ -54,7 +54,7 @@
             <h2 id="live-heading">Live spectrum</h2>
           </div>
           <div class="live-controls">
-            <span class="live-state" aria-live="polite">
+            <span class="live-state">
               <span id="live-dot" class="live-dot is-reconnecting" aria-hidden="true"></span>
               <span id="live-dot-label">Connecting</span>
             </span>
@@ -80,8 +80,9 @@
           </div>
         </div>
 
-        <!-- aria-live: the dot label names the state, this line is the only place its detail is given. -->
-        <div id="live-empty" class="live-empty" aria-live="polite">Connecting to backend (up to 1 min after idle)...</div>
+        <div id="live-empty" class="live-empty">Connecting to backend (up to 1 min after idle)...</div>
+        <!-- The only aria-live region: the status above without its ticking seconds (device_live.js). -->
+        <p id="live-announce" class="visually-hidden" aria-live="polite"></p>
         <div id="live-spectrum" hidden>
           <div class="live-legend" aria-hidden="true">
             <span><i class="live-swatch is-f4"></i>F4 · sfGFP</span>
@@ -106,6 +107,7 @@
   </div>
 
   <script src="js/config.js"></script>
+  <script src="js/hardware_processing.js"></script>
   <script src="js/device_live.js"></script>
   <script src="js/backend_status.js"></script>
 </body>

@@ -3,8 +3,9 @@
 // Target elements:
 //   #live-toggle / #live-dot / #live-dot-label
 //   #live-f4
-//   #live-empty / #live-spectrum / #live-chart / #live-settings
-// Depends on js/config.js (BACKEND_BASE_URL) and Chart.js.
+//   #live-empty / #live-spectrum / #live-chart / #live-settings / #live-announce
+// Depends on js/config.js (BACKEND_BASE_URL), js/hardware_processing.js (integration time and
+// full scale, so the landing page and the workflow pages can't disagree on them), and Chart.js.
 //
 // Connects to WS /api/live/spectrum as soon as the page opens, so device presence is known
 // right away; live_start is only sent while the Live switch is on AND the tab is in the
@@ -21,6 +22,8 @@
 //   the settings row under the chart   gain, integration time, LED current, and full scale
 //                      — the measurement configuration a raw count can't be read without.
 //                      Device identity and Wi-Fi were removed: they don't affect that reading.
+//   #live-announce (visually hidden)   what a screen reader hears: the same status, minus the
+//                      seconds that tick in the visible text, so it isn't re-read every second
 //
 // Rules:
 //   - Live data is only ever drawn; it's never written to storage, added to a plan, or fitted
@@ -43,16 +46,16 @@ const LIVE_RECONNECT_MAX_MS = 15000;
 const LIVE_PRESENCE_STALE_MS = 20000;
 // Once a second: the reconnect countdown and "last seen … ago" need to keep advancing.
 const LIVE_TICK_MS = 1000;
-// Integration time and full scale use the same formula as hardware_processing.js: (ATIME+1)(ASTEP+1)
-// steps, 2.78 µs each, with the ADC saturating at min(65535, (ATIME+1)(ASTEP+1)).
-const LIVE_ADC_MAX_COUNTS = 65535;
-const LIVE_ASTEP_UNIT_MS = 2.78e-3;
 // A first frame needs the LED settle plus one read (~0.6 s), or ~2 s if a measurement was
 // already running. Past this, Live was accepted but nothing is coming.
 const LIVE_FIRST_FRAME_MS = 8000;
 // Below this chart width (mobile), a 2.4 aspect ratio leaves only ~100 px of height and no
 // room for ten axis labels: switch to a near-square ratio with channel codes only as labels.
 const LIVE_NARROW_CHART_PX = 480;
+// Where the y axis starts. A bar above it steps the axis up to the next 1/2/5 × 10^n, and it
+// stays there until the chart is cleared. Placeholder: set it just above a real sample's F4
+// once one has been read.
+const LIVE_Y_BASE_COUNTS = 10000;
 
 // The landing page doesn't load hardware_common.js, so channel names are defined again here on their own.
 const LIVE_CHANNELS = [
@@ -88,7 +91,7 @@ function liveEl(id) {
   return document.getElementById(id);
 }
 
-// Skip resetting when the content hasn't changed: #live-dot-label sits in an aria-live region, and resetting it every second would make a screen reader keep re-announcing it.
+// Skip resetting when the content hasn't changed: #live-announce is an aria-live region, and resetting it every second would make a screen reader keep re-announcing it.
 function setLiveText(id, text) {
   const el = liveEl(id);
   if (el.textContent !== text) el.textContent = text;
@@ -120,14 +123,6 @@ function liveChannelName(channel) {
   return liveChannelLines(channel).join(" ");
 }
 
-function liveFullScale(config) {
-  return Math.min(LIVE_ADC_MAX_COUNTS, (config.atime + 1) * (config.astep + 1));
-}
-
-function liveIntegrationMs(config) {
-  return (config.atime + 1) * (config.astep + 1) * LIVE_ASTEP_UNIT_MS;
-}
-
 // Live is on but the tab is backgrounded, so nobody can see it — the LED shouldn't be lit for that.
 function liveWatching() {
   return liveWanted && !document.hidden;
@@ -141,20 +136,26 @@ function liveStatus() {
   }
   if (liveSocket?.readyState !== WebSocket.OPEN) {
     const retryS = Math.ceil((liveRetryAt - Date.now()) / 1000);
+    const retrying = liveRetryAt && retryS > 0;
     return {
       dot: "reconnecting",
       label: "Connecting",
       // A sleeping Render backend can take nearly a minute to wake — without saying so, it looks broken.
-      message: liveRetryAt && retryS > 0
+      message: retrying
         ? `Connection lost. Retrying in ${retryS} s`
         : "Connecting to backend (up to 1 min after idle)...",
+      spoken: retrying ? "Connection lost. Retrying" : undefined,
     };
   }
   if (!liveOnline) {
+    const seen = liveDevice && liveLastSeen;
     return {
       dot: "off",
       label: "Offline",
-      message: liveDevice && liveLastSeen ? `Last seen ${liveAgo(liveLastSeen)}` : "Waiting for CAPTURE-Screen to connect",
+      message: seen ? `Last seen ${liveAgo(liveLastSeen)}` : "Waiting for CAPTURE-Screen to connect",
+      spoken: seen
+        ? `Last seen at ${new Date(liveLastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : undefined,
     };
   }
   // The firmware refuses to stream without the AS7341, and says nothing further about it.
@@ -187,9 +188,9 @@ function renderSettings() {
   const { config } = liveDevice;
   const items = [
     ["Gain", `${config.gain}×`],
-    ["Integration", `${liveIntegrationMs(config).toFixed(2)} ms`],
+    ["Integration", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`],
     ["LED", `${config.led_current_mA} mA`],
-    ["Full scale", `${liveCounts(liveFullScale(config))} counts`],
+    ["Full scale", `${liveCounts(HardwareProcessing.fullScaleCounts(config))} counts`],
   ];
   const text = items.map(([label, value]) => `${label} ${value}`).join("|");
   if (el.dataset.text === text) return;
@@ -204,9 +205,12 @@ function renderSettings() {
 }
 
 function renderLive() {
-  const { dot, label, message } = liveStatus();
+  const { dot, label, message, spoken = message } = liveStatus();
   liveEl("live-dot").className = `live-dot is-${dot}`;
   setLiveText("live-dot-label", label);
+  // The one aria-live region. The visible text below carries ticking seconds; this doesn't,
+  // so setLiveText() leaves it alone until the state itself changes.
+  setLiveText("live-announce", spoken ? `${label}. ${spoken}` : label);
 
   // The box carries every message there is. With the chart up it shrinks to a single line
   // above it instead of standing in for it, so a measurement's "the stream comes back on
@@ -305,12 +309,23 @@ function ensureLiveChart() {
   });
 }
 
+// The smallest 1, 2 or 5 × 10^n at or above value, so a stepped-up axis still ends on a round number.
+function liveNiceCeil(value) {
+  const power = 10 ** Math.floor(Math.log10(value));
+  return [1, 2, 5, 10].find((m) => m * power >= value) * power;
+}
+
 function drawLiveFrame(raw) {
   const values = LIVE_CHANNELS.map(({ key }) => raw[key]);
   liveChart.data.datasets[0].data = values;
-  // Grows only, never shrinks, so the bars don't keep jumping around with the highest channel; resets when the chart is cleared.
+  // Fixed at LIVE_Y_BASE_COUNTS, so the bars don't jump with every frame. A bar above the
+  // current top steps it up rather than being cut off; it never steps back down (clearing the
+  // chart starts over), and never goes past the ADC's full scale, which no count can exceed.
   const y = liveChart.options.scales.y;
-  y.suggestedMax = Math.max(y.suggestedMax ?? 0, ...values);
+  const peak = Math.max(...values);
+  let top = y.max ?? LIVE_Y_BASE_COUNTS;
+  if (peak > top) top = liveNiceCeil(peak);
+  y.max = liveDevice ? Math.min(top, HardwareProcessing.fullScaleCounts(liveDevice.config)) : top;
   liveChart.update();
 
   liveEl("live-f4").textContent = liveCounts(raw.F4);
@@ -404,19 +419,22 @@ function openLiveSocket() {
   };
 
   socket.onclose = () => {
-    if (socket !== liveSocket) return;
-    liveSocket = null;
-    liveOnline = false;
-    clearLiveChart();
-    if (liveFatal) {
-      renderLive();
-      return;
-    }
+    if (socket === liveSocket) onLiveSocketLost();
+  };
+}
+
+// The current socket is gone, closed or given up on: forget it, clear the chart, and schedule
+// the reconnect. Any late event from the old socket fails the `socket !== liveSocket` checks.
+function onLiveSocketLost() {
+  liveSocket = null;
+  liveOnline = false;
+  clearLiveChart();
+  if (!liveFatal) {
     liveRetryAt = Date.now() + liveReconnectMs;
     liveReconnectTimer = setTimeout(openLiveSocket, liveReconnectMs);
     liveReconnectMs = Math.min(liveReconnectMs * 2, LIVE_RECONNECT_MAX_MS);
-    renderLive();
-  };
+  }
+  renderLive();
 }
 
 function setLiveWanted(wanted) {
@@ -428,10 +446,14 @@ function setLiveWanted(wanted) {
 
 function tickLive() {
   // Presence arrives at least every 10 s whether or not a device is attached, so a longer
-  // silence on an open socket means it died without a close frame. Closing it hands the
-  // work to onclose, which clears the chart and starts the reconnect countdown.
+  // silence on an open socket means it died without a close frame. Give up on it here rather
+  // than wait for its onclose: close() on a dead connection waits out the closing handshake,
+  // which can take up to a minute, and nothing would reconnect in the meantime.
   if (liveSocket?.readyState === WebSocket.OPEN && Date.now() - liveLastPresenceMs > LIVE_PRESENCE_STALE_MS) {
-    liveSocket.close();
+    const socket = liveSocket;
+    onLiveSocketLost();
+    socket.close();
+    return;
   }
   renderLive();
 }
@@ -452,11 +474,16 @@ document.addEventListener("DOMContentLoaded", () => {
     renderLive();
   });
   // Closes the connection on leaving the page: the backend counts one fewer viewer, and turns the device's LED off itself once nobody is watching.
+  // The chart is cleared here too: the socket's own onclose is skipped (liveSocket is already
+  // null), and a page restored from the back/forward cache would otherwise show the old frame.
   window.addEventListener("pagehide", () => {
     clearTimeout(liveReconnectTimer);
     const socket = liveSocket;
     liveSocket = null;
     socket?.close();
+    liveOnline = false;
+    clearLiveChart();
+    renderLive();
   });
   // Coming back from the back/forward cache, page state is still intact — just reconnect.
   window.addEventListener("pageshow", (event) => {
