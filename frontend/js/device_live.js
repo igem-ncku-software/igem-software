@@ -292,7 +292,8 @@ function ensureLiveChart() {
           beginAtZero: true,
           title: { display: true, text: "Raw counts", color: ink },
           grid: { color: rule },
-          ticks: { ...ticks, maxTicksLimit: 5 },
+          // stepSize is set per frame in drawLiveFrame(); 11 leaves room for 0 plus ten steps.
+          ticks: { ...ticks, maxTicksLimit: 11 },
         },
       },
       plugins: {
@@ -325,6 +326,9 @@ function drawLiveFrame(raw) {
   let top = y.max ?? LIVE_Y_BASE_COUNTS;
   if (peak > top) top = liveNiceCeil(peak);
   y.max = liveDevice ? Math.min(top, HardwareProcessing.fullScaleCounts(liveDevice.config)) : top;
+  // A gridline every 1,000 counts (the user's choice). Once the axis has stepped past 10,000
+  // that would be dozens of lines, so it switches to ten equal steps of the top instead.
+  y.ticks.stepSize = y.max <= 10000 ? 1000 : y.max / 10;
   liveChart.update();
 
   liveEl("live-f4").textContent = liveCounts(raw.F4);
