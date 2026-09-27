@@ -422,6 +422,9 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 .step-card[data-state="waiting"] .step-card-head h2 { color: var(--muted); }
 .step-card .step-card-waiting { margin: 10px 0 0 48px; }
 .step-card-body { margin-top: 16px; }
+/* What to have ready at the bench: shown even while the step waits, so it can be prepared meanwhile. */
+.step-card .step-bench { margin: 10px 0 0 48px; color: var(--text-dim); font-size: .88rem; }
+.step-bench b { margin-right: 4px; color: var(--gold-ink); font-size: .76rem; }
 
 /* Choosing a curve: one selectable row per curve. */
 .choice-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
@@ -435,6 +438,14 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 .choice.is-static { cursor: default; }
 .choice-title { display: block; color: var(--text); font-weight: 700; }
 .choice-meta { display: block; margin-top: 2px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+#source-summary .choice-title, #source-summary .choice-meta { margin: 0; }
+#source-summary .choice-meta { margin-top: 2px; }
+
+/* Calibrate's Set up: the tube list a run will make, in reading order. */
+.tube-order { margin-top: 8px; font-size: .88rem; }
+.tube-order summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+.tube-order ol { columns: 9rem; column-gap: 24px; margin: 8px 0 0; padding-left: 2.4em; color: var(--text-dim); }
+.tube-order li { break-inside: avoid; }
 
 .ruo-notice { color: var(--text-dim); font-weight: 600; }
 
@@ -465,6 +476,7 @@ button.is-blocked:disabled { cursor: not-allowed; }
 .radio-row { display: flex; flex-wrap: wrap; gap: 0 28px; }
 
 .table-heading { margin: 26px 0 12px; }
+.step-card-body > .table-heading:first-child { margin-top: 0; }
 .table-spaced { margin-top: 16px; }
 .plan-meta { margin: 8px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.6; }
 .cell-note { color: var(--muted); font-size: .8rem; }
@@ -659,7 +671,7 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 @media (max-width: 640px) {
   .hw-steps-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hw-data-link { flex: 1 1 100%; }
-  .step-card .step-card-waiting { margin-left: 0; }
+  .step-card .step-card-waiting, .step-card .step-bench { margin-left: 0; }
   .section-heading { flex-wrap: wrap; }
   .curve-chip { align-items: flex-start; text-align: left; }
   .next-tube { top: 6px; padding: 14px 16px; }

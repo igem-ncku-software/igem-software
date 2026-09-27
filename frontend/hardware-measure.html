@@ -38,6 +38,7 @@
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="step-bench"><b>Bench</b> <span>Samples of the same biosensor strain as the curve, read after the same induction time.</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
@@ -47,7 +48,6 @@
               <legend class="visually-hidden">Curve</legend>
               <ul class="choice-list" id="batch-curve-list"></ul>
             </fieldset>
-            <p class="plan-meta">Samples must be the same biosensor strain, read after the same induction time.</p>
 
             <div class="form-grid">
               <div class="field">
@@ -86,10 +86,11 @@
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="step-bench"><b>Bench</b> <span>Cells at the standards' OD without AHL, same strain and induction time as the samples.</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <p class="plan-meta">Same strain and induction time as the samples. Sets the HIGH_SCATTER baseline.</p>
+          <p class="plan-meta">Sets the HIGH_SCATTER baseline.</p>
           <div class="button-row">
             <button type="button" id="blank-read-button">Read blank</button>
           </div>
@@ -124,6 +125,7 @@
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="step-bench"><b>Bench</b> <span>Each sample in as many cuvettes as tubes per sample.</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
@@ -202,12 +204,35 @@
           </div>
 
           <div class="button-row">
-            <button type="button" id="results-export-button">Export CSV</button>
-            <button type="button" class="btn-secondary" id="batch-finish-button">Finish batch</button>
+            <button type="button" id="batch-finish-button">Finish batch</button>
           </div>
-          <p class="blocked-reason" id="results-export-reason" hidden></p>
           <p class="blocked-reason" id="batch-finish-reason" hidden></p>
           <p class="status-message" id="results-status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <!-- 5. Export: the finished batch as CSV, the one copy outside this browser. -->
+      <section class="card step-card" id="export-card">
+        <div class="step-card-head">
+          <span class="step-card-num">5</span>
+          <div>
+            <p class="section-label">Export</p>
+            <h2>Keep a copy</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta" id="export-state"></p>
+          <div class="button-row">
+            <button type="button" id="results-export-button">Export CSV</button>
+          </div>
+          <p class="status-message" id="export-status" aria-live="polite"></p>
+          <p class="plan-meta">
+            Kept in this browser only.
+            <a class="text-link" href="hardware-data.html">Back up everything on the Data page &rarr;</a>
+          </p>
         </div>
       </section>
 

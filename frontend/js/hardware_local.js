@@ -182,6 +182,33 @@ function localConditions(input) {
   return conditions;
 }
 
+// A run's tube list, validated, with slots numbered in reading order. Shared by
+// createCalibrationPlan and its preview, so the preview can't disagree with the run.
+function localPlanItems(input) {
+  const { concentrations_nM, replicates, blanks } = input ?? {};
+  if (!Array.isArray(concentrations_nM) || concentrations_nM.length === 0) localFail("Enter at least one concentration.");
+  if (!concentrations_nM.every((c) => Number.isFinite(c) && c > 0)) localFail("Concentrations must be positive numbers.");
+  const concentrations = [...new Set(concentrations_nM)].sort((a, b) => a - b);
+  if (concentrations.length < 4) localFail("A 4PL fit needs at least 4 distinct concentrations.");
+  if (!(Number.isInteger(replicates) && replicates >= 1 && replicates <= 10)) localFail("Replicates must be an integer from 1 to 10.");
+  if (!(Number.isInteger(blanks) && blanks >= 2 && blanks <= 10)) localFail("Blanks must be an integer from 2 to 10 (LOD needs a blank SD).");
+
+  // Interleaved by "replicate round": each round is a blank, then concentrations low to high.
+  // This keeps instrument drift from concentrating on any one concentration, and makes carryover
+  // less of a concern when the single cuvette moves from a low to a high concentration.
+  const items = [];
+  const rounds = Math.max(replicates, blanks);
+  for (let r = 1; r <= rounds; r++) {
+    if (r <= blanks) items.push({ label: `blank r${r}`, sample_type: "blank", concentration_nM: null });
+    if (r <= replicates) {
+      for (const c of concentrations) {
+        items.push({ label: `${localConcentrationLabel(c)} r${r}`, sample_type: "standard", concentration_nM: c });
+      }
+    }
+  }
+  return items.map((item, i) => ({ slot: i + 1, ...item }));
+}
+
 // ---- 4PL -------------------------------------------------------------
 
 // The parameter vector during fitting is [top, bottom, ln(ec50_nM), hill]: using ln(EC50)
@@ -692,30 +719,10 @@ const HardwareLocal = {
 
   createCalibrationPlan(input, configFingerprint, signal) {
     const store = localLoad();
-    const { concentrations_nM, replicates, blanks } = input ?? {};
     if (!configFingerprint) localFail("Instrument config unknown: a run must be bound to the device's config.");
     if (!signal) localFail("Signal definition unknown.");
     const conditions = localConditions(input?.conditions);
-    if (!Array.isArray(concentrations_nM) || concentrations_nM.length === 0) localFail("Enter at least one concentration.");
-    if (!concentrations_nM.every((c) => Number.isFinite(c) && c > 0)) localFail("Concentrations must be positive numbers.");
-    const concentrations = [...new Set(concentrations_nM)].sort((a, b) => a - b);
-    if (concentrations.length < 4) localFail("A 4PL fit needs at least 4 distinct concentrations.");
-    if (!(Number.isInteger(replicates) && replicates >= 1 && replicates <= 10)) localFail("Replicates must be an integer from 1 to 10.");
-    if (!(Number.isInteger(blanks) && blanks >= 2 && blanks <= 10)) localFail("Blanks must be an integer from 2 to 10 (LOD needs a blank SD).");
-
-    // Interleaved by "replicate round": each round is a blank, then concentrations low to high.
-    // This keeps instrument drift from concentrating on any one concentration, and makes carryover
-    // less of a concern when the single cuvette moves from a low to a high concentration.
-    const items = [];
-    const rounds = Math.max(replicates, blanks);
-    for (let r = 1; r <= rounds; r++) {
-      if (r <= blanks) items.push({ label: `blank r${r}`, sample_type: "blank", concentration_nM: null });
-      if (r <= replicates) {
-        for (const c of concentrations) {
-          items.push({ label: `${localConcentrationLabel(c)} r${r}`, sample_type: "standard", concentration_nM: c });
-        }
-      }
-    }
+    const items = localPlanItems(input);
 
     const plan = {
       plan_id: localId("RUN"),
@@ -725,11 +732,17 @@ const HardwareLocal = {
       config_fingerprint: configFingerprint,
       signal,
       conditions,
-      items: items.map((item, i) => ({ slot: i + 1, ...item, measurement: null })),
+      items: items.map((item) => ({ ...item, measurement: null })),
     };
     store.plans[plan.plan_id] = plan;
     localSave(store);
     return plan;
+  },
+
+  // The tube list createCalibrationPlan would make from this input, in reading order, without
+  // storing anything: Calibrate's Set up shows it before the run exists.
+  previewCalibrationPlan(input) {
+    return localPlanItems(input);
   },
 
   // Readings recorded earlier and entered by hand, stored as a run whose every slot is already

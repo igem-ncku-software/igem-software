@@ -28,22 +28,68 @@
     <nav class="hw-steps" id="hardware-subnav" data-page="calibration" aria-label="CAPTURE-Screen workflow"></nav>
 
     <main>
-      <!-- 1. Set up: a new run's form, or the open run's summary. -->
-      <section class="card step-card" id="setup-card">
+      <!-- 1. Source: read on the instrument, or enter readings recorded earlier. The instrument's
+           status here is polled, so the choice always shows whether it can be used now. -->
+      <section class="card step-card" id="source-card">
         <div class="step-card-head">
           <span class="step-card-num">1</span>
           <div>
-            <p class="section-label">Set up</p>
-            <h2 id="setup-title">New calibration run</h2>
+            <p class="section-label">Source</p>
+            <h2>Data source</h2>
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <div id="setup-form-area">
-            <p class="status-message" id="plan-resume" hidden></p>
+          <p class="status-message" id="plan-resume" hidden></p>
+          <fieldset class="plain-fieldset" id="source-choice">
+            <legend class="visually-hidden">Data source</legend>
+            <ul class="choice-list">
+              <li>
+                <label class="choice">
+                  <input type="radio" name="setup-source" value="device" />
+                  <span>
+                    <span class="choice-title">Read on CAPTURE-Screen</span>
+                    <span class="choice-meta" id="source-device-status">Checking the instrument...</span>
+                  </span>
+                </label>
+              </li>
+              <li>
+                <label class="choice">
+                  <input type="radio" name="setup-source" value="manual" />
+                  <span>
+                    <span class="choice-title">Enter recorded data</span>
+                    <span class="choice-meta">Readings taken earlier on CAPTURE-Screen, typed in.</span>
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </fieldset>
 
+          <!-- The open run's source; for an instrument run, the instrument now. -->
+          <div id="source-summary" hidden>
+            <p class="choice-title" id="source-summary-title"></p>
+            <p class="choice-meta" id="source-summary-status"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Set up: a new run's form, or the open run's summary. -->
+      <section class="card step-card" id="setup-card">
+        <div class="step-card-head">
+          <span class="step-card-num">2</span>
+          <div>
+            <p class="section-label">Set up</p>
+            <h2 id="setup-title">New calibration run</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="step-bench"><b>Bench</b> <span>Biosensor cells induced with each AHL standard, and cell blanks without AHL, all for the same time.</span></p>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <div id="setup-form-area">
             <form id="setup-form" novalidate>
               <fieldset class="plain-fieldset">
                 <legend>Conditions</legend>
@@ -64,20 +110,6 @@
                 </div>
               </fieldset>
 
-              <fieldset class="plain-fieldset">
-                <legend>Data source</legend>
-                <div class="radio-row">
-                  <label class="check-field">
-                    <input type="radio" name="setup-source" value="device" checked />
-                    Read on the instrument
-                  </label>
-                  <label class="check-field">
-                    <input type="radio" name="setup-source" value="manual" />
-                    Enter recorded data
-                  </label>
-                </div>
-              </fieldset>
-
               <!-- Read on the instrument: the tube list. Blanks are the 0 nM point. -->
               <div id="device-fields">
                 <label for="plan-concentrations">Standard concentrations (nM, comma-separated)</label>
@@ -93,9 +125,14 @@
                   </div>
                 </div>
                 <p class="plan-meta" id="plan-preview" aria-live="polite"></p>
+                <!-- The tube list Create run will make, in the order it will be read. -->
+                <details class="tube-order" id="plan-order" hidden>
+                  <summary>Reading order</summary>
+                  <ol id="plan-order-list"></ol>
+                </details>
               </div>
 
-              <!-- Enter recorded data: one row per tube. -->
+              <!-- Enter recorded data: when and under which config. The values go in at step 3. -->
               <div id="manual-fields" hidden>
                 <div class="form-grid">
                   <div class="field">
@@ -140,27 +177,12 @@
                   </div>
                 </fieldset>
                 <p class="plan-meta" id="manual-fingerprint" aria-live="polite"></p>
-
-                <div class="table-wrapper table-spaced">
-                  <table class="manual-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">#</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Concentration (nM)</th>
-                        <th scope="col">sfGFP signal (basic counts)</th>
-                        <th scope="col"><span class="visually-hidden">Actions</span></th>
-                      </tr>
-                    </thead>
-                    <tbody id="manual-table-body"></tbody>
-                  </table>
-                </div>
-                <button type="button" class="btn-secondary" id="manual-add-row">Add row</button>
-                <p class="plan-meta" id="manual-summary" aria-live="polite"></p>
               </div>
 
-              <button type="submit" id="setup-create-button">Create run</button>
-              <p class="blocked-reason" id="setup-create-reason" hidden></p>
+              <div id="setup-create-area">
+                <button type="submit" id="setup-create-button">Create run</button>
+                <p class="blocked-reason" id="setup-create-reason" hidden></p>
+              </div>
             </form>
             <p class="status-message" id="setup-status" aria-live="polite"></p>
           </div>
@@ -172,65 +194,92 @@
                 <tbody id="setup-summary-body"></tbody>
               </table>
             </div>
-            <p class="status-message" id="plan-config-warning" hidden></p>
             <p class="link-row"><a class="text-link" href="hardware-calibration.html">Start a new run</a></p>
           </div>
         </div>
       </section>
 
-      <!-- 2. Read: one cuvette at a time, in slot order. -->
+      <!-- 3. Read: one cuvette at a time, in slot order. For recorded data, Enter values instead:
+           the table is typed in here and the run is created from it. -->
       <section class="card step-card" id="read-card">
         <div class="step-card-head">
-          <span class="step-card-num">2</span>
+          <span class="step-card-num">3</span>
           <div>
-            <p class="section-label">Read</p>
-            <h2>Standards and blanks</h2>
+            <p class="section-label" id="read-label">Read</p>
+            <h2 id="read-title">Standards and blanks</h2>
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="step-bench" id="read-bench"><b>Bench</b> <span>One cuvette per tube, read in the order listed.</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <!-- Sticky: "which tube goes in next" stays on screen while the table
-               below scrolls, and the Read button stays with it. -->
-          <div class="next-tube" id="next-tube">
-            <p class="next-tube-label" id="next-tube-label">Next tube</p>
-            <p class="next-tube-value" id="next-tube-value" aria-live="polite">--</p>
-            <div class="progress" id="plan-progress" role="progressbar" aria-valuemin="0" aria-label="Tubes read">
-              <div class="progress-fill" id="plan-progress-fill"></div>
+          <div id="manual-entry" hidden>
+            <div class="table-wrapper table-spaced">
+              <table class="manual-table">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Concentration (nM)</th>
+                    <th scope="col">sfGFP signal (basic counts)</th>
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody id="manual-table-body"></tbody>
+              </table>
             </div>
-            <p class="progress-text" id="plan-progress-text"></p>
-            <div class="button-row" id="plan-read-controls">
-              <button type="button" id="plan-read-button">Read</button>
-              <button type="button" class="btn-secondary" id="plan-cancel-reread" hidden>Cancel re-read</button>
-            </div>
-            <p class="blocked-reason" id="plan-read-reason" hidden></p>
-            <p class="status-message" id="plan-read-status" aria-live="polite"></p>
-          </div>
-          <p class="plan-meta" data-basis-note hidden></p>
+            <button type="button" class="btn-secondary" id="manual-add-row">Add row</button>
+            <p class="plan-meta" id="manual-summary" aria-live="polite"></p>
 
-          <div class="table-wrapper table-spaced">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Slot</th>
-                  <th scope="col">Label</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">sfGFP signal (basic counts)</th>
-                  <th scope="col">Read at</th>
-                  <th scope="col"><span class="visually-hidden">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody id="plan-table-body"></tbody>
-            </table>
+            <button type="button" id="manual-create-button">Create run</button>
+            <p class="blocked-reason" id="manual-create-reason" hidden></p>
+            <p class="status-message" id="manual-create-status" aria-live="polite"></p>
+          </div>
+
+          <div id="read-area">
+            <p class="status-message" id="plan-config-warning" hidden></p>
+            <!-- Sticky: "which tube goes in next" stays on screen while the table
+                 below scrolls, and the Read button stays with it. -->
+            <div class="next-tube" id="next-tube">
+              <p class="next-tube-label" id="next-tube-label">Next tube</p>
+              <p class="next-tube-value" id="next-tube-value" aria-live="polite">--</p>
+              <div class="progress" id="plan-progress" role="progressbar" aria-valuemin="0" aria-label="Tubes read">
+                <div class="progress-fill" id="plan-progress-fill"></div>
+              </div>
+              <p class="progress-text" id="plan-progress-text"></p>
+              <div class="button-row" id="plan-read-controls">
+                <button type="button" id="plan-read-button">Read</button>
+                <button type="button" class="btn-secondary" id="plan-cancel-reread" hidden>Cancel re-read</button>
+              </div>
+              <p class="blocked-reason" id="plan-read-reason" hidden></p>
+              <p class="status-message" id="plan-read-status" aria-live="polite"></p>
+            </div>
+            <p class="plan-meta" data-basis-note hidden></p>
+
+            <div class="table-wrapper table-spaced">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Slot</th>
+                    <th scope="col">Label</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">sfGFP signal (basic counts)</th>
+                    <th scope="col">Read at</th>
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody id="plan-table-body"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- 3. Fit: 4PL, exclusions with reasons. -->
+      <!-- 4. Fit: 4PL, exclusions with reasons. -->
       <section class="card step-card" id="fit-card">
         <div class="step-card-head">
-          <span class="step-card-num">3</span>
+          <span class="step-card-num">4</span>
           <div>
             <p class="section-label">Fit</p>
             <h2>4PL curve</h2>
@@ -240,11 +289,37 @@
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <button type="button" id="fit-button">Fit</button>
+          <!-- Data first: review the tubes and exclude any, then fit, then read the result. -->
+          <h3 class="subsection-heading table-heading">Tubes</h3>
+          <p class="chart-note">Tick a tube and give a reason to exclude it. Changing an exclusion discards the current fit.</p>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Concentration</th>
+                  <th scope="col">n</th>
+                  <th scope="col">Mean signal</th>
+                  <th scope="col">Mean residual</th>
+                  <th scope="col">Tube</th>
+                  <th scope="col">Signal</th>
+                  <th scope="col">Residual</th>
+                  <th scope="col">QC</th>
+                  <th scope="col">Exclude</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="fit-table-body"></tbody>
+            </table>
+          </div>
+
+          <div class="button-row table-spaced">
+            <button type="button" id="fit-button">Fit</button>
+          </div>
           <p class="blocked-reason" id="fit-reason" hidden></p>
           <p class="status-message" id="fit-status" aria-live="polite"></p>
 
-          <p class="chart-note table-spaced">
+          <h3 class="subsection-heading table-heading">Curve</h3>
+          <p class="chart-note">
             Log concentration axis. Dots: tubes. Squares: mean ± SD. Dashed line: EC50. Grey open
             circles: excluded tubes. Blanks (0 nM) appear in the table only.
           </p>
@@ -275,35 +350,13 @@
               <span class="sensor-stat-sub" id="fit-rmse-sub"></span>
             </div>
           </div>
-
-          <h3 class="subsection-heading table-heading">Tubes</h3>
-          <p class="chart-note">Tick a tube and give a reason to exclude it. Changing an exclusion discards the current fit.</p>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Concentration</th>
-                  <th scope="col">n</th>
-                  <th scope="col">Mean signal</th>
-                  <th scope="col">Mean residual</th>
-                  <th scope="col">Tube</th>
-                  <th scope="col">Signal</th>
-                  <th scope="col">Residual</th>
-                  <th scope="col">QC</th>
-                  <th scope="col">Exclude</th>
-                  <th scope="col">Reason</th>
-                </tr>
-              </thead>
-              <tbody id="fit-table-body"></tbody>
-            </table>
-          </div>
         </div>
       </section>
 
-      <!-- 4. Save: the curve, bound to this run's config, signal and conditions. -->
+      <!-- 5. Save: the curve, bound to this run's config, signal and conditions. -->
       <section class="card step-card" id="save-card">
         <div class="step-card-head">
-          <span class="step-card-num">4</span>
+          <span class="step-card-num">5</span>
           <div>
             <p class="section-label">Save</p>
             <h2>Calibration curve</h2>
@@ -332,8 +385,8 @@
 
       <div id="hardware-next" data-next="curves"></div>
 
-      <!-- Always visible: the only way to reach a run other than the last one, and where an
-           imported run shows up. -->
+      <!-- Always visible, last on the page: the only way to reach a run other than the open one,
+           and where an imported run shows up. -->
       <section class="card">
         <p class="section-label">Saved runs</p>
         <p class="status-message" id="runs-status" aria-live="polite">Loading runs...</p>
@@ -366,6 +419,7 @@
           <a class="text-link" href="hardware-data.html">Back up on the Data page &rarr;</a>
         </p>
       </section>
+
     </main>
 
     <footer class="site-footer">

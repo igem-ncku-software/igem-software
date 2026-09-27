@@ -1,11 +1,18 @@
 // =========================================================
 // Backs hardware-calibration.html: step 2 of the CAPTURE-Screen workflow. One page walks a
-// calibration run through four numbered steps:
-//   1 Set up  conditions (biosensor strain, induction time) and either a tube list to read on the
-//             instrument, or readings recorded earlier typed in row by row
-//   2 Read    the next tube pinned at the top; Read measures it, records it, and moves on
-//   3 Fit     4PL, with any tube excluded only with a reason
-//   4 Save    the curve, bound to the run's config, signal and conditions
+// calibration run through five numbered steps, data before processing:
+//   1 Source  read on CAPTURE-Screen, or enter readings recorded earlier. The instrument's status
+//             is shown live, and it is pre-selected when it comes online before a choice is made
+//   2 Set up  conditions (biosensor strain, induction time), then either the standards to read
+//             (with the reading order previewed) or when and under which config recorded
+//             readings were taken
+//   3 Read    the next tube pinned at the top; Read measures it, records it, and moves on.
+//             For recorded data this step is Enter values instead: the readings are typed in row
+//             by row, and Create run stores them as a run in one go
+//   4 Fit     4PL, with any tube excluded only with a reason
+//   5 Save    the curve, bound to the run's config, signal and conditions
+// The instrument is polled every DEVICE_STATUS_POLL_INTERVAL_MS in every state, so Source, Create
+// run and Read follow it (online, offline, sensor fault, config change) without a reload.
 // A step that can't start yet stays visible with what it is waiting for, so the order is always
 // on screen. Every state is derived from the stored run plus this page's fit state, never kept
 // separately.
@@ -22,8 +29,6 @@
 // =========================================================
 
 let plan = null;
-let planDeviceFingerprint = null; // null = device unreachable, config can't be confirmed
-let planDeviceSensorOk = null;    // DeviceStatus.sensor_ok; null = unreachable or a firmware that doesn't report it
 let planCurves = [];              // curves already saved from this run
 let rereadSlot = null;            // the slot the user pressed Re-read on; null means measure the "next tube"
 let planReading = false;
@@ -58,10 +63,91 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
-// ---- 1. Set up --------------------------------------------------------
+// ---- The instrument, polled -----------------------------------------------
+
+let deviceState = "checking";  // checking | online | offline
+let deviceFingerprint = null;  // null unless online: the config can't be confirmed
+let deviceSensorOk = null;     // DeviceStatus.sensor_ok; null = not online, or a firmware that doesn't report it
+let deviceError = null;        // why it isn't online, in words
+let sourceTouched = false;     // the user picked a source: never pre-select over their choice
+
+function deviceSnapshot() {
+  return [deviceState, deviceFingerprint, deviceSensorOk, deviceError].join("|");
+}
+
+async function refreshDevice() {
+  const before = deviceSnapshot();
+  try {
+    const status = await HardwareApi.getDeviceStatus();
+    deviceState = "online";
+    deviceFingerprint = status.config.fingerprint;
+    deviceSensorOk = status.sensor_ok;
+    deviceError = null;
+  } catch (err) {
+    deviceState = "offline";
+    deviceFingerprint = null;
+    deviceSensorOk = null;
+    // The API's own offline message formats last_seen in the browser locale; this page uses the fixed format.
+    deviceError = err.deviceOffline && err.lastSeen ? `CAPTURE-Screen is offline (last seen ${formatLocalTime(err.lastSeen)}).` : err.message;
+  }
+  applyDevice(before !== deviceSnapshot());
+}
+
+// What the instrument's status feeds: the Source choice, Create run, and an open run's Read step.
+function applyDevice(changed) {
+  renderDeviceStatus(document.getElementById("source-device-status"));
+  if (!plan) {
+    if (!sourceTouched && !setupSource() && deviceState === "online") selectSource("device");
+    updateSetupControls();
+  } else if (changed && !planReading) {
+    renderSourceSummary();
+    renderRead();
+  }
+}
+
+// One line: online with config and sensor, or why not.
+function renderDeviceStatus(el) {
+  el.textContent = "";
+  if (deviceState === "checking") {
+    el.textContent = "Checking the instrument...";
+  } else if (deviceState === "offline") {
+    el.append(`${deviceError} `, hwLink("hardware.html", "Check on Instrument →"));
+  } else {
+    const sensor = sensorReading(deviceSensorOk);
+    el.append("Online · config ", hwFingerprint(deviceFingerprint), ` · sensor ${sensor.text.toLowerCase()}`);
+    if (sensor.blocks) el.append(" ", hwLink("hardware.html", "Check on Instrument →"));
+  }
+}
+
+// ---- 1. Source --------------------------------------------------------
 
 function setupSource() {
-  return document.querySelector('input[name="setup-source"]:checked').value;
+  return document.querySelector('input[name="setup-source"]:checked')?.value ?? null;
+}
+
+function selectSource(value) {
+  document.querySelector(`input[name="setup-source"][value="${value}"]`).checked = true;
+}
+
+function renderSourceSummary() {
+  const manual = plan.source === "manual";
+  document.getElementById("source-summary-title").textContent = manual ? "Enter recorded data" : "Read on CAPTURE-Screen";
+  const status = document.getElementById("source-summary-status");
+  if (manual) status.textContent = `Measured ${plan.measured_on}.`;
+  else renderDeviceStatus(status);
+}
+
+// ---- 2. Set up --------------------------------------------------------
+
+// Step 3 is Read for an instrument run and Enter values for recorded data.
+function showReadStep(manual, entering) {
+  document.getElementById("read-label").textContent = manual ? "Enter values" : "Read";
+  document.getElementById("read-title").textContent = manual ? "Recorded standards and blanks" : "Standards and blanks";
+  document.querySelector("#read-bench span").textContent = manual
+    ? "The recorded readings, one value per tube."
+    : "One cuvette per tube, read in the order listed.";
+  document.getElementById("manual-entry").hidden = !entering;
+  document.getElementById("read-area").hidden = entering;
 }
 
 function setupConditions() {
@@ -78,48 +164,92 @@ function conditionsProblem(c) {
   return null;
 }
 
-function updatePlanPreview() {
-  const concentrations = parseConcentrationList(document.getElementById("plan-concentrations").value);
-  const replicates = Number(document.getElementById("plan-replicates").value);
-  const blanks = Number(document.getElementById("plan-blanks").value);
-  const preview = document.getElementById("plan-preview");
-
-  const unique = new Set(concentrations);
-  if (concentrations.length === 0 || concentrations.some((c) => !(c > 0)) || !(replicates >= 1) || !(blanks >= 0)) {
-    preview.textContent = "";
-    return;
-  }
-  preview.textContent = `${unique.size * replicates + blanks} tubes: ${unique.size} concentrations × ${replicates} replicates + ${blanks} blanks`;
+function planInput() {
+  return {
+    concentrations_nM: parseConcentrationList(document.getElementById("plan-concentrations").value),
+    replicates: Number(document.getElementById("plan-replicates").value),
+    blanks: Number(document.getElementById("plan-blanks").value),
+  };
 }
 
+// Shows the tube list Create run would make, in reading order, and returns what blocks it, or null.
+// The list comes from the same code that creates the run, so it can't disagree with it.
+function updatePlanPreview() {
+  const preview = document.getElementById("plan-preview");
+  const order = document.getElementById("plan-order");
+  const input = planInput();
+  let items;
+  try {
+    items = HardwareApi.previewCalibrationPlan(input);
+  } catch (err) {
+    preview.textContent = "";
+    order.hidden = true;
+    return err.message;
+  }
+  const concentrations = new Set(items.filter((it) => it.sample_type === "standard").map((it) => it.concentration_nM));
+  preview.textContent = `${plural(items.length, "tube")}: ${plural(concentrations.size, "concentration")} × `
+    + `${plural(input.replicates, "replicate")} + ${plural(input.blanks, "blank")}`;
+  const list = document.getElementById("plan-order-list");
+  list.replaceChildren(...items.map((it) => hwEl("li", null, it.label)));
+  order.hidden = false;
+  return null;
+}
+
+// Steps 1 to 3 while no run is open. An instrument run is created at step 2; recorded data is
+// created at step 3, which opens as soon as step 2 is complete.
 function updateSetupControls() {
+  if (plan) return; // a status poll can land after a run has opened
   const source = setupSource();
-  document.getElementById("device-fields").hidden = source !== "device";
-  document.getElementById("manual-fields").hidden = source !== "manual";
-  const button = document.getElementById("setup-create-button");
-  button.textContent = source === "device" ? "Create run" : "Create dataset";
+  const manual = source === "manual";
+  const sourceCard = document.getElementById("source-card");
+  const setupCard = document.getElementById("setup-card");
+  const readCard = document.getElementById("read-card");
+  showReadStep(manual, manual);
+
+  if (!source) {
+    setStepCard(sourceCard, "current");
+    for (const id of ["setup-card", "read-card", "fit-card", "save-card"]) {
+      setStepCard(document.getElementById(id), "waiting", "Choose a data source first.");
+    }
+    return;
+  }
+  setStepCard(sourceCard, "done");
+  document.getElementById("device-fields").hidden = manual;
+  document.getElementById("manual-fields").hidden = !manual;
+  document.getElementById("setup-create-area").hidden = manual;
 
   let problem = conditionsProblem(setupConditions());
-  if (source === "device") {
-    updatePlanPreview();
+  if (!manual) {
+    const planProblem = updatePlanPreview(); // always, so the tube list shows while conditions are still empty
+    problem = problem ?? planProblem;
     // A run is bound to the instrument's config when it is created, so the instrument has to answer.
-    if (manualDeviceState === "checking") problem = problem ?? "Checking the instrument...";
-    if (manualDeviceState === "offline") problem = problem ?? "The instrument is offline. Connect it, or enter recorded data instead.";
+    if (deviceState === "checking") problem = problem ?? "Checking the instrument...";
+    if (deviceState === "offline") problem = problem ?? `${deviceError} Or enter recorded data instead.`;
+    const button = document.getElementById("setup-create-button");
+    setBlocked(button, document.getElementById("setup-create-reason"), problem);
+    if (manualCreating) button.disabled = true;
+    setStepCard(setupCard, "current");
+    setStepCard(readCard, "waiting", "Create a run first.");
   } else {
-    problem = problem ?? updateManualControls();
+    const manualState = updateManualControls();
+    problem = problem ?? manualState.setup;
+    setStepCard(setupCard, problem ? "current" : "done");
+    setStepCard(readCard, problem ? "waiting" : "current", problem ? `Complete Set up first: ${problem}` : null);
+    const button = document.getElementById("manual-create-button");
+    setBlocked(button, document.getElementById("manual-create-reason"), problem ?? manualState.rows);
+    if (manualCreating) button.disabled = true;
   }
-  setBlocked(button, document.getElementById("setup-create-reason"), problem);
-  if (manualCreating) button.disabled = true;
+  const waiting = manual ? "Enter the values and create the run first." : "Create a run first.";
+  for (const id of ["fit-card", "save-card"]) setStepCard(document.getElementById(id), "waiting", waiting);
 }
 
 async function showSetup(errorText) {
   plan = null;
   document.getElementById("setup-title").textContent = "New calibration run";
+  document.getElementById("source-choice").hidden = false;
+  document.getElementById("source-summary").hidden = true;
   document.getElementById("setup-form-area").hidden = false;
   document.getElementById("setup-summary").hidden = true;
-  setStepCard(document.getElementById("setup-card"), "current");
-  const waiting = "Create a run first.";
-  for (const id of ["read-card", "fit-card", "save-card"]) setStepCard(document.getElementById(id), "waiting", waiting);
   startManualEntry();
   updateSetupControls();
   if (errorText) setHardwareStatus(document.getElementById("setup-status"), errorText, "error");
@@ -140,10 +270,14 @@ async function showSetup(errorText) {
   }
 }
 
+// An instrument run is created from step 2's form, recorded data from step 3's Create run.
 async function createFromSetup(event) {
   event.preventDefault();
-  const button = document.getElementById("setup-create-button");
-  const statusEl = document.getElementById("setup-status");
+  if (setupSource() !== "device") return; // Enter in a step-2 field; recorded data is created at step 3
+  await createRun(document.getElementById("setup-create-button"), document.getElementById("setup-status"));
+}
+
+async function createRun(button, statusEl) {
   if (button.disabled) return;
 
   manualCreating = true;
@@ -193,25 +327,36 @@ function renderSetupSummary() {
   appendKvRow(tbody, "Biosensor strain", plan.conditions.sensor);
   appendKvRow(tbody, "Induction time", formatHours(plan.conditions.induction_h));
   if (plan.conditions.notes) appendKvRow(tbody, "Notes", plan.conditions.notes);
-  appendKvRow(tbody, "Source", manual ? `Recorded data, measured ${plan.measured_on}` : "Read on the instrument");
+  if (manual) appendKvRow(tbody, "Measured on", plan.measured_on);
   appendKvRow(tbody, "Config", hwFingerprint(plan.config_fingerprint));
   appendKvRow(tbody, "Signal", plan.signal);
   appendKvRow(tbody, "Created", formatLocalTime(plan.created_at));
+}
 
-  // Only a run still being read needs the instrument to be on the same config.
+// ---- 3. Read ----------------------------------------------------------
+
+// Only a run still being read needs the instrument on the same config. Offline is said by the
+// Read button's own reason, so this speaks only to a config the instrument has confirmed.
+function renderConfigWarning() {
   const warning = document.getElementById("plan-config-warning");
-  const reading = !manual && !planComplete(plan);
-  warning.hidden = !reading || planDeviceFingerprint === plan.config_fingerprint;
-  if (!warning.hidden && planDeviceFingerprint === null) {
-    setHardwareStatus(warning, "The instrument is unreachable, so its config can't be checked against this run.", "warn");
-  } else if (!warning.hidden) {
+  const reading = plan.source === "device" && !planComplete(plan);
+  warning.hidden = !reading || deviceFingerprint === null || deviceFingerprint === plan.config_fingerprint;
+  if (!warning.hidden) {
     setHardwareStatus(warning,
-      `The instrument now runs config ${planDeviceFingerprint}, not this run's ${plan.config_fingerprint}. New readings will be flagged STALE_CONFIG and cannot be fitted.`,
+      `The instrument now runs config ${deviceFingerprint}, not this run's ${plan.config_fingerprint}. New readings will be flagged STALE_CONFIG and cannot be fitted.`,
       "error");
   }
 }
 
-// ---- 2. Read ----------------------------------------------------------
+// Why Read can't run now, or null. The instrument outranks "nothing left to read": neither can be
+// read, but only one is a fault.
+function readBlockReason(target) {
+  if (deviceState === "checking") return "Checking the instrument...";
+  if (deviceState === "offline") return deviceError;
+  const sensorBlock = sensorReading(deviceSensorOk).blocks;
+  if (sensorBlock) return sensorBlock;
+  return target ? null : "Every tube has been read. Use Re-read on a row to replace a reading.";
+}
 
 function renderRead() {
   const manual = plan.source === "manual";
@@ -220,6 +365,7 @@ function renderRead() {
   const target = manual ? null : targetItem();
 
   document.getElementById("next-tube").hidden = manual;
+  renderConfigWarning();
   if (!manual) {
     const banner = document.getElementById("next-tube");
     const label = document.getElementById("next-tube-label");
@@ -246,10 +392,7 @@ function renderRead() {
 
     const readButton = document.getElementById("plan-read-button");
     readButton.textContent = target ? `Read ${target.label}` : "Read";
-    // A dead AS7341 outranks "nothing left to read": neither can be read, but only one is a fault.
-    const sensorBlock = sensorReading(planDeviceSensorOk).blocks;
-    setBlocked(readButton, document.getElementById("plan-read-reason"),
-      sensorBlock || (target ? null : "Every tube has been read. Use Re-read on a row to replace a reading."));
+    setBlocked(readButton, document.getElementById("plan-read-reason"), readBlockReason(target));
     if (planReading) readButton.disabled = true;
   }
 
@@ -311,8 +454,10 @@ async function readPlanTarget() {
     if (item.sample_type === "standard") input.known_concentration_nM = item.concentration_nM;
 
     const [m, status] = await Promise.all([HardwareApi.readSample(input), HardwareApi.getDeviceStatus()]);
-    planDeviceFingerprint = status.config.fingerprint;
-    planDeviceSensorOk = status.sensor_ok;
+    deviceState = "online";
+    deviceFingerprint = status.config.fingerprint;
+    deviceSensorOk = status.sensor_ok;
+    deviceError = null;
     plan = await HardwareApi.recordPlanMeasurement(plan.plan_id, item.slot, m);
     rereadSlot = null;
     // The data under any fit just changed, so the fit no longer describes it.
@@ -320,12 +465,19 @@ async function readPlanTarget() {
 
     const recorded = plan.items.find((it) => it.slot === item.slot).measurement;
     const flagText = recorded.flags.length ? ` Flags: ${recorded.flags.join(", ")}.` : "";
+    // The same concentration's other tubes, so an odd value is caught while the cuvette is still in hand.
+    const replicates = plan.items.filter((it) => it.slot !== item.slot && it.measurement
+      && it.sample_type === item.sample_type && it.concentration_nM === item.concentration_nM);
+    const replicateText = replicates.length
+      ? ` Replicates: ${replicates.map((it) => `${it.label} ${formatFluorescence(it.measurement.fluorescence)}`).join(", ")}.`
+      : "";
     setHardwareStatus(statusEl,
-      `Recorded tube ${item.slot} (${item.label}): ${formatFluorescence(recorded.fluorescence)} ${HARDWARE_FLUORESCENCE_UNIT}.${flagText}`,
+      `Recorded tube ${item.slot} (${item.label}): ${formatFluorescence(recorded.fluorescence)} ${HARDWARE_FLUORESCENCE_UNIT}.${replicateText}${flagText}`,
       recorded.flags.length ? "warn" : "success");
   } catch (err) {
     console.error("Run reading failed:", err);
     setHardwareStatus(statusEl, `Read failed for tube ${item.slot}: ${err.message}`, "error");
+    refreshDevice(); // the failure may be the instrument going offline: say so at the button
   } finally {
     planReading = false;
     renderAll();
@@ -704,7 +856,8 @@ async function saveFit() {
     fitCurveResult = await HardwareApi.saveCurve(payload);
     fitState = "saved";
     planCurves = [fitCurveResult, ...planCurves];
-    setHardwareStatus(statusEl, `Saved as ${fitCurveResult.curve_id}.`, "success");
+    setHardwareStatus(statusEl, `Saved as ${fitCurveResult.curve_id}. `, "success");
+    statusEl.appendChild(hwLink(`hardware-measure.html?curve=${encodeURIComponent(fitCurveResult.curve_id)}`, "Measure with this curve →"));
     refreshRuns();
     refreshHardwareSteps();
   } catch (err) {
@@ -731,9 +884,12 @@ function renderAll() {
   const complete = planComplete(plan);
   const pending = plan.items.filter((it) => !it.measurement).length;
 
+  renderSourceSummary();
+  setStepCard(document.getElementById("source-card"), "done");
   renderSetupSummary();
   setStepCard(document.getElementById("setup-card"), "done");
 
+  showReadStep(plan.source === "manual", false);
   setStepCard(document.getElementById("read-card"), complete ? "done" : "current");
   renderRead();
 
@@ -756,11 +912,10 @@ function renderAll() {
 }
 
 async function openPlan(planId, alreadyLoaded) {
-  stopManualEntry();
   // The run lives in the browser: it still opens when the device is unreachable, just without a config check.
-  const [planResult, statusResult, curvesResult] = await Promise.allSettled([
+  const [planResult, , curvesResult] = await Promise.allSettled([
     alreadyLoaded ? Promise.resolve(alreadyLoaded) : HardwareApi.getCalibrationPlan(planId),
-    HardwareApi.getDeviceStatus(),
+    refreshDevice(),
     HardwareApi.listCurves(),
   ]);
 
@@ -771,21 +926,19 @@ async function openPlan(planId, alreadyLoaded) {
     return;
   }
   plan = planResult.value;
-  planDeviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
-  planDeviceSensorOk = statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null;
   planCurves = curvesResult.status === "fulfilled" ? curvesResult.value.filter((curve) => curve.plan_id === plan.plan_id) : [];
   hardwareRemember(HARDWARE_LAST_PLAN_KEY, plan.plan_id);
 
+  document.getElementById("source-choice").hidden = true;
+  document.getElementById("source-summary").hidden = false;
   document.getElementById("setup-form-area").hidden = true;
   document.getElementById("setup-summary").hidden = false;
   renderAll();
   refreshRuns();
-  if (plan.source === "device" && !planComplete(plan)) {
-    if (statusResult.status === "rejected") {
-      setHardwareStatus(document.getElementById("plan-read-status"), `Read unavailable: ${statusResult.reason.message}`, "error");
-    }
-    document.getElementById("plan-read-button").focus();
-  }
+  // Straight to the step that is next. Focusing Read scrolls to it and lets Enter read the first tube.
+  const readButton = document.getElementById("plan-read-button");
+  if (plan.source === "device" && !planComplete(plan) && !readButton.disabled) readButton.focus();
+  else document.querySelector(".step-card[data-state='current']")?.scrollIntoView({ block: "start" });
 }
 
 // ---- Set up: readings recorded earlier, entered by hand ------------------
@@ -794,9 +947,6 @@ async function openPlan(planId, alreadyLoaded) {
 const MANUAL_START_ROWS = ["blank", "blank", "standard", "standard", "standard", "standard"];
 
 const manualRows = []; // { sample_type, concentration, signal }, the last two as typed
-let manualDeviceState = "checking"; // checking | online | offline; also gates creating an instrument run
-let manualDeviceFingerprint = null;
-let manualPollTimer = null;
 let manualCreating = false;
 
 function manualToday() {
@@ -822,11 +972,11 @@ function manualConfigValues() {
 // { fingerprint } when the config is known, otherwise { error } saying why not.
 function manualConfig() {
   if (manualConfigMode() === "current") {
-    if (manualDeviceState === "checking") return { error: "Checking the instrument's config..." };
-    if (manualDeviceState === "offline") {
+    if (deviceState === "checking") return { error: "Checking the instrument's config..." };
+    if (deviceState === "offline") {
       return { error: "Instrument unreachable, so its current config is unknown. Enter the config manually." };
     }
-    return { fingerprint: manualDeviceFingerprint };
+    return { fingerprint: deviceFingerprint };
   }
   try {
     return { fingerprint: HardwareApi.fingerprintConfig(manualConfigValues()) };
@@ -858,11 +1008,16 @@ function manualCounts() {
   };
 }
 
-function manualProblem(config) {
+// Step 1's part: when, and under which config.
+function manualSetupProblem(config) {
   const measuredOn = document.getElementById("manual-measured-on").value;
   if (!measuredOn) return "Enter the date the readings were taken.";
   if (measuredOn > manualToday()) return "The measurement date is in the future.";
-  if (config.error) return config.error;
+  return config.error ?? null;
+}
+
+// Step 2's part: the values themselves.
+function manualRowsProblem() {
   for (const [i, row] of manualRows.entries()) {
     const problem = manualCellProblem(row, "concentration") ?? manualCellProblem(row, "signal");
     if (problem) return `Row ${i + 1}: ${problem}`;
@@ -873,7 +1028,7 @@ function manualProblem(config) {
   return null;
 }
 
-// Refreshes the manual-entry summary lines and returns what blocks creating the dataset, or null.
+// Refreshes the manual-entry summary lines and returns what blocks each step, { setup, rows }, null when nothing.
 function updateManualControls() {
   const config = manualConfig();
   const { tubes, concentrations, blanks } = manualCounts();
@@ -884,27 +1039,16 @@ function updateManualControls() {
   fingerprintEl.textContent = "";
   if (config.fingerprint) {
     fingerprintEl.append("Config fingerprint ", hwFingerprint(config.fingerprint));
-    if (manualConfigMode() === "manual" && manualDeviceFingerprint) {
-      if (config.fingerprint === manualDeviceFingerprint) {
+    if (manualConfigMode() === "manual" && deviceFingerprint) {
+      if (config.fingerprint === deviceFingerprint) {
         fingerprintEl.append(" · matches the instrument now");
       } else {
-        fingerprintEl.append(" · the instrument now runs ", hwFingerprint(manualDeviceFingerprint),
+        fingerprintEl.append(" · the instrument now runs ", hwFingerprint(deviceFingerprint),
           ", so a curve from this dataset can't measure until they match");
       }
     }
   }
-  return manualProblem(config);
-}
-
-async function refreshManualDevice() {
-  try {
-    manualDeviceFingerprint = (await HardwareApi.getDeviceStatus()).config.fingerprint;
-    manualDeviceState = "online";
-  } catch (err) {
-    manualDeviceFingerprint = null;
-    manualDeviceState = "offline";
-  }
-  updateSetupControls();
+  return { setup: manualSetupProblem(config), rows: manualRowsProblem() };
 }
 
 function focusManualSignal(index) {
@@ -1004,19 +1148,11 @@ function renderManualRows() {
 }
 
 function startManualEntry() {
-  if (manualPollTimer !== null) return;
   if (manualRows.length === 0) {
     for (const type of MANUAL_START_ROWS) manualRows.push({ sample_type: type, concentration: "", signal: "" });
   }
   document.getElementById("manual-measured-on").max = manualToday();
   renderManualRows();
-  refreshManualDevice();
-  manualPollTimer = setInterval(refreshManualDevice, DEVICE_STATUS_POLL_INTERVAL_MS);
-}
-
-function stopManualEntry() {
-  clearInterval(manualPollTimer);
-  manualPollTimer = null;
 }
 
 // ---- Saved runs: the list and a CSV per run ------------------
@@ -1119,7 +1255,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     updateSetupControls();
   });
+  document.getElementById("source-choice").addEventListener("change", () => {
+    sourceTouched = true;
+    updateSetupControls();
+  });
   document.getElementById("manual-add-row").addEventListener("click", addManualRow);
+  document.getElementById("manual-entry").addEventListener("input", updateSetupControls);
+  document.getElementById("manual-entry").addEventListener("change", updateSetupControls);
+  document.getElementById("manual-create-button").addEventListener("click", (event) =>
+    createRun(event.currentTarget, document.getElementById("manual-create-status")));
 
   document.getElementById("plan-read-button").addEventListener("click", readPlanTarget);
   document.getElementById("plan-cancel-reread").addEventListener("click", () => {
@@ -1132,8 +1276,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("refit-button").addEventListener("click", startRefit);
 
   refreshRuns();
+  setInterval(refreshDevice, DEVICE_STATUS_POLL_INTERVAL_MS);
 
   const planId = hardwareQueryParam("plan");
   if (planId) openPlan(planId);
-  else showSetup();
+  else {
+    showSetup();
+    refreshDevice();
+  }
 });

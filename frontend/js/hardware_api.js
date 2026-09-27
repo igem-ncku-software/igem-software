@@ -309,6 +309,16 @@ const HardwareApi = {
   },
 
   /**
+   * The tube list createCalibrationPlan would make, in reading order, without creating anything.
+   * Throws a displayable message for the first invalid field, like createCalibrationPlan.
+   * @param {{concentrations_nM: number[], replicates: number, blanks: number}} input
+   * @returns {{slot: number, label: string, sample_type: "blank" | "standard", concentration_nM: number | null}[]}
+   */
+  previewCalibrationPlan(input) {
+    return structuredClone(HardwareLocal.previewCalibrationPlan(structuredClone(input)));
+  },
+
+  /**
    * Fingerprint of a config entered by hand. Throws a displayable message for the first invalid field.
    * @param {{led_current_mA: number, gain: number, atime: number, astep: number, build_id: string}} config
    * @returns {string}

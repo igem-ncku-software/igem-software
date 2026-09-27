@@ -51,7 +51,7 @@ async function showChooser() {
   document.getElementById("batch-summary").hidden = true;
   document.getElementById("curve-title").textContent = "Choose a curve";
   setStepCard(document.getElementById("curve-card"), "current");
-  for (const id of ["blank-card", "sample-card", "results-card"]) {
+  for (const id of ["blank-card", "sample-card", "results-card", "export-card"]) {
     setStepCard(document.getElementById(id), "waiting", "Start a batch first.");
   }
 
@@ -545,7 +545,6 @@ function renderResults() {
     }
   }
 
-  setBlocked(document.getElementById("results-export-button"), document.getElementById("results-export-reason"), null);
   const finish = document.getElementById("batch-finish-button");
   finish.hidden = Boolean(batch.finished_at);
   setBlocked(finish, document.getElementById("batch-finish-reason"), measureReading ? "A read is in progress." : null);
@@ -589,7 +588,10 @@ async function exportBatchCsv(batchId, button, statusEl) {
     hwDownloadCsv(`lasreader-${batchId}-${hwFileStamp()}.csv`, BATCH_CSV_HEADERS, batchCsvRows(exported));
     // Only marked once the file has actually been handed to the browser.
     await HardwareApi.markBatchesExported([batchId]);
-    if (batch && batch.batch_id === batchId) batch = await HardwareApi.getBatch(batchId);
+    if (batch && batch.batch_id === batchId) {
+      batch = await HardwareApi.getBatch(batchId);
+      renderBatch();
+    }
     setHardwareStatus(statusEl, `Exported ${batchId}. Check the download completed before relying on it.`, "success");
   } catch (err) {
     console.error("Batch export failed:", err);
@@ -604,13 +606,29 @@ async function finishBatch() {
   const statusEl = document.getElementById("results-status");
   try {
     batch = await HardwareApi.finishBatch(batch.batch_id);
-    setHardwareStatus(statusEl, `${batch.batch_id} finished. Export it as CSV to keep a copy outside this browser.`, "success");
+    setHardwareStatus(statusEl, `${batch.batch_id} finished.`, "success");
   } catch (err) {
     console.error("Could not finish the batch:", err);
     setHardwareStatus(statusEl, `Could not finish: ${err.message}`, "error");
   }
   renderBatch();
   refreshBatches();
+}
+
+// ---- 5. Export ------------------------------------------------------------------
+
+// Done once the finished batch has been exported, and current again if a tube changes after that
+// (the store clears exported_at). Any batch can still be exported from the Batches list at any time.
+function renderExport() {
+  const card = document.getElementById("export-card");
+  if (!batch.finished_at) {
+    setStepCard(card, "waiting", "Finish the batch first.");
+    return;
+  }
+  setStepCard(card, batch.exported_at ? "done" : "current");
+  document.getElementById("export-state").textContent = batch.exported_at
+    ? `Exported ${formatLocalTime(batch.exported_at)}.`
+    : "Not exported yet.";
 }
 
 // ---- The open batch -------------------------------------------------------------
@@ -622,6 +640,7 @@ function renderBatch() {
   renderBlank();
   renderSamples();
   renderResults();
+  renderExport();
 }
 
 async function openBatch(batchId, alreadyLoaded) {
@@ -718,7 +737,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("results-export-button").addEventListener("click", (event) =>
-    exportBatchCsv(batch.batch_id, event.currentTarget, document.getElementById("results-status")));
+    exportBatchCsv(batch.batch_id, event.currentTarget, document.getElementById("export-status")));
   document.getElementById("batch-finish-button").addEventListener("click", finishBatch);
 
   refreshBatches();
