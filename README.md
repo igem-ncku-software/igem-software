@@ -219,11 +219,13 @@ The hardware pages are one workflow used in order. A step bar at the top of ever
 
 | Step | Page | Purpose |
 |---|---|---|
-| 1 Instrument | `hardware.html` | Whether the reader can measure now and, if not, which link failed (backend → device → sensor / LED); its full configuration; a self-check read of a buffer-only cuvette: pass/fail on dark stability and saturation, with the stray-light level and LED signal |
+| 1 Instrument | `hardware.html` | Connection and self-check status, with the failed link identified (backend → device → sensor / LED); full configuration; a buffer-only self-check of dark stability and saturation, with informational dark level and light − dark readings |
 | 2 Calibrate | `hardware-calibration.html` | Set up a run with its conditions (biosensor strain, induction time) → read the standards tube by tube, or enter recorded data → 4PL fit, excluding tubes only with a reason → save the curve |
 | 3 Curves | `hardware-curves.html` | Every saved curve, what it is valid for, and whether it matches the instrument now |
 | 4 Measure | `hardware-measure.html` | A batch: choose a curve → read a blank → read each sample in replicate tubes → per-sample inferred AHL with a 95% CI, exported as CSV |
 | — | `hardware-data.html` | One backup file for runs, curves and batches; restore; delete everything |
+
+Instrument distinguishes a check not yet run, in progress, passed, needing attention, or incomplete. A pass applies only to dark stability and saturation under the checked configuration; LED response is not verified. A failed retry is shown as incomplete, with any earlier pass labelled as history and its configuration. Checks are not saved, and do not replace calibration or a measurement blank. Run the Instrument regression checks with `node --test tests/frontend/instrument.test.cjs` (Node.js; no server or device required).
 
 Runs, curves, fitting, batches and conversion currently live in the browser's localStorage via `hardware_local.js`, not yet moved to a backend database.
 

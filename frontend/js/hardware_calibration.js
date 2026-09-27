@@ -172,14 +172,19 @@ function showReadStep(manual, entering) {
 function setupConditions() {
   return {
     sensor: document.getElementById("cond-sensor").value.trim(),
-    induction_h: manualNumber(document.getElementById("cond-induction").value),
+    // Optional: empty means not recorded (null), never 0.
+    induction_h: document.getElementById("cond-induction").value.trim() === ""
+      ? null
+      : manualNumber(document.getElementById("cond-induction").value),
     notes: document.getElementById("cond-notes").value.trim(),
   };
 }
 
 function conditionsProblem(c) {
   if (!c.sensor) return "Enter the biosensor strain.";
-  if (!(Number.isFinite(c.induction_h) && c.induction_h > 0)) return "Enter the induction time in hours.";
+  if (c.induction_h !== null && !(Number.isFinite(c.induction_h) && c.induction_h > 0)) {
+    return "Induction time must be a number of hours above 0, or left empty.";
+  }
   return null;
 }
 

@@ -1,7 +1,7 @@
 // =========================================================
 // Backs hardware.html: step 1 of the CAPTURE-Screen workflow, the instrument itself.
 // Target elements:
-//   #status-verdict(-title / -detail)            the one answer to "can I measure now?"
+//   #status-verdict(-title / -detail)            connection and self-check status
 //   #node-{backend,device,sensor,led} / #link-{device,stem,sensor,led}   the signal path
 //   #status-details / #status-config-body       the Current configuration table
 //   #self-check-button / #self-check-reason / #self-check-status / #self-check-result
@@ -21,6 +21,10 @@ let selfCheckRunning = false;
 // {at: Date, fingerprint, problems: string[]} from this page session, or null. The fingerprint is the
 // config the check ran under: a check says nothing about a config it didn't run on.
 let lastSelfCheck = null;
+// Keep the latest incomplete attempt separate from completed checks, so a failed retry
+// cannot restore an earlier pass. Earlier passes are history only, always labelled by config.
+let lastSelfCheckError = null; // {at: Date, message: string}, cleared by a completed check
+let lastPassedSelfCheck = null;
 
 // Grouped "60,000" whatever the browser's locale, like the fixed time format: a de-DE browser
 // would otherwise write "60.000" into an English interface.
@@ -73,7 +77,7 @@ function renderInstrument() {
   if (instrumentStatus) renderConfig(document.getElementById("status-config-body"), instrumentStatus);
 }
 
-// {tone, title, detail}: the reason and what to do, for the first thing that stops a reading.
+// {tone, title, detail}: connection and self-check status, not calibration/measurement readiness.
 function instrumentVerdict() {
   const status = instrumentStatus;
   switch (linkState()) {
@@ -97,19 +101,39 @@ function instrumentVerdict() {
     return { tone: "error", title: "Not ready: AS7341 sensor not responding",
       detail: "Check the I2C wiring. It reconnects automatically within seconds." };
   }
+  if (selfCheckRunning) {
+    return { tone: "warn", title: "Self-check in progress", detail: "Reading dark · light · dark." };
+  }
   if (status.state === "MEASURING") {
     return { tone: "warn", title: "Busy: reading in progress", detail: "Finishes in a few seconds." };
   }
+  const notes = [`Config ${status.config.fingerprint}`];
+  if (status.sensor_ok === null) notes.push("Sensor health not reported by this firmware");
+  if (lastSelfCheckError) {
+    const { at, message } = lastSelfCheckError;
+    return { tone: "warn", title: "Self-check incomplete",
+      detail: [`Read failed at ${formatClockTime(at)}: ${message}. Run it again.`, previousSelfCheckPass(), ...notes].filter(Boolean).join(" · ") };
+  }
   const check = lastSelfCheck?.fingerprint === status.config.fingerprint ? lastSelfCheck : null;
   if (check?.problems.length) {
-    return { tone: "warn", title: "Online, but the last self-check failed",
-      detail: `${capitalize(check.problems.join("; "))} (${formatClockTime(check.at)}). Run it again once fixed.` };
+    return { tone: "warn", title: "Self-check needs attention",
+      detail: [`${capitalize(check.problems.join("; "))} (${formatClockTime(check.at)}). Run it again once fixed.`, previousSelfCheckPass(), ...notes].filter(Boolean).join(" · ") };
   }
-  const notes = [`Config ${status.config.fingerprint}`];
-  if (check) notes.push(`Self-check passed ${formatClockTime(check.at)}`);
-  else notes.push(lastSelfCheck ? "Config changed since the last self-check" : "No self-check this session");
-  if (status.sensor_ok === null) notes.push("Sensor health not reported by this firmware");
-  return { tone: "ok", title: "Ready to measure", detail: notes.join(" · ") };
+  if (check) {
+    return { tone: "ok", title: "Self-check passed",
+      detail: [`Dark readings stable; no light channel saturated (${formatClockTime(check.at)}). LED response is not verified.`, ...notes].join(" · ") };
+  }
+  return lastSelfCheck
+    ? { tone: "warn", title: "Connected · Repeat self-check",
+      detail: ["Config changed since the last completed self-check. Run it again.", ...notes].join(" · ") }
+    : { tone: null, title: "Connected · Self-check not run",
+      detail: ["Run a self-check with buffer before calibrating or measuring.", ...notes].join(" · ") };
+}
+
+function previousSelfCheckPass() {
+  return lastPassedSelfCheck
+    ? `Previous checks passed at ${formatClockTime(lastPassedSelfCheck.at)} (config ${lastPassedSelfCheck.fingerprint})`
+    : "";
 }
 
 // The device's last contact, for the verdict and its node alike.
@@ -289,6 +313,7 @@ function applySelfCheckBlock() {
 }
 
 async function runSelfCheck() {
+  if (selfCheckRunning) return;
   const statusEl = document.getElementById("self-check-status");
   const result = document.getElementById("self-check-result");
 
@@ -296,14 +321,17 @@ async function runSelfCheck() {
   applySelfCheckBlock();
   result.hidden = true;
   setHardwareStatus(statusEl, "Reading...", null);
+  renderVerdict();
 
   try {
     renderSelfCheck(await HardwareApi.runSelfCheck(), result, statusEl);
   } catch (err) {
     console.error("Self-check failed:", err);
-    setHardwareStatus(statusEl, `Read failed: ${err.message}`, "error");
+    lastSelfCheckError = { at: new Date(), message: err.message };
+    setHardwareStatus(statusEl, `Self-check incomplete at ${formatClockTime(lastSelfCheckError.at)}: ${err.message}. Run again.`, "error");
   } finally {
     selfCheckRunning = false;
+    renderVerdict();
     // The block comes from a fresh status, not from how the read went: a failed read says
     // nothing about the sensor, so it leaves the button usable for a retry.
     await refreshInstrument();
@@ -376,11 +404,13 @@ function renderSelfCheck(check, container, statusEl) {
   const time = formatClockTime(at);
 
   lastSelfCheck = { at, fingerprint: check.config.fingerprint, problems: problems.map((p) => p.text) };
+  lastSelfCheckError = null;
   if (problems.length) {
     const advice = [...new Set(problems.map((p) => p.advice))].join(" ");
     setHardwareStatus(statusEl, `Failed at ${time}: ${problems.map((p) => p.text).join("; ")}. ${advice}`, "error");
   } else {
-    setHardwareStatus(statusEl, `Passed at ${time}. The dark reading is steady and no channel is saturated.`, "success");
+    lastPassedSelfCheck = lastSelfCheck;
+    setHardwareStatus(statusEl, `Checks passed at ${time}: dark readings are stable; no light channel is saturated.`, "success");
   }
 
   const list = hwEl("ul", "check-list");
@@ -388,8 +418,8 @@ function renderSelfCheck(check, container, statusEl) {
     checkRow("Dark stability", driftPeak ? `${countsText(driftPeak.value, true)} (limit ±${DARK_DRIFT_TOLERANCE_COUNTS})` : "--",
       result.stable ? "pass" : "fail"),
     checkRow("Peak signal", `${formatPercent(lightPeak.value / fullScale)} of full scale`, result.saturated ? "fail" : "pass"),
-    checkRow("Stray light", darkMax ? countsText(peakChannel(darkMax).value) : "--", null),
-    checkRow("LED signal", net ? countsText(peakChannel(net).value, true) : "--", null),
+    checkRow("Dark level", darkMax ? countsText(peakChannel(darkMax).value) : "--", null),
+    checkRow("Light − dark", net ? countsText(peakChannel(net).value, true) : "--", null),
   );
 
   // The full per-channel numbers stay one click away: the list summarises, the table is the record.
@@ -406,7 +436,8 @@ function renderSelfCheck(check, container, statusEl) {
     ]),
   );
 
-  container.replaceChildren(list, raw);
+  const scope = hwEl("p", "plan-meta", "Dark level and light − dark are informational; LED response is not verified.");
+  container.replaceChildren(list, scope, raw);
   container.hidden = false;
 }
 
