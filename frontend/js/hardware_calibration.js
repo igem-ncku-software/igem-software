@@ -569,10 +569,14 @@ async function readPlanTarget() {
 
   const statusEl = document.getElementById("plan-read-status");
   planReading = true;
-  renderAll();
-  setHardwareStatus(statusEl, `Reading tube ${item.slot} (${item.label})...`, null);
 
   try {
+    // Inside the try on purpose: an exception here must still reach `finally` and reset
+    // planReading, or a rendering bug leaves Read disabled for good, with no request sent and
+    // nothing on screen saying why.
+    renderAll();
+    setHardwareStatus(statusEl, `Reading tube ${item.slot} (${item.label})...`, null);
+
     const input = {
       sample_id: `${plan.plan_id}-${String(item.slot).padStart(2, "0")}`,
       sample_type: item.sample_type,
@@ -672,7 +676,7 @@ function groupPlanItems(items) {
 }
 
 function isExcluded(item) {
-  return fitExclusions.has(item.measurement.sample_id);
+  return item.measurement !== null && fitExclusions.has(item.measurement.sample_id);
 }
 
 function missingReasonCount() {
@@ -700,6 +704,11 @@ function isStaleTube(item) {
 function blockedFitReason() {
   if (fitState === "fitted") return "Already fitted with these exclusions. Change an exclusion to fit again.";
   if (fitState === "saved") return "This fit is saved. Use “Fit again with different exclusions” below to start a new one.";
+  // Every check below reads a tube's own measurement, so none of them can run until every tube
+  // has one: an unread tube's measurement is null. renderAll() calls this on every render, not
+  // only once the Fit step is open.
+  const pending = plan.items.filter((it) => !it.measurement).length;
+  if (pending > 0) return `${plural(pending, "tube")} still unread.`;
   const counted = plan.items.filter((it) => !isExcluded(it));
   const stale = counted.filter((it) => it.measurement.config_fingerprint !== plan.config_fingerprint).length;
   if (stale > 0) return `${plural(stale, "tube")} read under another config (marked). Exclude or re-read them.`;
