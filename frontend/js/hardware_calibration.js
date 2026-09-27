@@ -39,6 +39,9 @@ let fitState = "unfitted";        // unfitted | fitted | saved
 let fitCurveResult = null;        // the CalibrationCurve returned by fitCurve / saveCurve
 let fitBusy = false;
 let fitHasFittedOnce = false;
+// A new fit is under way on this page ("Fit again", or an exclusion changed): steps 4 and 5 then
+// follow that fit, not the curves this run already saved, so they don't read as done mid-refit.
+let refitting = false;
 let fitChart = null;
 const fitExclusions = new Map();  // sample_id -> reason; present once ticked, reason may not be filled in yet
 
@@ -591,8 +594,10 @@ async function readPlanTarget() {
     plan = await HardwareApi.recordPlanMeasurement(plan.plan_id, item.slot, m);
     lastReadSlot = item.slot;
     rereadSlot = null;
-    // The data under any fit just changed, so the fit no longer describes it.
+    // The data under any fit just changed, so the fit no longer describes it, and a curve saved
+    // before this reading doesn't either: Fit is the next step again.
     if (fitState !== "unfitted") discardFit();
+    refitting = true;
 
     const recorded = plan.items.find((it) => it.slot === item.slot).measurement;
     const flagText = recorded.flags.length ? ` Flags: ${recorded.flags.join(", ")}.` : "";
@@ -902,6 +907,7 @@ function renderFitTable() {
 }
 
 function toggleExclusion(sampleId, checked) {
+  refitting = true;
   if (checked) fitExclusions.set(sampleId, fitExclusions.get(sampleId) ?? "");
   else fitExclusions.delete(sampleId);
 
@@ -981,11 +987,8 @@ function renderFitControls() {
     binding.append(`Strain ${plan.conditions.sensor} · Config `, hwFingerprint(plan.config_fingerprint), ` · Signal ${plan.signal}`);
   }
 
-  // Once a curve from this run exists, the step's one way on is the next workflow step, Curves,
-  // with the reminder that the curve lives only in this browser.
-  const saved = !fitted && planCurves.length > 0;
-  document.getElementById("save-next-button").hidden = !saved;
-  document.getElementById("save-backup").hidden = !saved;
+  // Once a curve from this run exists: the reminder that it lives only in this browser.
+  document.getElementById("save-backup").hidden = fitted || planCurves.length === 0;
 
   const refit = document.getElementById("refit-button");
   refit.hidden = fitState !== "saved";
@@ -1039,12 +1042,11 @@ async function saveFit() {
   } finally {
     fitBusy = false;
     renderAll();
-    // Enter keeps working: after saving it moves on to Curves.
-    if (fitState === "saved") document.getElementById("save-next-button").focus();
   }
 }
 
 function startRefit() {
+  refitting = true;
   discardFit();
   setHardwareStatus(document.getElementById("fit-status"), "", null);
   setHardwareStatus(document.getElementById("save-status"), "", null);
@@ -1073,7 +1075,7 @@ function renderAll() {
   if (!complete) {
     setStepCard(fitCard, "waiting", `${pending} of ${plan.items.length} tubes are still unread.`);
   } else {
-    setStepCard(fitCard, fitState !== "unfitted" || planCurves.length > 0 ? "done" : "current");
+    setStepCard(fitCard, fitState !== "unfitted" || (planCurves.length > 0 && !refitting) ? "done" : "current");
     renderFitChart();
     renderFitMetrics();
     renderFitTable();
@@ -1081,7 +1083,7 @@ function renderAll() {
 
   const saveCard = document.getElementById("save-card");
   if (fitState === "fitted") setStepCard(saveCard, "current");
-  else if (fitState === "saved" || planCurves.length > 0) setStepCard(saveCard, "done");
+  else if (fitState === "saved" || (planCurves.length > 0 && !refitting)) setStepCard(saveCard, "done");
   else setStepCard(saveCard, "waiting", complete ? "Fit the curve first." : "Read every tube, then fit.");
   renderFitControls();
   renderSavedCurves();
@@ -1467,7 +1469,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("setup-next-button").addEventListener("click", goToManualEntry);
   document.getElementById("plan-next-button").addEventListener("click", goToFit);
   document.getElementById("fit-next-button").addEventListener("click", goToSave);
-  document.getElementById("save-next-button").addEventListener("click", () => { location.href = "hardware-curves.html"; });
   document.getElementById("manual-entry").addEventListener("input", updateSetupControls);
   document.getElementById("manual-entry").addEventListener("change", updateSetupControls);
   document.getElementById("manual-create-button").addEventListener("click", (event) =>
