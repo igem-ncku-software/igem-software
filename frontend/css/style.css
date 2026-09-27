@@ -443,6 +443,10 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 /* Calibrate's Source: the same 16px under the heading as every other step card. The choices are
    <label>s, which otherwise take the global label margin on top of the list's own. */
 #source-choice, #source-choice .choice-list, #source-choice .choice { margin-top: 0; }
+/* Measure's curve list: the same fix as Calibrate's Source, and for the same reason - a
+   .plain-fieldset's own margin plus .choice-list's stacks an extra 12px onto the status
+   message's own spacing above it. */
+#curve-choice, #curve-choice .choice-list, #curve-choice .choice { margin-top: 0; }
 #plan-resume { margin: 0 0 12px; }
 /* A status line led by a health dot, kept level with the first line when the text wraps. */
 .source-status { display: flex; align-items: flex-start; gap: 8px; }
