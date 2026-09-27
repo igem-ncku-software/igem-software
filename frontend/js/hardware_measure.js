@@ -1,34 +1,302 @@
 // =========================================================
-// Backs hardware-measure.html: measures one sample tube, showing the sfGFP signal, the
-// inferred AHL concentration, QC flags, a ten-channel bar chart, and config provenance.
-// Target elements:
-//   #measure-curve (the curve currently in use, top right)
-//   #measure-form / #measure-sample-id / #measure-sample-type
-//   #measure-known-field / #measure-known-concentration / #measure-read-button
-//   #measure-status / #measure-result / #measure-signal(-sub)
-//   #measure-concentration(-sub) / #measure-flags / #measure-channel-chart / #measure-provenance
-//   #log-count / #log-export-button(-reason) / #log-status / #log-empty
-//   #log-table-wrapper / #log-table-body
-// Backing API: getActiveCurve / getDeviceStatus / readSample / invert /
-//   recordMeasurement / listMeasurements / markMeasurementsExported
+// Backs hardware-measure.html: step 4 of the CAPTURE-Screen workflow. A batch is one sitting at
+// the instrument, walked through four numbered steps:
+//   1 Curve    chosen once; only curves matching the instrument's config and signal can start one
+//   2 Blank    the same cells without AHL, before any sample (and the HIGH_SCATTER baseline)
+//   3 Samples  each sample read in replicate tubes, the next tube pinned at the top
+//   4 Results  per sample, the mean of its counted tubes converted once, with a 95% CI
+// A step that can't start yet stays visible with what it is waiting for.
 //
-// The inverse estimate only shows a numeric concentration when status === "ok". Every other
-// status gets no point estimate at all, and nothing is ever extrapolated outside the curve's range.
+// Every tube is stored the moment it is read — it is already spent — before anything is drawn.
+// A tube can be left out only with a reason, and stays in the batch and the export. A numeric
+// concentration appears only for status "ok": nothing is ever extrapolated outside the range.
 //
-// Every reading is appended to the browser-local log before it is drawn, so a rendering fault
-// can't cost a tube. The log is the working copy; the CSV export is the one that survives a
-// cleared browser, which is why the unexported count sits in front of the user at all times.
+// Target elements: #curve-card / #batch-* family, #blank-* family, #sample-* / #last-tube-* family,
+//   #results-* family, #batches-* family
+// Backing API: listCurves / getDeviceStatus / getCurrentSignal / createBatch / getBatch /
+//   listBatches / readSample / recordBatchReading / setBatchTubeExclusion / finishBatch /
+//   markBatchesExported
 // =========================================================
 
+let batch = null;
+let deviceFingerprint = null;
+let deviceSensorOk = null;
+let deviceConfig = null;
+let measureReading = false;
 let channelChart = null;
+const openSamples = new Set();
 
-// Picking a sample type does more than label the row, and only Blank's effect outlives the
-// reading: it becomes the scatter baseline every later tube under this config is judged against.
-// Unknown and Standard change only how this one reading is treated, which the page already shows
-// (the known-concentration field, the QC flags), so neither needs a note here.
-const SAMPLE_TYPE_NOTE = {
-  blank: "Sets the scatter baseline for this instrument config: later readings above twice this tube's scatter are flagged HIGH_SCATTER.",
-};
+// ---- 1. Curve -------------------------------------------------------------
+
+let chooserCurves = [];
+let chooserSignal = null;
+
+function selectedCurveId() {
+  return document.querySelector('input[name="batch-curve"]:checked')?.value ?? null;
+}
+
+function updateBatchStartControls() {
+  let reason = null;
+  if (chooserCurves.length === 0) reason = "No saved curves. Calibrate first.";
+  else if (deviceFingerprint === null) reason = "Instrument unreachable, so no curve can be checked against its config.";
+  else if (!selectedCurveId()) reason = "Choose a usable curve.";
+  const tubes = Number(document.getElementById("batch-tubes").value);
+  if (!reason && !(Number.isInteger(tubes) && tubes >= 1 && tubes <= 10)) reason = "Tubes per sample must be 1 to 10.";
+  setBlocked(document.getElementById("batch-start-button"), document.getElementById("batch-start-reason"), reason);
+}
+
+async function showChooser() {
+  batch = null;
+  document.getElementById("batch-form").hidden = false;
+  document.getElementById("batch-summary").hidden = true;
+  document.getElementById("curve-title").textContent = "Choose a curve";
+  setStepCard(document.getElementById("curve-card"), "current");
+  for (const id of ["blank-card", "sample-card", "results-card"]) {
+    setStepCard(document.getElementById(id), "waiting", "Start a batch first.");
+  }
+
+  const statusEl = document.getElementById("batch-curves-status");
+  const [curvesResult, statusResult, signalResult] = await Promise.allSettled([
+    HardwareApi.listCurves(),
+    HardwareApi.getDeviceStatus(),
+    HardwareApi.getCurrentSignal(),
+  ]);
+  chooserCurves = curvesResult.status === "fulfilled" ? curvesResult.value : [];
+  deviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  chooserSignal = signalResult.status === "fulfilled" ? signalResult.value : null;
+
+  if (curvesResult.status === "rejected") {
+    setHardwareStatus(statusEl, `Could not load curves: ${curvesResult.reason.message}`, "error");
+  } else if (chooserCurves.length === 0) {
+    statusEl.textContent = "No saved curves yet. ";
+    statusEl.className = "status-message warn";
+    statusEl.appendChild(hwLink("hardware-calibration.html", "Calibrate →"));
+  } else if (deviceFingerprint === null) {
+    setHardwareStatus(statusEl, `Instrument unreachable: ${statusResult.reason.message}`, "warn");
+  } else {
+    statusEl.textContent = "";
+    statusEl.className = "status-message";
+    statusEl.hidden = true;
+  }
+
+  // The curve asked for by ?curve= is picked when it can be; otherwise the newest usable one.
+  const wanted = hardwareQueryParam("curve");
+  const usable = chooserCurves.filter((curve) => !curveBlockReason(curve, deviceFingerprint, chooserSignal));
+  const preselect = usable.find((curve) => curve.curve_id === wanted) ?? usable[0] ?? null;
+
+  const list = document.getElementById("batch-curve-list");
+  list.innerHTML = "";
+  for (const curve of chooserCurves) {
+    const blocked = curveBlockReason(curve, deviceFingerprint, chooserSignal);
+    const li = hwEl("li");
+    const label = hwEl("label", "choice");
+    const input = hwEl("input");
+    input.type = "radio";
+    input.name = "batch-curve";
+    input.value = curve.curve_id;
+    input.disabled = Boolean(blocked);
+    input.checked = preselect?.curve_id === curve.curve_id;
+    const text = hwEl("span");
+    text.append(
+      hwEl("span", "choice-title", `${formatConditions(curve.conditions)}`),
+      hwEl("span", "choice-meta",
+        `${curve.curve_id} · EC50 ${formatConcentration(curve.params.ec50_nM)} · LOD ${formatConcentration(curve.lod_nM)} · `
+        + `range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · fitted ${formatLocalTime(curve.fitted_at)}`),
+    );
+    if (blocked) text.appendChild(hwEl("span", "choice-meta", `Not usable: ${blocked}`));
+    label.append(input, text);
+    li.appendChild(label);
+    list.appendChild(li);
+  }
+  updateBatchStartControls();
+}
+
+async function startBatch(event) {
+  event.preventDefault();
+  const button = document.getElementById("batch-start-button");
+  const statusEl = document.getElementById("batch-start-status");
+  if (button.disabled) return;
+
+  button.disabled = true;
+  setHardwareStatus(statusEl, "Starting batch...", null);
+  try {
+    const created = await HardwareApi.createBatch({
+      curve_id: selectedCurveId(),
+      tubes_per_sample: Number(document.getElementById("batch-tubes").value),
+      notes: document.getElementById("batch-notes").value,
+    });
+    history.replaceState(null, "", `?batch=${encodeURIComponent(created.batch_id)}`);
+    setHardwareStatus(statusEl, "", null);
+    await openBatch(created.batch_id, created);
+    refreshBatches();
+    refreshHardwareSteps();
+  } catch (err) {
+    console.error("Could not start batch:", err);
+    setHardwareStatus(statusEl, `Could not start the batch: ${err.message}`, "error");
+    updateBatchStartControls();
+  }
+}
+
+function renderBatchSummary() {
+  document.getElementById("curve-title").textContent = batch.batch_id;
+  const tbody = document.getElementById("batch-summary-body");
+  tbody.innerHTML = "";
+  const { curve } = batch;
+  appendKvRow(tbody, "Biosensor strain", curve.conditions.sensor);
+  appendKvRow(tbody, "Induction time", formatHours(curve.conditions.induction_h));
+  const curveCell = hwEl("span");
+  curveCell.append(`${curve.curve_id} · LOD ${formatConcentration(curve.lod_nM)} · usable range `
+    + `${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])}`);
+  appendKvRow(tbody, "Curve", curveCell);
+  const config = hwEl("span");
+  config.append(hwFingerprint(curve.config_fingerprint), ` · signal ${curve.signal}`);
+  appendKvRow(tbody, "Config", config);
+  appendKvRow(tbody, "Tubes per sample", String(batch.tubes_per_sample));
+  if (batch.notes) appendKvRow(tbody, "Notes", batch.notes);
+  appendKvRow(tbody, "Started", formatLocalTime(batch.created_at));
+  if (batch.finished_at) appendKvRow(tbody, "Finished", formatLocalTime(batch.finished_at));
+}
+
+// ---- Shared: why a read can't happen now ---------------------------------------
+
+function readBlockReason() {
+  if (batch.finished_at) return "This batch is finished. Start a new batch to read more.";
+  if (deviceFingerprint === null) return "Instrument unreachable.";
+  const sensor = sensorReading(deviceSensorOk).blocks;
+  if (sensor) return sensor;
+  if (deviceFingerprint !== batch.curve.config_fingerprint) {
+    return `The instrument now runs config ${deviceFingerprint}, not the curve's ${batch.curve.config_fingerprint}. Readings would not count.`;
+  }
+  return null;
+}
+
+// A tube is left out automatically when it was read under another config or signal; the user
+// can't count it back in.
+function tubeAutoExcluded(tube) {
+  return tube.measurement.config_fingerprint !== batch.curve.config_fingerprint
+    || tube.measurement.signal !== batch.curve.signal;
+}
+
+// "Counted", or the reason it isn't, plus the control to change that while the batch is open.
+function tubeCountedCell(tube) {
+  const td = hwEl("td");
+  const m = tube.measurement;
+  if (tube.excluded_reason !== null) {
+    td.append(hwEl("span", "flag-chip warn", "Left out"), " ", hwEl("span", "cell-note", tube.excluded_reason));
+    if (!batch.finished_at && !tubeAutoExcluded(tube)) {
+      const back = hwEl("button", "btn-secondary table-button", "Count again");
+      back.type = "button";
+      back.addEventListener("click", () => setTubeExclusion(m.sample_id, null));
+      td.append(" ", back);
+    }
+    return td;
+  }
+  td.appendChild(hwEl("span", "flag-chip ok", "Counted"));
+  if (batch.finished_at) return td;
+  const reason = hwEl("input", "table-input");
+  reason.type = "text";
+  reason.placeholder = "Reason to leave out";
+  reason.setAttribute("aria-label", `Reason to leave out ${m.sample_id}`);
+  const leave = hwEl("button", "btn-secondary table-button", "Leave out");
+  leave.type = "button";
+  leave.disabled = true;
+  reason.addEventListener("input", () => { leave.disabled = !reason.value.trim(); });
+  leave.addEventListener("click", () => setTubeExclusion(m.sample_id, reason.value));
+  td.append(" ", reason, " ", leave);
+  return td;
+}
+
+async function setTubeExclusion(sampleId, reason) {
+  try {
+    batch = await HardwareApi.setBatchTubeExclusion(batch.batch_id, sampleId, reason);
+    setHardwareStatus(document.getElementById("results-status"),
+      reason === null ? `${sampleId} counts again.` : `${sampleId} left out: ${reason.trim()}`, "success");
+  } catch (err) {
+    console.error("Could not change the tube:", err);
+    setHardwareStatus(document.getElementById("results-status"), `Could not change ${sampleId}: ${err.message}`, "error");
+  }
+  renderBatch();
+  refreshBatches();
+}
+
+// ---- 2. Blank -----------------------------------------------------------------
+
+function renderBlank() {
+  const counted = batch.blank_estimate.n;
+  setStepCard(document.getElementById("blank-card"), counted > 0 ? "done" : "current");
+
+  setBlocked(document.getElementById("blank-read-button"), document.getElementById("blank-read-reason"), readBlockReason());
+  if (measureReading) document.getElementById("blank-read-button").disabled = true;
+
+  // The blank should read below the curve's LOD. If it converts to a concentration, the cells,
+  // the medium or the instrument has moved since the curve was made, and the samples would carry it.
+  const check = document.getElementById("blank-check");
+  const estimate = batch.blank_estimate;
+  check.hidden = counted === 0;
+  if (estimate.status === "below_lod") {
+    setHardwareStatus(check, `Blank mean ${formatFluorescence(estimate.mean_signal)} reads below the curve's LOD, as it should.`, "success");
+  } else if (estimate.status === "ok" || estimate.status === "above_range") {
+    setHardwareStatus(check,
+      `Blank mean reads as ${formatEstimate(estimate, batch.curve)} AHL. Check for AHL carry-over or drift before reading samples.`, "warn");
+  }
+
+  document.getElementById("blank-table-wrapper").hidden = batch.blanks.length === 0;
+  const tbody = document.getElementById("blank-table-body");
+  tbody.innerHTML = "";
+  for (const tube of batch.blanks) {
+    const m = tube.measurement;
+    const qc = hwEl("td");
+    qc.appendChild(renderFlagChips(m.flags));
+    const row = hwEl("tr");
+    row.classList.toggle("is-excluded", tube.excluded_reason !== null);
+    row.append(
+      hwEl("td", null, m.sample_id),
+      hwEl("td", null, formatLocalTime(m.timestamp_utc)),
+      hwEl("td", null, formatFluorescence(m.fluorescence)),
+      hwEl("td", null, formatFluorescence(m.scatter)),
+      qc,
+      tubeCountedCell(tube),
+    );
+    tbody.appendChild(row);
+  }
+}
+
+// ---- 3. Samples -----------------------------------------------------------------
+
+function sampleTubeCount(name) {
+  return batch.samples.find((s) => s.name === name)?.tubes.length ?? 0;
+}
+
+function nextSampleId(id) {
+  const match = id.match(/^(.*?)(\d+)$/);
+  if (!match) return `${id}-2`;
+  return match[1] + String(Number(match[2]) + 1).padStart(match[2].length, "0");
+}
+
+function renderSamples() {
+  const card = document.getElementById("sample-card");
+  if (batch.blank_estimate.n === 0) {
+    setStepCard(card, "waiting", "Read at least one blank first.");
+    return;
+  }
+  setStepCard(card, batch.finished_at ? "done" : "current");
+
+  const name = document.getElementById("sample-name").value.trim();
+  const tube = sampleTubeCount(name) + 1;
+  const n = batch.tubes_per_sample;
+  document.getElementById("sample-next-value").textContent = !name
+    ? "Enter a sample name"
+    : tube <= n ? `${name} · tube ${tube} of ${n}` : `${name} · extra tube ${tube}`;
+  document.getElementById("sample-next").classList.toggle("is-done", Boolean(batch.finished_at));
+
+  const button = document.getElementById("sample-read-button");
+  button.textContent = name ? `Read ${name} tube ${tube}` : "Read";
+  setBlocked(button, document.getElementById("sample-read-reason"), readBlockReason() ?? (name ? null : "Enter the sample name."));
+  if (measureReading) button.disabled = true;
+  document.getElementById("sample-name").disabled = Boolean(batch.finished_at);
+}
+
+// ---- The last tube's detail: signal, flags, all ten channels, and the config it was read under ----
 
 // Draws a text label above the F4 / F3 bars. Chart.js has no built-in annotation support,
 // and the plugin would be a new dependency, so this draws it manually.
@@ -52,108 +320,6 @@ const channelAnnotationPlugin = {
   },
 };
 
-function renderCurveChip(curve, config) {
-  const el = document.getElementById("measure-curve");
-  el.innerHTML = "";
-  el.appendChild(hwEl("span", "curve-chip-label", "Curve in use"));
-
-  if (!curve) {
-    el.append(hwEl("strong", null, "No active curve"), hwLink("hardware-calibration.html", "Run a calibration →"));
-    return;
-  }
-
-  const stale = config && curve.config_fingerprint !== config.fingerprint;
-  const bound = hwEl("span");
-  bound.append("Config ", hwFingerprint(curve.config_fingerprint));
-  if (stale) bound.append(" ", hwEl("span", "flag-chip error", "stale"));
-
-  el.append(
-    hwEl("strong", null, curve.curve_id),
-    hwEl("span", null, `Fitted ${formatLocalTime(curve.fitted_at)}${curve.source === "manual" ? " · manual entry" : ""}`),
-    // The curve only applies to a sample grown to the same timepoint, so it belongs next to the
-    // config the curve is bound to, not only on the Curves page.
-    hwEl("span", null, `Timepoint ${curve.timepoint}`),
-    bound,
-  );
-}
-
-// Blocked with a reason rather than left to fail: without the AS7341 every read comes back
-// sensor_offline. An unreachable device leaves sensor_ok unknown, which blocks nothing.
-function applySensorBlock(sensorOk) {
-  setBlocked(document.getElementById("measure-read-button"),
-    document.getElementById("measure-read-reason"), sensorReading(sensorOk).blocks);
-}
-
-// The curve itself should still show when the device is unreachable, just without a stale check.
-async function refreshCurveChip() {
-  const [curveResult, statusResult] = await Promise.allSettled([
-    HardwareApi.getActiveCurve(),
-    HardwareApi.getDeviceStatus(),
-  ]);
-  // Before the curve: whether reading is possible doesn't depend on there being a curve.
-  applySensorBlock(statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null);
-  if (curveResult.status === "rejected") {
-    document.getElementById("measure-curve").textContent = `Curve unavailable: ${curveResult.reason.message}`;
-    return;
-  }
-  renderCurveChip(curveResult.value, statusResult.status === "fulfilled" ? statusResult.value.config : null);
-}
-
-// Recovery = inferred / known: the one number that says whether the curve still reads true on a
-// tube whose answer is already known. Needs a point estimate, so only status "ok" qualifies, and a
-// 0 nM standard has nothing to divide by.
-function recoveryPercent(measurement, estimate) {
-  if (measurement.sample_type !== "standard" || estimate.status !== "ok") return null;
-  if (!(measurement.known_concentration_nM > 0)) return null;
-  return formatPercent(estimate.concentration_nM / measurement.known_concentration_nM);
-}
-
-function renderEstimate(estimate, curve, measurement) {
-  const value = document.getElementById("measure-concentration");
-  const sub = document.getElementById("measure-concentration-sub");
-  value.classList.remove("is-message");
-  sub.innerHTML = "";
-  document.getElementById("measure-known-sub")?.remove();
-
-  switch (estimate.status) {
-    case "ok":
-      value.textContent = formatConcentration(estimate.concentration_nM);
-      sub.textContent = `95% CI ${formatConcentrationInterval(estimate.ci95_nM)} · curve ${estimate.curve_id}`;
-      break;
-    case "below_lod":
-      // range_nM.min = max(LOD, lowest standard), which usually just equals the LOD.
-      value.textContent = curve ? `< ${formatConcentration(curve.range_nM.min)}` : "< LOD";
-      sub.textContent = curve
-        ? `Below the curve's lower limit (LOD ${formatConcentration(curve.lod_nM)}). No point estimate.`
-        : "Below LOD. No point estimate.";
-      break;
-    case "above_range":
-      value.textContent = curve ? `> ${formatConcentration(curve.range_nM.max)}` : "> range";
-      sub.textContent = "Above the calibrated range. No point estimate; dilute and read again.";
-      break;
-    case "no_curve":
-      value.textContent = "No active curve";
-      value.classList.add("is-message");
-      sub.appendChild(hwLink("hardware-calibration.html", "Run a calibration →"));
-      break;
-    case "config_mismatch":
-      value.textContent = "Instrument config changed, curve not applicable";
-      value.classList.add("is-message");
-      sub.appendChild(hwLink("hardware-calibration.html", "Rebuild the curve →"));
-      break;
-    default:
-      value.textContent = "--";
-  }
-
-  if (measurement.sample_type === "standard") {
-    const recovery = recoveryPercent(measurement, estimate);
-    const known = hwEl("span", "sensor-stat-sub",
-      `Known: ${formatConcentration(measurement.known_concentration_nM)}${recovery ? ` · recovery ${recovery}` : ""}`);
-    known.id = "measure-known-sub";
-    sub.after(known);
-  }
-}
-
 function renderChannelChart(raw) {
   const canvas = document.getElementById("measure-channel-chart");
   if (channelChart) channelChart.destroy();
@@ -165,12 +331,6 @@ function renderChannelChart(raw) {
   const ink = cssVar("--text");
   const rule = cssVar("--border");
 
-  const colors = HARDWARE_CHANNELS.map(({ key }) => {
-    if (key === "F4") return accent;
-    if (key === "F3") return gold;
-    return muted;
-  });
-
   channelChart = new Chart(canvas, {
     type: "bar",
     data: {
@@ -178,7 +338,7 @@ function renderChannelChart(raw) {
       datasets: [{
         label: "Basic counts",
         data: HARDWARE_CHANNELS.map(({ key }) => raw[key]),
-        backgroundColor: colors,
+        backgroundColor: HARDWARE_CHANNELS.map(({ key }) => (key === "F4" ? accent : key === "F3" ? gold : muted)),
         borderRadius: 4,
       }],
     },
@@ -188,11 +348,7 @@ function renderChannelChart(raw) {
       animation: false,
       layout: { padding: { top: 8 } },
       scales: {
-        x: {
-          title: { display: true, text: "Channel center wavelength (nm)", color: ink },
-          grid: { display: false },
-          ticks: { color: muted },
-        },
+        x: { title: { display: true, text: "Channel center wavelength (nm)", color: ink }, grid: { display: false }, ticks: { color: muted } },
         y: {
           beginAtZero: true,
           grace: "12%", // leaves room for the label text above the bars
@@ -204,270 +360,369 @@ function renderChannelChart(raw) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (context) => `${formatFluorescence(context.parsed.y)} ${HARDWARE_FLUORESCENCE_UNIT}` } },
-        channelAnnotations: {
-          annotations: {
-            F4: { text: "sfGFP 510 nm", color: accent },
-            F3: { text: "leakage", color: goldInk },
-          },
-        },
+        channelAnnotations: { annotations: { F4: { text: "sfGFP 510 nm", color: accent }, F3: { text: "leakage", color: goldInk } } },
       },
     },
     plugins: [channelAnnotationPlugin],
   });
 }
 
-function renderProvenance(m, config) {
-  const el = document.getElementById("measure-provenance");
+function renderProvenance(m) {
+  const el = document.getElementById("last-tube-provenance");
   el.innerHTML = "";
-
   const item = (label, value) => {
     const span = hwEl("span");
     span.append(hwEl("b", null, `${label} `), value);
     el.appendChild(span);
   };
-
   // The current config details only describe this reading if the config hasn't changed; otherwise all that can be shown is the fingerprint.
-  if (config && config.fingerprint === m.config_fingerprint) {
-    item("LED", `${config.led_current_mA} mA`);
-    item("Gain", `${config.gain}×`);
-    item("ATIME / ASTEP", `${config.atime} / ${config.astep}`);
-    item("Build", config.build_id);
-    item("Firmware", config.firmware_version);
+  if (deviceConfig && deviceConfig.fingerprint === m.config_fingerprint) {
+    item("LED", `${deviceConfig.led_current_mA} mA`);
+    item("Gain", `${deviceConfig.gain}×`);
+    item("ATIME / ASTEP", `${deviceConfig.atime} / ${deviceConfig.astep}`);
+    item("Build", deviceConfig.build_id);
   } else {
     item("Config details", "unavailable (the instrument config changed after this read)");
   }
   item("Config", hwFingerprint(m.config_fingerprint));
 }
 
-function nextSampleId(id) {
-  const match = id.match(/^(.*?)(\d+)$/);
-  if (!match) return id;
-  return match[1] + String(Number(match[2]) + 1).padStart(match[2].length, "0");
+function renderLastTube(m, label) {
+  document.getElementById("last-tube").hidden = false;
+  document.getElementById("last-tube-heading").textContent = `${label} · ${formatLocalTime(m.timestamp_utc)}`;
+  document.getElementById("last-tube-signal-label").textContent = `sfGFP signal · ${m.signal}`;
+  document.getElementById("last-tube-signal").textContent = `${formatFluorescence(m.fluorescence)} ± ${formatFluorescence(m.fluorescence_sd)}`;
+  document.getElementById("last-tube-signal-sub").textContent =
+    `${HARDWARE_FLUORESCENCE_UNIT} (± read-noise SD) · scatter ${formatFluorescence(m.scatter)}`;
+  const flags = document.getElementById("last-tube-flags");
+  flags.innerHTML = "";
+  flags.appendChild(renderFlagChips(m.flags));
+  renderChannelChart(m.raw);
+  renderProvenance(m);
 }
 
-// ---- Reading log ---------------------------------------------------------
+// ---- Reading a tube (blank or sample) -----------------------------------------------
 
-const LOG_TYPE_LABEL = { unknown: "Unknown", standard: "Standard", blank: "Blank" };
+async function readTube(role) {
+  if (measureReading) return;
+  const name = role === "sample" ? document.getElementById("sample-name").value.trim() : null;
+  const statusEl = document.getElementById(role === "blank" ? "blank-status" : "sample-status");
+  const index = role === "blank" ? batch.blanks.length + 1 : sampleTubeCount(name) + 1;
+  const sampleId = role === "blank"
+    ? `${batch.batch_id}-BLANK-${index}`
+    : `${batch.batch_id}-${name}-${index}`;
+  const label = role === "blank" ? `Blank ${index}` : `${name} tube ${index}`;
 
-// One row per reading, holding everything needed to read it back without this browser: the
-// signal, the estimate as reported, the curve's limits at the time, and every raw channel.
-const LOG_CSV_HEADERS = [
-  "record_id", "sample_id", "timestamp_utc", "sample_type", "known_concentration_nM",
-  "fluorescence", "fluorescence_sd", "scatter",
-  "estimate_status", "inferred_nM", "ci95_low_nM", "ci95_high_nM",
-  "curve_id", "curve_timepoint", "curve_lod_nM", "curve_range_min_nM", "curve_range_max_nM",
-  "flags", "config_fingerprint", "source",
-  ...HARDWARE_CHANNELS.map(({ key }) => key),
-];
+  measureReading = true;
+  renderBatch();
+  setHardwareStatus(statusEl, `Reading ${label}...`, null);
 
-// Same rule as the result card: a number only for "ok", and never an extrapolation.
-function logEstimateText(record) {
-  const { estimate, curve } = record;
-  switch (estimate.status) {
-    case "ok": return formatConcentration(estimate.concentration_nM);
-    case "below_lod": return curve ? `< ${formatConcentration(curve.range_nM.min)}` : "< LOD";
-    case "above_range": return curve ? `> ${formatConcentration(curve.range_nM.max)}` : "> range";
-    case "no_curve": return "No curve";
-    case "config_mismatch": return "Config changed";
-    default: return "--";
+  let sensorOk;
+  try {
+    const [m, status] = await Promise.all([
+      HardwareApi.readSample({ sample_id: sampleId, sample_type: role === "blank" ? "blank" : "unknown" }),
+      HardwareApi.getDeviceStatus(),
+    ]);
+    sensorOk = status.sensor_ok;
+    deviceFingerprint = status.config.fingerprint;
+    deviceConfig = status.config;
+    // Stored before anything is drawn: the tube is already spent, so the reading must be kept
+    // even if rendering it fails.
+    batch = await HardwareApi.recordBatchReading(batch.batch_id, role, name, m);
+
+    const stored = role === "blank"
+      ? batch.blanks[batch.blanks.length - 1]
+      : batch.samples.find((s) => s.name === name).tubes.at(-1);
+    renderLastTube(stored.measurement, label);
+    if (stored.excluded_reason) {
+      setHardwareStatus(statusEl, `${label} stored but left out: ${stored.excluded_reason}`, "error");
+    } else {
+      const flagText = stored.measurement.flags.length ? ` Flags: ${stored.measurement.flags.join(", ")}.` : "";
+      setHardwareStatus(statusEl, `Recorded ${label}: ${formatFluorescence(stored.measurement.fluorescence)} ${HARDWARE_FLUORESCENCE_UNIT}.${flagText}`,
+        stored.measurement.flags.length ? "warn" : "success");
+    }
+    // After the planned number of tubes, move on to the next sample.
+    if (role === "sample" && sampleTubeCount(name) >= batch.tubes_per_sample) {
+      let next = nextSampleId(name);
+      while (sampleTubeCount(next) > 0) next = nextSampleId(next);
+      document.getElementById("sample-name").value = next;
+      setHardwareStatus(statusEl, `${name} done (${batch.tubes_per_sample} tubes). Next sample: ${next}.`, "success");
+    }
+  } catch (err) {
+    console.error("Read failed:", err);
+    setHardwareStatus(statusEl, `Read failed for ${label}: ${err.message}`, "error");
+  } finally {
+    measureReading = false;
+    // A failed read says nothing about the sensor, so it leaves the buttons usable for a retry.
+    if (sensorOk !== undefined) deviceSensorOk = sensorOk;
+    renderBatch();
+    refreshBatches();
   }
 }
 
-// Full precision on purpose: the file is the record, the table is the view.
-function logCsvRow(record) {
-  const { measurement: m, estimate, curve } = record;
-  const raw = m.raw ?? {};
-  return [
-    record.record_id, m.sample_id, m.timestamp_utc, m.sample_type, m.known_concentration_nM,
-    m.fluorescence, m.fluorescence_sd, m.scatter,
-    estimate.status, estimate.concentration_nM,
-    estimate.ci95_nM?.[0] ?? null, estimate.ci95_nM?.[1] ?? null,
-    estimate.curve_id, curve?.timepoint ?? null, curve?.lod_nM ?? null,
-    curve?.range_nM.min ?? null, curve?.range_nM.max ?? null,
-    m.flags.join(";"), m.config_fingerprint, m.source,
-    ...HARDWARE_CHANNELS.map(({ key }) => raw[key] ?? null),
-  ];
-}
+// ---- 4. Results -----------------------------------------------------------------
 
-function renderLog(records) {
-  const unexported = records.filter((record) => !record.exported_at).length;
+const RESULTS_COLUMN_COUNT = 8;
 
-  const chip = document.getElementById("log-count");
-  chip.textContent = records.length === 0
-    ? "Empty"
-    : `${records.length} reading${records.length === 1 ? "" : "s"} · ${unexported} not exported`;
-  chip.className = `flag-chip ${unexported > 0 ? "warn" : records.length > 0 ? "ok" : ""}`.trim();
+function renderResults() {
+  const card = document.getElementById("results-card");
+  if (batch.samples.length === 0) {
+    setStepCard(card, "waiting", "No samples read yet.");
+    return;
+  }
+  setStepCard(card, batch.finished_at ? "done" : "current");
 
-  setBlocked(document.getElementById("log-export-button"), document.getElementById("log-export-reason"),
-    records.length === 0 ? "No readings to export yet." : null);
-
-  document.getElementById("log-empty").hidden = records.length > 0;
-  document.getElementById("log-table-wrapper").hidden = records.length === 0;
-
-  const tbody = document.getElementById("log-table-body");
+  const tbody = document.getElementById("results-table-body");
   tbody.innerHTML = "";
-  // Newest first: the tube just read is the one being looked at.
-  for (const record of [...records].reverse()) {
-    const m = record.measurement;
+  for (const sample of batch.samples) {
+    const e = sample.estimate;
+    const counted = sample.tubes.filter((tube) => tube.excluded_reason === null);
+    const flags = [...new Set(counted.flatMap((tube) => tube.measurement.flags))];
     const qc = hwEl("td");
-    qc.appendChild(renderFlagChips(m.flags));
+    qc.appendChild(renderFlagChips(flags));
 
-    const type = m.sample_type === "standard"
-      ? `Standard (${formatConcentration(m.known_concentration_nM)})`
-      : LOG_TYPE_LABEL[m.sample_type] ?? m.sample_type;
+    const open = openSamples.has(sample.name);
+    const toggle = hwEl("button", "btn-secondary table-button", open ? "Hide tubes" : "Tubes");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.addEventListener("click", () => {
+      if (open) openSamples.delete(sample.name);
+      else openSamples.add(sample.name);
+      renderResults();
+    });
+    const actions = hwEl("td", "action-cell");
+    actions.appendChild(toggle);
 
-    // Recovery belongs in the table too: checking the curve usually means reading several
-    // standards and comparing them, not looking at one result card.
-    const inferred = hwEl("td", null, logEstimateText(record));
-    const recovery = recoveryPercent(m, record.estimate);
-    if (recovery) inferred.append(" ", hwEl("span", "cell-note", recovery));
+    const cv = e.sd_signal !== null && e.mean_signal ? formatPercent(e.sd_signal / Math.abs(e.mean_signal)) : "--";
+    const tubesText = counted.length === sample.tubes.length ? String(counted.length) : `${counted.length} of ${sample.tubes.length}`;
+    const short = counted.length < batch.tubes_per_sample ? " (fewer than planned)" : "";
 
     const row = hwEl("tr");
     row.append(
-      hwEl("td", null, formatLocalTime(m.timestamp_utc)),
-      hwEl("td", null, m.sample_id),
-      hwEl("td", null, type),
-      hwEl("td", null, formatFluorescence(m.fluorescence)),
-      inferred,
-      hwEl("td", null, record.estimate.curve_id ?? "--"),
+      hwEl("td", null, sample.name),
+      hwEl("td", null, `${tubesText}${short}`),
+      hwEl("td", null, e.mean_signal === null ? "--" : `${formatFluorescence(e.mean_signal)} ± ${formatFluorescence(e.sd_signal)}`),
+      hwEl("td", null, cv),
+      hwEl("td", null, formatEstimate(e, batch.curve)),
+      hwEl("td", null, e.status === "ok" ? formatConcentrationInterval(e.ci95_nM) : "--"),
       qc,
-      hwEl("td", null, record.exported_at ? formatLocalTime(record.exported_at) : "Not yet"),
+      actions,
+    );
+    tbody.appendChild(row);
+
+    if (open) {
+      const detail = hwEl("tr", "detail-row");
+      const cell = hwEl("td");
+      cell.colSpan = RESULTS_COLUMN_COUNT;
+      const wrapper = hwEl("div", "table-wrapper");
+      const table = hwEl("table");
+      const head = hwEl("tr");
+      for (const text of ["Tube", "Read at", "Signal", "Scatter", "QC", "Counted"]) head.appendChild(Object.assign(hwEl("th", null, text), { scope: "col" }));
+      const thead = hwEl("thead");
+      thead.appendChild(head);
+      const body = hwEl("tbody");
+      for (const tube of sample.tubes) {
+        const m = tube.measurement;
+        const tubeQc = hwEl("td");
+        tubeQc.appendChild(renderFlagChips(m.flags));
+        const tr = hwEl("tr");
+        tr.classList.toggle("is-excluded", tube.excluded_reason !== null);
+        tr.append(
+          hwEl("td", null, m.sample_id),
+          hwEl("td", null, formatLocalTime(m.timestamp_utc)),
+          hwEl("td", null, formatFluorescence(m.fluorescence)),
+          hwEl("td", null, formatFluorescence(m.scatter)),
+          tubeQc,
+          tubeCountedCell(tube),
+        );
+        body.appendChild(tr);
+      }
+      table.append(thead, body);
+      wrapper.appendChild(table);
+      cell.appendChild(wrapper);
+      detail.appendChild(cell);
+      tbody.appendChild(detail);
+    }
+  }
+
+  setBlocked(document.getElementById("results-export-button"), document.getElementById("results-export-reason"), null);
+  const finish = document.getElementById("batch-finish-button");
+  finish.hidden = Boolean(batch.finished_at);
+  setBlocked(finish, document.getElementById("batch-finish-reason"), measureReading ? "A read is in progress." : null);
+}
+
+// One row per tube, with its group's estimate beside it: everything needed to read the result back
+// without this browser. Full precision on purpose: the file is the record, the table is the view.
+const BATCH_CSV_HEADERS = [
+  "batch_id", "curve_id", "sensor", "induction_h", "curve_signal", "curve_config_fingerprint",
+  "curve_lod_nM", "curve_range_min_nM", "curve_range_max_nM",
+  "role", "sample_name", "tube_id", "timestamp_utc", "signal", "fluorescence", "fluorescence_sd", "scatter",
+  "flags", "config_fingerprint", "excluded_reason",
+  "group_n", "group_mean_signal", "group_sd_signal", "estimate_status", "inferred_nM", "ci95_low_nM", "ci95_high_nM",
+  ...HARDWARE_CHANNELS.map(({ key }) => key),
+];
+
+function batchCsvRows(b) {
+  const { curve } = b;
+  const rows = [];
+  const add = (role, name, tube, e) => {
+    const m = tube.measurement;
+    const raw = m.raw ?? {};
+    rows.push([
+      b.batch_id, curve.curve_id, curve.conditions.sensor, curve.conditions.induction_h, curve.signal, curve.config_fingerprint,
+      curve.lod_nM, curve.range_nM.min, curve.range_nM.max,
+      role, name, m.sample_id, m.timestamp_utc, m.signal, m.fluorescence, m.fluorescence_sd, m.scatter,
+      m.flags.join(";"), m.config_fingerprint, tube.excluded_reason,
+      e.n, e.mean_signal, e.sd_signal, e.status, e.concentration_nM, e.ci95_nM?.[0] ?? null, e.ci95_nM?.[1] ?? null,
+      ...HARDWARE_CHANNELS.map(({ key }) => raw[key] ?? null),
+    ]);
+  };
+  for (const tube of b.blanks) add("blank", null, tube, b.blank_estimate);
+  for (const sample of b.samples) for (const tube of sample.tubes) add("sample", sample.name, tube, sample.estimate);
+  return rows;
+}
+
+async function exportBatchCsv(batchId, button, statusEl) {
+  button.disabled = true;
+  try {
+    const exported = await HardwareApi.getBatch(batchId);
+    hwDownloadCsv(`lasreader-${batchId}-${hwFileStamp()}.csv`, BATCH_CSV_HEADERS, batchCsvRows(exported));
+    // Only marked once the file has actually been handed to the browser.
+    await HardwareApi.markBatchesExported([batchId]);
+    if (batch && batch.batch_id === batchId) batch = await HardwareApi.getBatch(batchId);
+    setHardwareStatus(statusEl, `Exported ${batchId}. Check the download completed before relying on it.`, "success");
+  } catch (err) {
+    console.error("Batch export failed:", err);
+    setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+    refreshBatches();
+  }
+}
+
+async function finishBatch() {
+  const statusEl = document.getElementById("results-status");
+  try {
+    batch = await HardwareApi.finishBatch(batch.batch_id);
+    setHardwareStatus(statusEl, `${batch.batch_id} finished. Export it as CSV to keep a copy outside this browser.`, "success");
+  } catch (err) {
+    console.error("Could not finish the batch:", err);
+    setHardwareStatus(statusEl, `Could not finish: ${err.message}`, "error");
+  }
+  renderBatch();
+  refreshBatches();
+}
+
+// ---- The open batch -------------------------------------------------------------
+
+function renderBatch() {
+  if (!batch) return;
+  renderBatchSummary();
+  setStepCard(document.getElementById("curve-card"), "done");
+  renderBlank();
+  renderSamples();
+  renderResults();
+}
+
+async function openBatch(batchId, alreadyLoaded) {
+  const [batchResult, statusResult] = await Promise.allSettled([
+    alreadyLoaded ? Promise.resolve(alreadyLoaded) : HardwareApi.getBatch(batchId),
+    HardwareApi.getDeviceStatus(),
+  ]);
+  if (batchResult.status === "rejected") {
+    console.error("Failed to load batch:", batchResult.reason);
+    history.replaceState(null, "", "hardware-measure.html");
+    await showChooser();
+    setHardwareStatus(document.getElementById("batch-start-status"), `Could not load ${batchId}: ${batchResult.reason.message}`, "error");
+    return;
+  }
+  batch = batchResult.value;
+  deviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  deviceSensorOk = statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null;
+  deviceConfig = statusResult.status === "fulfilled" ? statusResult.value.config : null;
+  hardwareRemember(HARDWARE_LAST_BATCH_KEY, batch.batch_id);
+
+  // Resume on the first sample that still needs tubes, or the one after the last.
+  const unfinished = batch.samples.find((s) => s.tubes.length < batch.tubes_per_sample);
+  const last = batch.samples.at(-1);
+  if (unfinished) document.getElementById("sample-name").value = unfinished.name;
+  else if (last) {
+    let next = nextSampleId(last.name);
+    while (sampleTubeCount(next) > 0) next = nextSampleId(next);
+    document.getElementById("sample-name").value = next;
+  }
+
+  document.getElementById("batch-form").hidden = true;
+  document.getElementById("batch-summary").hidden = false;
+  renderBatch();
+}
+
+// ---- Batch list --------------------------------------------------------------------
+
+async function refreshBatches() {
+  const statusEl = document.getElementById("batches-status");
+  let batches;
+  try {
+    batches = await HardwareApi.listBatches();
+    setHardwareStatus(statusEl, "", null);
+  } catch (err) {
+    console.error("Could not load batches:", err);
+    setHardwareStatus(statusEl, `Could not load batches: ${err.message}`, "error");
+    return;
+  }
+  document.getElementById("batches-empty").hidden = batches.length > 0;
+  document.getElementById("batches-table-wrapper").hidden = batches.length === 0;
+  const tbody = document.getElementById("batches-table-body");
+  tbody.innerHTML = "";
+  for (const summary of batches) {
+    const csv = hwEl("button", "btn-secondary table-button", "CSV");
+    csv.type = "button";
+    csv.setAttribute("aria-label", `Export batch ${summary.batch_id} as CSV`);
+    csv.addEventListener("click", () => exportBatchCsv(summary.batch_id, csv, statusEl));
+    const actions = hwEl("td", "action-cell");
+    actions.append(hwLink(`hardware-measure.html?batch=${encodeURIComponent(summary.batch_id)}`, "Open"), " ", csv);
+
+    const exported = hwEl("td");
+    if (summary.exported_at) exported.textContent = formatLocalTime(summary.exported_at);
+    else exported.appendChild(hwEl("span", "flag-chip warn", "Not yet"));
+
+    const row = hwEl("tr");
+    if (batch && batch.batch_id === summary.batch_id) row.classList.add("is-target");
+    row.append(
+      hwEl("td", null, summary.batch_id),
+      hwEl("td", null, formatLocalTime(summary.created_at)),
+      hwEl("td", null, formatConditions(summary.conditions)),
+      hwEl("td", null, summary.curve_id),
+      hwEl("td", null, String(summary.samples)),
+      hwEl("td", null, summary.finished_at ? "Finished" : "Open"),
+      exported,
+      actions,
     );
     tbody.appendChild(row);
   }
 }
 
-async function refreshLog() {
-  try {
-    renderLog(await HardwareApi.listMeasurements());
-  } catch (err) {
-    console.error("Could not load the reading log:", err);
-    setHardwareStatus(document.getElementById("log-status"), `Could not load the log: ${err.message}`, "error");
-  }
-}
-
-async function exportLog() {
-  const button = document.getElementById("log-export-button");
-  const statusEl = document.getElementById("log-status");
-  if (button.disabled) return;
-
-  button.disabled = true;
-  try {
-    // Everything every time: overlapping files are cheap, a missing reading is not.
-    const records = await HardwareApi.listMeasurements();
-    if (records.length === 0) {
-      setHardwareStatus(statusEl, "Nothing to export yet.", "warn");
-      return;
-    }
-    hwDownloadCsv(`lasreader-measurements-${hwFileStamp()}.csv`, LOG_CSV_HEADERS, records.map(logCsvRow));
-    // Only marked once the file has actually been handed to the browser: if anything above threw,
-    // every reading must stay counted as unexported.
-    await HardwareApi.markMeasurementsExported(records.map((record) => record.record_id));
-    setHardwareStatus(statusEl,
-      `Exported ${records.length} reading${records.length === 1 ? "" : "s"}. Check the download completed before relying on it.`,
-      "success");
-    await refreshLog();
-  } catch (err) {
-    console.error("Export failed:", err);
-    setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function readMeasureSample(event) {
-  event.preventDefault();
-
-  const idInput = document.getElementById("measure-sample-id");
-  const sampleType = document.getElementById("measure-sample-type").value;
-  const statusEl = document.getElementById("measure-status");
-  const button = document.getElementById("measure-read-button");
-  if (button.disabled) return;
-
-  const sampleId = idInput.value.trim();
-  if (!sampleId) {
-    setHardwareStatus(statusEl, "Enter a sample ID first.", "error");
-    return;
-  }
-
-  const input = { sample_id: sampleId, sample_type: sampleType };
-  if (sampleType === "standard") {
-    const knownInput = document.getElementById("measure-known-concentration");
-    const known = Number(knownInput.value);
-    if (knownInput.value === "" || !(known >= 0)) {
-      setHardwareStatus(statusEl, "A standard needs its known concentration (nM).", "error");
-      return;
-    }
-    input.known_concentration_nM = known;
-  }
-
-  let sensorOk;
-  button.disabled = true;
-  // Hide the previous tube's result first: if this read fails, the old numbers can't be left on screen looking like they belong to this one.
-  document.getElementById("measure-result").hidden = true;
-  setHardwareStatus(statusEl, `Reading ${sampleId}...`, null);
-
-  try {
-    const [m, status] = await Promise.all([HardwareApi.readSample(input), HardwareApi.getDeviceStatus()]);
-    sensorOk = status.sensor_ok;
-    const [estimate, curve] = await Promise.all([
-      HardwareApi.invert(m.fluorescence, m.config_fingerprint),
-      HardwareApi.getActiveCurve(),
-    ]);
-    // The active curve could be swapped between the two calls; if they don't match, don't use its LOD / range for display.
-    const matchingCurve = curve && curve.curve_id === estimate.curve_id ? curve : null;
-
-    // Recorded before anything is drawn: the tube is already spent, so the reading must be kept
-    // even if rendering it fails.
-    await HardwareApi.recordMeasurement(m, estimate, matchingCurve);
-
-    renderCurveChip(curve, status.config);
-
-    document.getElementById("measure-result").hidden = false;
-    document.getElementById("measure-signal").textContent =
-      `${formatFluorescence(m.fluorescence)} ± ${formatFluorescence(m.fluorescence_sd)}`;
-    document.getElementById("measure-signal-sub").textContent =
-      `${HARDWARE_FLUORESCENCE_UNIT} (± read-noise SD from the dark frames) · scatter ${formatFluorescence(m.scatter)}`;
-    renderEstimate(estimate, matchingCurve, m);
-
-    const flags = document.getElementById("measure-flags");
-    flags.innerHTML = "";
-    flags.appendChild(renderFlagChips(m.flags));
-
-    renderChannelChart(m.raw);
-    renderProvenance(m, status.config);
-
-    setHardwareStatus(statusEl, `Read ${m.sample_id} at ${formatLocalTime(m.timestamp_utc)}.`, m.flags.length ? "warn" : "success");
-    idInput.value = nextSampleId(sampleId);
-    await refreshLog();
-  } catch (err) {
-    console.error("Measurement failed:", err);
-    setHardwareStatus(statusEl, `Read failed: ${err.message}`, "error");
-  } finally {
-    button.disabled = false;
-    // A failed read says nothing about the sensor, so it leaves the button usable for a retry.
-    if (sensorOk !== undefined) applySensorBlock(sensorOk);
-  }
-}
-
-function applySampleType() {
-  const type = document.getElementById("measure-sample-type").value;
-  document.getElementById("measure-known-field").hidden = type !== "standard";
-
-  const note = document.getElementById("measure-type-note");
-  note.textContent = SAMPLE_TYPE_NOTE[type] ?? "";
-  note.hidden = !note.textContent;
-}
-
 document.addEventListener("DOMContentLoaded", () => {
-  refreshCurveChip();
-  refreshLog();
+  const form = document.getElementById("batch-form");
+  form.addEventListener("submit", startBatch);
+  form.addEventListener("change", updateBatchStartControls);
+  form.addEventListener("input", updateBatchStartControls);
 
-  // Called on load as well as on change: a browser restoring the select on reload would otherwise
-  // leave the page showing Unknown's fields under a different selection.
-  applySampleType();
-  document.getElementById("measure-sample-type").addEventListener("change", applySampleType);
+  document.getElementById("blank-read-button").addEventListener("click", () => readTube("blank"));
+  document.getElementById("sample-read-button").addEventListener("click", () => readTube("sample"));
+  document.getElementById("sample-name").addEventListener("input", () => { if (batch) renderSamples(); });
+  document.getElementById("sample-name").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      document.getElementById("sample-read-button").click();
+    }
+  });
+  document.getElementById("results-export-button").addEventListener("click", (event) =>
+    exportBatchCsv(batch.batch_id, event.currentTarget, document.getElementById("results-status")));
+  document.getElementById("batch-finish-button").addEventListener("click", finishBatch);
 
-  document.getElementById("measure-form").addEventListener("submit", readMeasureSample);
-  document.getElementById("log-export-button").addEventListener("click", exportLog);
+  refreshBatches();
+  const batchId = hardwareQueryParam("batch");
+  if (batchId) openBatch(batchId);
+  else showChooser();
 });

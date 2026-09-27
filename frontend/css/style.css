@@ -363,21 +363,78 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* Sub-navigation: five entries on the left, the instrument badge on the right. */
-.hw-subnav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; }
-.hw-subnav-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.hw-subnav-links a {
-  display: inline-block; padding: 7px 16px; border-radius: 999px;
+/* Step bar: the four workflow steps in order, each with its live state; Data sits apart on the right. */
+.hw-steps { display: flex; align-items: stretch; flex-wrap: wrap; gap: 10px 14px; }
+.hw-steps-list {
+  display: grid; flex: 1 1 640px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
+  margin: 0; padding: 0; list-style: none; counter-reset: none;
+}
+.hw-step a, .hw-data-link {
+  display: flex; align-items: center; gap: 10px; height: 100%; box-sizing: border-box;
+  padding: 9px 12px; border-radius: 12px;
   color: var(--text-dim); background: var(--glass-chip);
   backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
   border: 1px solid rgba(255,255,255,.8);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 6px rgba(61,50,41,.08);
-  font-size: .9rem; font-weight: 600; text-decoration: none;
+  text-decoration: none;
   transition: background-color .15s ease, border-color .15s ease;
 }
-.hw-subnav-links a:hover { color: var(--text); background: rgba(255,253,247,.88); }
-.hw-subnav-links a[aria-current="page"] { color: var(--accent); border-color: var(--accent); font-weight: 700; }
-.hw-subnav-links a:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.hw-step a:hover, .hw-data-link:hover { color: var(--text); background: rgba(255,253,247,.88); }
+.hw-step a:focus-visible, .hw-data-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.hw-step-num {
+  display: grid; flex: none; width: 28px; height: 28px; place-items: center; border-radius: 50%;
+  border: 2px solid var(--border); color: var(--muted); background: var(--solid);
+  font-weight: 700; font-size: .9rem;
+}
+.hw-step-text { display: flex; min-width: 0; flex-direction: column; }
+.hw-step-label { color: var(--text); font-weight: 700; font-size: .92rem; }
+.hw-step-state { overflow: hidden; color: var(--muted); font-size: .76rem; white-space: nowrap; text-overflow: ellipsis; }
+.hw-step.is-done .hw-step-num { border-color: var(--accent); color: #fff; background: var(--accent); }
+.hw-step.is-next .hw-step-num { border-color: var(--gold); color: var(--gold-ink); }
+.hw-step.is-next .hw-step-state { color: var(--gold-ink); font-weight: 600; }
+.hw-step.is-attention .hw-step-state { color: var(--error); }
+.hw-step a[aria-current="step"] { border-color: var(--accent); background: rgba(255,253,247,.92); box-shadow: inset 0 -3px 0 var(--accent), 0 2px 6px rgba(61,50,41,.08); }
+.hw-data-link { flex: 0 0 auto; justify-content: center; margin-left: auto; padding: 9px 18px; font-size: .9rem; font-weight: 600; }
+.hw-data-link[aria-current="page"] { color: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+/* The link at the bottom of a page to the step after it. */
+.hw-next { margin-top: 20px; }
+.hw-next-link {
+  display: flex; flex-direction: column; gap: 2px; padding: 16px 22px;
+  border: 1px solid var(--border); border-left: 6px solid var(--accent); border-radius: 12px;
+  background: var(--solid); text-decoration: none;
+}
+.hw-next-link:hover .hw-next-title { text-decoration: underline; }
+.hw-next-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.hw-next-label { color: var(--gold-ink); font-size: .76rem; font-weight: 700; }
+.hw-next-title { color: var(--accent); font-weight: 700; font-size: 1.02rem; }
+
+/* A numbered step within a page. A waiting step shows only its heading and what it waits for. */
+.step-card-head { display: flex; align-items: flex-start; gap: 14px; }
+.step-card-head > div { flex: 1; min-width: 0; }
+.step-card-head h2 { margin: 0; font-family: var(--heading-font); font-size: 1.3rem; color: var(--text); }
+.step-card-num {
+  display: grid; flex: none; width: 34px; height: 34px; place-items: center; border-radius: 50%;
+  border: 2px solid var(--gold); color: var(--gold-ink); background: var(--solid); font-weight: 700;
+}
+.step-card[data-state="done"] .step-card-num { border-color: var(--accent); color: #fff; background: var(--accent); }
+.step-card[data-state="waiting"] .step-card-num { border-color: var(--border); color: var(--muted); }
+.step-card[data-state="waiting"] .step-card-head h2 { color: var(--muted); }
+.step-card .step-card-waiting { margin: 10px 0 0 48px; }
+.step-card-body { margin-top: 16px; }
+
+/* Choosing a curve: one selectable row per curve. */
+.choice-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.choice {
+  display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--solid); cursor: pointer;
+}
+.choice input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); }
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.choice:has(input:disabled) { cursor: not-allowed; opacity: .75; }
+.choice.is-static { cursor: default; }
+.choice-title { display: block; color: var(--text); font-weight: 700; }
+.choice-meta { display: block; margin-top: 2px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
 
 .ruo-notice { color: var(--text-dim); font-weight: 600; }
 
@@ -505,6 +562,9 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 .provenance b { color: var(--muted); font-weight: 700; }
 
 @media (max-width: 640px) {
+  .hw-steps-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hw-data-link { flex: 1 1 100%; }
+  .step-card .step-card-waiting { margin-left: 0; }
   .section-heading { flex-wrap: wrap; }
   .curve-chip { align-items: flex-start; text-align: left; }
   .next-tube { top: 6px; padding: 14px 16px; }
@@ -512,11 +572,11 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .hw-subnav-links a { background: #fffdf7; }
+  .hw-step a, .hw-data-link { background: #fffdf7; }
 }
 
 @media print {
-  .hw-subnav, .next-tube button, .table-button { display: none; }
+  .hw-steps, .hw-next, .next-tube button, .table-button { display: none; }
   .next-tube { position: static; box-shadow: none; }
 }
 

@@ -1,12 +1,17 @@
 // =========================================================
-// CAPTURE-Screen's temporary stand-in backend: calibration plan / curve storage, weighted
-// 4PL fitting (Levenberg-Marquardt), LOD/LOQ, concentration inversion with a 95% CI
-// (delta method), and the QC flags that need stored state to determine.
+// CAPTURE-Screen's temporary stand-in backend: calibration runs, curves and measurement batches
+// kept in the browser, weighted 4PL fitting (Levenberg-Marquardt), LOD/LOQ, and concentration
+// inversion with a 95% CI (delta method).
 //
-// The device only takes readings (via the backend's POST /api/hardware/read); the backend
-// has no plan/curve storage or fitting yet, so this lives in the browser's localStorage for
-// now (falling back to memory if reads/writes fail). Once the backend has storage, this
-// whole file gets replaced by HTTP calls.
+// The workflow it stores, in order:
+//   run (CalibrationPlan)  standards + blanks under stated conditions, read tube by tube or entered by hand
+//   curve                  a 4PL fitted from one run, bound to its config, signal and conditions
+//   batch                  blanks, then samples read in replicate tubes, each sample converted
+//                          through the one curve the batch was started with
+//
+// The device only takes readings (via the backend's POST /api/hardware/read); the backend has no
+// storage or fitting yet, so this lives in localStorage (falling back to memory if reads/writes
+// fail). Once the backend has storage, this whole file gets replaced by HTTP calls.
 //
 // Holds only Measurements converted from a mode "measurement" reading, or readings recorded
 // earlier and entered by hand (source "manual"); live-stream data never can and never should reach this.
@@ -16,34 +21,30 @@
 
 // Upper bound on the inversion range: past 95% of the 4PL span the curve is too flat, and inversion error blows up.
 const LOCAL_RANGE_SPAN_FRACTION = 0.95;
-// How many Measure readings the log keeps. It has to be capped: localSave() swallows a
-// QuotaExceededError, so a log left to grow would eventually fill the origin's storage quota and
-// silently stop plans and curves persisting too — not just itself. A reading is ~600 bytes, so
-// this is well under any browser's budget, and a CSV export is the copy that actually lasts.
-const LOCAL_MEASUREMENT_LIMIT = 500;
-// The curve export file's shape. Named inside the file so an import can tell one of ours from any
-// other JSON, and versioned so a build that predates a format change refuses it instead of
-// guessing. Both the writer and the reader live here, so the two can't drift apart.
-const LOCAL_CURVES_EXPORT_FORMAT = "lasreader.hardware.curves";
-const LOCAL_CURVES_EXPORT_VERSION = 1;
-// Calibration runs get their own file: they are the raw readings a curve was fitted from, and
-// losing them means the fit can never be redone or checked, only trusted.
-const LOCAL_PLANS_EXPORT_FORMAT = "lasreader.hardware.plans";
-const LOCAL_PLANS_EXPORT_VERSION = 1;
-// One file holding everything, so a restore can't quietly bring back half of it. Curves and runs
-// used to be exported separately, and it took only forgetting one file to end up with a curve
-// whose calibration data was gone; importBackup() still reads those older single-section files.
+// How many measurement batches are kept. It has to be capped: localSave() swallows a
+// QuotaExceededError, so storage left to grow would eventually stop runs and curves persisting
+// too, silently. A batch of ten samples in triplicate is ~25 KB, so this stays well under any
+// browser's budget. When full, the oldest batch that has been exported makes room; a batch that
+// exists nowhere but here is never dropped.
+const LOCAL_BATCH_LIMIT = 60;
+// One file holding everything, so a restore can't quietly bring back half of it.
 const LOCAL_BACKUP_FORMAT = "lasreader.hardware.backup";
-const LOCAL_BACKUP_VERSION = 1;
-const LOCAL_STORE_KEY = "lasreader.hardware.local.v2";
-// Everything before v2 came from the now-removed simulated device: clear it on load so
-// simulated plans, curves, and dark-read records never mix in with real measurements.
+// Version 2 is the step-by-step workflow (conditions, signal ids, batches). Version 1 files hold
+// runs without conditions and a flat reading log, which this build no longer reads.
+const LOCAL_BACKUP_VERSION = 2;
+const LOCAL_STORE_KEY = "lasreader.hardware.local.v3";
+// Cleared on load. v1 and older came from the removed simulated device; v2 is the previous
+// workflow, whose data the user chose to clear rather than migrate (2026-09-27).
 const LOCAL_LEGACY_KEYS = [
   "lasreader.hardware.local.v1",
   "lasreader.hardware.mock.v1",
   "lasreader.hardware.mockDevice.v1",
   "lasreader.hardware.lastPlanId",
   "lasreader.hardware.lastDarkReadUtc",
+  "lasreader.hardware.local.v2",
+  "lasreader.hardware.v2.lastPlanId",
+  "lasreader.hardware.v2.lastDarkReadUtc",
+  "lasreader.hardware.v2.lastBackupUtc",
 ];
 
 try {
@@ -58,10 +59,10 @@ function localDefaultStore() {
   return {
     plans: {},         // plan_id -> CalibrationPlan
     drafts: {},        // curve_id -> { curve, cov, noise }: fitted but not yet saved
-    curves: {},        // curve_id -> CalibrationCurve: saved
+    curves: {},        // curve_id -> CalibrationCurve: saved, never changed afterwards
     curve_private: {}, // curve_id -> { cov, noise }: needed for inversion CI, but not part of the data contract
     blank_scatter: {}, // config fingerprint -> scatter of the most recent passing blank (the HIGH_SCATTER baseline)
-    measurements: [],  // the Measure page's reading log, oldest first, capped at LOCAL_MEASUREMENT_LIMIT
+    batches: {},       // batch_id -> MeasurementBatch
   };
 }
 
@@ -122,6 +123,10 @@ function localFail(message) {
   throw new Error(message);
 }
 
+function localIsDate(value) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
 // The concentration string used in a plan's label; above 1000 nM it's rewritten as µM, matching the page's display rule.
 function localConcentrationLabel(nM) {
   return nM > 1000 ? `${+(nM / 1000).toFixed(3)} µM` : `${+nM.toFixed(3)} nM`;
@@ -143,6 +148,36 @@ function localSampleSd(values) {
   if (values.length < 2) return 0;
   const m = localMean(values);
   return Math.sqrt(values.reduce((acc, v) => acc + (v - m) ** 2, 0) / (values.length - 1));
+}
+
+// ---- Experimental conditions ----------------------------------------------
+// What a curve is valid for beyond the instrument config: which biosensor strain, and how long
+// after AHL was added it was read. A sample only converts through a curve made under the same
+// conditions, so both are required, and induction time is a number rather than free text so it
+// can be compared.
+
+const LOCAL_TEXT_LIMIT = 200;
+
+function localConditionsProblem(c) {
+  if (!c || typeof c !== "object") return "conditions are missing";
+  if (typeof c.sensor !== "string" || !c.sensor.trim()) return "Enter the biosensor strain.";
+  if (c.sensor.length > LOCAL_TEXT_LIMIT) return "The biosensor strain is too long.";
+  if (!(Number.isFinite(c.induction_h) && c.induction_h > 0 && c.induction_h <= 1000)) {
+    return "Induction time must be a number of hours above 0.";
+  }
+  if (typeof c.notes !== "string" || c.notes.length > LOCAL_TEXT_LIMIT * 5) return "Notes are too long.";
+  return null;
+}
+
+function localConditions(input) {
+  const conditions = {
+    sensor: String(input?.sensor ?? "").trim(),
+    induction_h: Number(input?.induction_h),
+    notes: String(input?.notes ?? "").trim(),
+  };
+  const problem = localConditionsProblem(conditions);
+  if (problem) localFail(problem);
+  return conditions;
 }
 
 // ---- 4PL -------------------------------------------------------------
@@ -303,8 +338,10 @@ function localFit4PL(points) {
   return { p, cov };
 }
 
-// Fluorescence -> concentration. Only gives a point estimate within the curve's trusted range; outside it, only status comes back, never an extrapolation.
-function localInverseCore(F, curve, priv) {
+// Signal -> concentration. Only gives a point estimate within the curve's trusted range; outside
+// it, only status comes back, never an extrapolation. F is the mean of n tubes, so the reading's
+// own variance is divided by n; the curve's parameter uncertainty is not, since every tube shares it.
+function localInverseCore(F, curve, priv, n = 1) {
   const { top, bottom, ec50_nM, hill } = curve.params;
   if (!(F > bottom)) return { status: "below_lod" };
   if (!(F < top)) return { status: "above_range" };
@@ -318,7 +355,7 @@ function localInverseCore(F, curve, priv) {
   // delta method on ln(c): the reading's own variance plus the parameter covariance
   const gF = (1 / hill) * (1 / (F - bottom) + 1 / (top - F));
   const gTheta = [-(1 / hill) / (top - F), -(1 / hill) / (F - bottom), 1, -lnRatio / (hill * hill)];
-  let variance = gF * gF * (priv.noise.a + priv.noise.b * F * F);
+  let variance = (gF * gF * (priv.noise.a + priv.noise.b * F * F)) / n;
   for (let i = 0; i < 4; i++) {
     for (let j = 0; j < 4; j++) variance += gTheta[i] * priv.cov[i][j] * gTheta[j];
   }
@@ -326,120 +363,112 @@ function localInverseCore(F, curve, priv) {
   return { status: "ok", concentration_nM: c, ci95_nM: [Math.exp(lnC - half), Math.exp(lnC + half)] };
 }
 
-function localActiveCurve(store) {
-  return Object.values(store.curves).find((c) => c.is_active) ?? null;
+// ---- Batches ---------------------------------------------------------------
+
+// A tube a user left out stays in the batch with its reason; one read under a different config
+// or signal is left out automatically, with the reason saying so.
+function localIncludedTubes(tubes) {
+  return tubes.filter((tube) => tube.excluded_reason === null);
 }
 
-// ---- Importing into a store -----------------------------------------------
-// One implementation per section, taking the store so a combined backup can restore all three in
-// a single load/save. Each section is independent: a rejected curve must not cost you the runs in
-// the same file. Everything here follows the same two rules — an id already stored is kept rather
-// than replaced (what is here was produced on this machine; the file is a copy of something older),
-// and whatever fails validation is reported with a reason instead of vanishing.
+// The estimate for one group of tubes (a sample, or the batch's blanks): the mean of the included
+// tubes' signals, converted once. Stored as computed; recomputed only when that group's tubes
+// change, always against the batch's own curve.
+function localGroupEstimate(tubes, curve, priv) {
+  const ys = localIncludedTubes(tubes).map((tube) => tube.measurement.fluorescence);
+  const base = { curve_id: curve.curve_id, n: ys.length, mean_signal: null, sd_signal: null };
+  if (ys.length === 0) return { ...base, status: "no_tubes", concentration_nM: null, ci95_nM: null };
+  const mean = localMean(ys);
+  const result = localInverseCore(mean, curve, priv, ys.length);
+  return {
+    ...base,
+    mean_signal: mean,
+    sd_signal: ys.length >= 2 ? localSampleSd(ys) : null,
+    status: result.status,
+    concentration_nM: result.status === "ok" ? result.concentration_nM : null,
+    ci95_nM: result.status === "ok" ? result.ci95_nM : null,
+  };
+}
 
-function localImportPlansInto(store, entries) {
-  const imported = [];
-  const skipped = [];
-  const rejected = [];
-  for (const entry of entries) {
-    const plan_id = typeof entry?.plan_id === "string" && entry.plan_id.trim() ? entry.plan_id : "(no plan_id)";
-    const problem = localPlanProblem(entry);
-    if (problem) {
-      rejected.push({ id: plan_id, reason: problem });
-    } else if (store.plans[entry.plan_id]) {
-      skipped.push(entry.plan_id);
-    } else {
-      // Slot order is what the run walks through, and a hand-edited file could have reordered it.
-      store.plans[entry.plan_id] = { ...entry, items: [...entry.items].sort((a, b) => a.slot - b.slot) };
-      imported.push(entry.plan_id);
-    }
+function localBatchCurve(store, batch) {
+  const curve = store.curves[batch.curve_id];
+  const priv = store.curve_private[batch.curve_id];
+  if (!curve || !priv) localFail(`Curve ${batch.curve_id} is no longer stored, so this batch can't take readings.`);
+  return { curve, priv };
+}
+
+function localRecomputeBatch(store, batch) {
+  const { curve, priv } = localBatchCurve(store, batch);
+  batch.blank_estimate = localGroupEstimate(batch.blanks, curve, priv);
+  for (const sample of batch.samples) sample.estimate = localGroupEstimate(sample.tubes, curve, priv);
+}
+
+// What a batch keeps of its curve, so an exported row can be read without the curve.
+function localCurveSnapshot(curve) {
+  return {
+    curve_id: curve.curve_id,
+    conditions: curve.conditions,
+    signal: curve.signal,
+    config_fingerprint: curve.config_fingerprint,
+    lod_nM: curve.lod_nM,
+    loq_nM: curve.loq_nM,
+    range_nM: curve.range_nM,
+  };
+}
+
+function localFindTube(batch, sample_id) {
+  for (const tube of batch.blanks) if (tube.measurement.sample_id === sample_id) return tube;
+  for (const sample of batch.samples) {
+    for (const tube of sample.tubes) if (tube.measurement.sample_id === sample_id) return tube;
   }
-  return { imported, skipped, rejected };
+  return null;
 }
 
-function localImportCurvesInto(store, entries) {
-  const imported = [];
-  const skipped = [];
-  const rejected = [];
-  for (const entry of entries) {
-    const curve_id = typeof entry?.curve_id === "string" && entry.curve_id.trim() ? entry.curve_id : "(no curve_id)";
-    const problem = localCurveProblem(entry);
-    if (problem) {
-      rejected.push({ id: curve_id, reason: problem });
-    } else if (store.curves[entry.curve_id]) {
-      skipped.push(entry.curve_id);
-    } else {
-      const { private: priv, ...curve } = entry;
-      // is_active is always cleared: making a curve active has to go through saveCurve()'s check
-      // against the config the instrument is running right now.
-      store.curves[curve.curve_id] = { ...curve, is_active: false };
-      store.curve_private[curve.curve_id] = { cov: priv.cov, noise: priv.noise };
-      imported.push(curve.curve_id);
-    }
+function localBatchSummary(batch) {
+  return {
+    batch_id: batch.batch_id,
+    created_at: batch.created_at,
+    finished_at: batch.finished_at,
+    exported_at: batch.exported_at,
+    curve_id: batch.curve_id,
+    conditions: batch.curve.conditions,
+    blanks: batch.blanks.length,
+    samples: batch.samples.length,
+    tubes: batch.blanks.length + batch.samples.reduce((sum, sample) => sum + sample.tubes.length, 0),
+  };
+}
+
+// Oldest exported batch first; never one that exists only here.
+function localMakeRoomForBatch(store) {
+  const batches = Object.values(store.batches).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (batches.length < LOCAL_BATCH_LIMIT) return;
+  const exported = batches.find((batch) => batch.exported_at !== null);
+  if (!exported) {
+    localFail(`${LOCAL_BATCH_LIMIT} batches are stored and none has been exported. Export them (CSV, or a backup on the Data page) to make room.`);
   }
-  return { imported, skipped, rejected };
+  delete store.batches[exported.batch_id];
 }
 
-function localImportMeasurementsInto(store, entries) {
-  const existing = new Set(store.measurements.map((record) => record.record_id));
-  const imported = [];
-  const skipped = [];
-  const rejected = [];
-  for (const entry of entries) {
-    const record_id = typeof entry?.record_id === "string" && entry.record_id.trim() ? entry.record_id : "(no record_id)";
-    const problem = localMeasurementRecordProblem(entry);
-    if (problem) {
-      rejected.push({ id: record_id, reason: problem });
-    } else if (existing.has(entry.record_id)) {
-      skipped.push(entry.record_id);
-    } else {
-      store.measurements.push(entry);
-      existing.add(entry.record_id);
-      imported.push(entry.record_id);
-    }
-  }
-  // Back into time order before capping: an import can easily push the log past the limit, and
-  // what survives has to be the newest readings, not whatever order the file happened to hold.
-  // The count that fell off is returned rather than swallowed — this is the one place an import
-  // can lose a reading that was already here.
-  store.measurements.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
-  const dropped = Math.max(0, store.measurements.length - LOCAL_MEASUREMENT_LIMIT);
-  if (dropped > 0) store.measurements = store.measurements.slice(-LOCAL_MEASUREMENT_LIMIT);
-  return { imported, skipped, rejected, dropped };
-}
+// ---- Validating imported entries --------------------------------------------
+// A backup file is untrusted: hand-edited, from another build, or not ours at all. Every field a
+// later calculation touches is checked, because a bad entry would go on converting real readings
+// into wrong concentrations.
 
-// One stored reading out of an import file. item is the plan slot it claims to fill, or null for a
-// standalone Measure record. A plan is what fitCurve() reads, so anything wrong here ends up
-// inside a curve, and then inside every reading that curve converts.
-function localMeasurementProblem(m, item) {
+// One stored reading. expectedType is the sample type its place in a run or batch requires, and
+// item is the plan slot it claims to fill (or null outside a run).
+function localMeasurementProblem(m, expectedType, item = null) {
   const finite = (value) => Number.isFinite(value);
   const nullOrFinite = (value) => value === null || finite(value);
   if (!m || typeof m !== "object") return "measurement is not an object";
   if (typeof m.sample_id !== "string" || !m.sample_id.trim()) return "measurement.sample_id is missing";
-  if (typeof m.timestamp_utc !== "string" || Number.isNaN(Date.parse(m.timestamp_utc))) {
-    return "measurement.timestamp_utc is not a date";
+  if (!localIsDate(m.timestamp_utc)) return "measurement.timestamp_utc is not a date";
+  if (m.sample_type !== expectedType) return `measurement.sample_type "${m.sample_type}" should be "${expectedType}"`;
+  if (item && item.sample_type === "standard") {
+    if (m.known_concentration_nM !== item.concentration_nM) return "measurement.known_concentration_nM does not match the slot";
+  } else if (m.known_concentration_nM !== null) {
+    return "only a standard may carry known_concentration_nM";
   }
-  if (item) {
-    if (m.sample_type !== item.sample_type) {
-      return `measurement.sample_type "${m.sample_type}" is not the slot's "${item.sample_type}"`;
-    }
-    if (item.sample_type === "standard" && m.known_concentration_nM !== item.concentration_nM) {
-      return "measurement.known_concentration_nM does not match the slot";
-    }
-  } else {
-    // A Measure record has no slot to agree with, so the type and its concentration are checked
-    // against each other instead: only a standard knows what it should read.
-    if (!["blank", "standard", "unknown"].includes(m.sample_type)) {
-      return `unknown measurement.sample_type "${m.sample_type}"`;
-    }
-    if (m.sample_type === "standard") {
-      if (!(finite(m.known_concentration_nM) && m.known_concentration_nM >= 0)) {
-        return "a standard needs known_concentration_nM ≥ 0";
-      }
-    } else if (m.known_concentration_nM !== null) {
-      return "only a standard may carry known_concentration_nM";
-    }
-  }
+  if (typeof m.signal !== "string" || !m.signal.trim()) return "measurement.signal is missing";
   if (!finite(m.fluorescence)) return "measurement.fluorescence is not a number";
   // Null on both: a manual entry records neither read noise nor scatter.
   if (!nullOrFinite(m.fluorescence_sd)) return "measurement.fluorescence_sd is neither a number nor null";
@@ -447,8 +476,7 @@ function localMeasurementProblem(m, item) {
   if (!Array.isArray(m.flags) || !m.flags.every((flag) => typeof flag === "string")) return "measurement.flags is malformed";
   if (!/^[0-9a-f]{6}$/.test(String(m.config_fingerprint))) return "measurement.config_fingerprint is malformed";
   if (!["device", "manual"].includes(m.source)) return `unknown measurement.source "${m.source}"`;
-  // raw is only ever displayed and exported, never computed from, so it is checked loosely:
-  // the fit reads fluorescence alone.
+  // raw is only ever displayed and exported, never computed from, so it is checked loosely.
   if (m.raw !== null) {
     if (!m.raw || typeof m.raw !== "object") return "measurement.raw is neither an object nor null";
     if (!Object.values(m.raw).every(finite)) return "measurement.raw holds a non-number";
@@ -456,23 +484,23 @@ function localMeasurementProblem(m, item) {
   return null;
 }
 
-// One calibration run out of an import file: an error message, or null if it is sound.
 function localPlanProblem(entry) {
   if (!entry || typeof entry !== "object") return "not an object";
   if (typeof entry.plan_id !== "string" || !entry.plan_id.trim()) return "plan_id is missing";
-  if (typeof entry.created_at !== "string" || Number.isNaN(Date.parse(entry.created_at))) return "created_at is not a date";
+  if (!localIsDate(entry.created_at)) return "created_at is not a date";
   if (!["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
   if (entry.measured_on !== null && !localIsPastDate(entry.measured_on)) return "measured_on is neither a past date nor null";
   if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
-  if (typeof entry.timepoint !== "string" || !entry.timepoint.trim()) return "timepoint is missing";
+  if (typeof entry.signal !== "string" || !entry.signal.trim()) return "signal is missing";
+  const conditions = localConditionsProblem(entry.conditions);
+  if (conditions) return `conditions: ${conditions}`;
   if (!Array.isArray(entry.items) || entry.items.length === 0) return "items is missing";
 
   const slots = new Set();
   for (const item of entry.items) {
     if (!item || typeof item !== "object") return "an item is not an object";
     if (!Number.isInteger(item.slot) || item.slot < 1) return "an item has a bad slot number";
-    // Duplicate slots would make targetItem() and recordPlanMeasurement() disagree about which
-    // tube is next, and the run would never finish.
+    // Duplicate slots would make the run disagree with itself about which tube is next.
     if (slots.has(item.slot)) return `slot ${item.slot} appears twice`;
     slots.add(item.slot);
     if (typeof item.label !== "string" || !item.label.trim()) return `slot ${item.slot}: label is missing`;
@@ -483,75 +511,32 @@ function localPlanProblem(entry) {
       return `slot ${item.slot}: concentration_nM must be positive`;
     }
     if (item.measurement !== null) {
-      const problem = localMeasurementProblem(item.measurement, item);
+      const problem = localMeasurementProblem(item.measurement, item.sample_type, item);
       if (problem) return `slot ${item.slot}: ${problem}`;
     }
   }
-  // A manual dataset is defined by having every slot already filled, and recordPlanMeasurement()
-  // refuses to fill one, so a gap here would be a run that can never be completed.
+  // A manual dataset has every slot filled at creation and can't take a reading, so a gap here
+  // would be a run that can never be completed.
   if (entry.source === "manual" && entry.items.some((item) => item.measurement === null)) {
     return "a manual dataset cannot have an unread slot";
   }
   return null;
 }
 
-// One Measure reading-log entry out of an import file. The estimate is checked as strictly as the
-// measurement: a restored row that claims a concentration outside the "ok" status would read as a
-// result the curve never gave.
-function localMeasurementRecordProblem(entry) {
-  const finite = (value) => Number.isFinite(value);
-  const isDate = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
-  if (!entry || typeof entry !== "object") return "not an object";
-  if (typeof entry.record_id !== "string" || !entry.record_id.trim()) return "record_id is missing";
-  if (!isDate(entry.recorded_at)) return "recorded_at is not a date";
-  if (!(entry.exported_at === null || isDate(entry.exported_at))) return "exported_at is neither a date nor null";
-
-  const problem = localMeasurementProblem(entry.measurement, null);
-  if (problem) return problem;
-
-  const estimate = entry.estimate;
-  if (!estimate || typeof estimate !== "object") return "estimate is missing";
-  if (!["ok", "below_lod", "above_range", "no_curve", "config_mismatch"].includes(estimate.status)) {
-    return `unknown estimate.status "${estimate.status}"`;
-  }
-  if (estimate.status === "ok") {
-    if (!finite(estimate.concentration_nM)) return "estimate.concentration_nM is not a number";
-    if (!Array.isArray(estimate.ci95_nM) || estimate.ci95_nM.length !== 2 || !estimate.ci95_nM.every(finite)) {
-      return "estimate.ci95_nM is malformed";
-    }
-  } else if (estimate.concentration_nM !== null) {
-    return 'only an "ok" estimate may carry a concentration';
-  }
-  if (!(estimate.curve_id === null || typeof estimate.curve_id === "string")) {
-    return "estimate.curve_id is neither a string nor null";
-  }
-
-  if (entry.curve !== null) {
-    const curve = entry.curve;
-    if (!curve || typeof curve !== "object") return "curve snapshot is neither an object nor null";
-    if (typeof curve.curve_id !== "string" || !curve.curve_id.trim()) return "curve snapshot: curve_id is missing";
-    if (typeof curve.timepoint !== "string") return "curve snapshot: timepoint is missing";
-    if (!finite(curve.lod_nM)) return "curve snapshot: lod_nM is not a number";
-    if (!curve.range_nM || !finite(curve.range_nM.min) || !finite(curve.range_nM.max)) {
-      return "curve snapshot: range_nM is malformed";
-    }
-  }
-  return null;
-}
-
-// One curve out of an import file: an error message naming what is wrong, or null if it is sound.
 // A curve that gets past this will convert real readings into concentrations, so every field a
-// later calculation touches is checked here rather than trusted. is_active is deliberately not
-// checked: localImportCurvesInto() overrides it either way.
+// later calculation touches is checked here rather than trusted.
 function localCurveProblem(entry) {
   const finite = (value) => Number.isFinite(value);
   if (!entry || typeof entry !== "object") return "not an object";
   if (typeof entry.curve_id !== "string" || !entry.curve_id.trim()) return "curve_id is missing";
   if (entry.model !== "4PL") return `unsupported model "${entry.model}"`;
-  if (typeof entry.fitted_at !== "string" || Number.isNaN(Date.parse(entry.fitted_at))) return "fitted_at is not a date";
+  if (!localIsDate(entry.fitted_at)) return "fitted_at is not a date";
+  if (!["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
+  if (typeof entry.plan_id !== "string" || !entry.plan_id.trim()) return "plan_id is missing";
   if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
-  if (typeof entry.timepoint !== "string" || !entry.timepoint.trim()) return "timepoint is missing";
-  if (entry.source !== undefined && !["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
+  if (typeof entry.signal !== "string" || !entry.signal.trim()) return "signal is missing";
+  const conditions = localConditionsProblem(entry.conditions);
+  if (conditions) return `conditions: ${conditions}`;
 
   const params = entry.params;
   if (!params || typeof params !== "object") return "params is missing";
@@ -571,7 +556,7 @@ function localCurveProblem(entry) {
   }
 
   // localInverseCore() reaches straight into these, so a curve without them would not merely lose
-  // its confidence interval — the first inversion would throw.
+  // its confidence interval — the first conversion would throw.
   const priv = entry.private;
   if (!priv || typeof priv !== "object") return "fit internals are missing";
   if (!priv.noise || !finite(priv.noise.a) || !finite(priv.noise.b)) return "fit internals: the noise model is malformed";
@@ -580,6 +565,101 @@ function localCurveProblem(entry) {
     if (!Array.isArray(row) || row.length !== 4 || !row.every(finite)) return "fit internals: the covariance is not 4x4";
   }
   return null;
+}
+
+// An estimate is checked as strictly as a measurement: a restored row that claims a concentration
+// outside the "ok" status would read as a result the curve never gave.
+function localEstimateProblem(estimate) {
+  const finite = (value) => Number.isFinite(value);
+  if (!estimate || typeof estimate !== "object") return "estimate is missing";
+  if (!["ok", "below_lod", "above_range", "no_tubes"].includes(estimate.status)) return `unknown estimate.status "${estimate.status}"`;
+  if (estimate.status === "ok") {
+    if (!finite(estimate.concentration_nM)) return "estimate.concentration_nM is not a number";
+    if (!Array.isArray(estimate.ci95_nM) || estimate.ci95_nM.length !== 2 || !estimate.ci95_nM.every(finite)) {
+      return "estimate.ci95_nM is malformed";
+    }
+  } else if (estimate.concentration_nM !== null || estimate.ci95_nM !== null) {
+    return 'only an "ok" estimate may carry a concentration';
+  }
+  if (!(Number.isInteger(estimate.n) && estimate.n >= 0)) return "estimate.n is malformed";
+  if (!(estimate.mean_signal === null || finite(estimate.mean_signal))) return "estimate.mean_signal is malformed";
+  if (!(estimate.sd_signal === null || finite(estimate.sd_signal))) return "estimate.sd_signal is malformed";
+  return null;
+}
+
+function localTubesProblem(tubes, expectedType) {
+  if (!Array.isArray(tubes)) return "tubes are missing";
+  for (const tube of tubes) {
+    if (!tube || typeof tube !== "object") return "a tube is not an object";
+    if (!(tube.excluded_reason === null || (typeof tube.excluded_reason === "string" && tube.excluded_reason.trim()))) {
+      return "a tube's excluded_reason is malformed";
+    }
+    const problem = localMeasurementProblem(tube.measurement, expectedType);
+    if (problem) return problem;
+  }
+  return null;
+}
+
+function localBatchProblem(entry) {
+  const finite = (value) => Number.isFinite(value);
+  if (!entry || typeof entry !== "object") return "not an object";
+  if (typeof entry.batch_id !== "string" || !entry.batch_id.trim()) return "batch_id is missing";
+  if (!localIsDate(entry.created_at)) return "created_at is not a date";
+  if (!(entry.finished_at === null || localIsDate(entry.finished_at))) return "finished_at is neither a date nor null";
+  if (!(entry.exported_at === null || localIsDate(entry.exported_at))) return "exported_at is neither a date nor null";
+  if (typeof entry.curve_id !== "string" || !entry.curve_id.trim()) return "curve_id is missing";
+  if (!(Number.isInteger(entry.tubes_per_sample) && entry.tubes_per_sample >= 1 && entry.tubes_per_sample <= 10)) {
+    return "tubes_per_sample is malformed";
+  }
+  if (typeof entry.notes !== "string") return "notes is malformed";
+
+  const curve = entry.curve;
+  if (!curve || typeof curve !== "object" || curve.curve_id !== entry.curve_id) return "curve snapshot is missing or names another curve";
+  if (localConditionsProblem(curve.conditions)) return "curve snapshot: conditions are malformed";
+  if (typeof curve.signal !== "string" || !/^[0-9a-f]{6}$/.test(String(curve.config_fingerprint))) {
+    return "curve snapshot: signal or config is malformed";
+  }
+  if (![curve.lod_nM, curve.loq_nM].every(finite) || !curve.range_nM || !finite(curve.range_nM.min) || !finite(curve.range_nM.max)) {
+    return "curve snapshot: limits are malformed";
+  }
+
+  const blanks = localTubesProblem(entry.blanks, "blank");
+  if (blanks) return `blanks: ${blanks}`;
+  const blankEstimate = localEstimateProblem(entry.blank_estimate);
+  if (blankEstimate) return `blanks: ${blankEstimate}`;
+  if (!Array.isArray(entry.samples)) return "samples are missing";
+  const names = new Set();
+  for (const sample of entry.samples) {
+    if (!sample || typeof sample.name !== "string" || !sample.name.trim()) return "a sample has no name";
+    if (names.has(sample.name)) return `sample "${sample.name}" appears twice`;
+    names.add(sample.name);
+    const tubes = localTubesProblem(sample.tubes, "unknown");
+    if (tubes) return `sample "${sample.name}": ${tubes}`;
+    const estimate = localEstimateProblem(sample.estimate);
+    if (estimate) return `sample "${sample.name}": ${estimate}`;
+  }
+  return null;
+}
+
+// One section of a backup into the store. Every section follows the same two rules: an id already
+// stored is kept rather than replaced (what is here was produced on this machine; the file is a
+// copy of something older), and whatever fails validation is reported with a reason instead of
+// vanishing.
+function localImportSection(entries, idField, problemOf, exists, store) {
+  const imported = [];
+  const skipped = [];
+  const rejected = [];
+  for (const entry of entries) {
+    const id = typeof entry?.[idField] === "string" && entry[idField].trim() ? entry[idField] : `(no ${idField})`;
+    const problem = problemOf(entry);
+    if (problem) rejected.push({ id, reason: problem });
+    else if (exists(entry[idField])) skipped.push(id);
+    else {
+      store(entry);
+      imported.push(id);
+    }
+  }
+  return { imported, skipped, rejected };
 }
 
 // ---- Exposed to hardware_api.js -----------------------------------------
@@ -591,47 +671,35 @@ const HardwareLocal = {
     return { blankScatter: Number.isFinite(value) ? value : null };
   },
 
-  // Called right after HardwareProcessing.toMeasurement() has assembled a reading:
-  // adds the flags that need stored state, and updates the blank baseline. Only sample reads go
-  // through here (Measure and a calibration run); the status page's instrument check goes through
-  // HardwareApi.runBlankCheck(), which skips this entirely.
+  // Called right after HardwareProcessing.toMeasurement() has assembled a reading. Only sample
+  // reads go through here (a calibration run and a measurement batch); the Instrument page's
+  // checks go through HardwareApi.runBlankCheck(), which skips this entirely.
   finalizeMeasurement(m) {
     const store = localLoad();
-
     // The HIGH_SCATTER baseline, and so what counts as "too cloudy", is whatever blank was read
-    // last. That must be a calibration blank — cells at the standards' OD, no AHL. A buffer-only
-    // cuvette would set it far below any real sample and flag everything read after it.
+    // last. That must be a cell blank — cells at the standards' OD, no AHL. A buffer-only cuvette
+    // would set it far below any real sample and flag everything read after it.
     if (m.sample_type === "blank" && !m.flags.some((f) => ["HIGH_SCATTER", "NO_DARK_PAIR", "SATURATED"].includes(f))) {
       store.blank_scatter[m.config_fingerprint] = m.scatter;
+      localSave(store);
     }
-
-    // QC for unknowns: compared against the active curve, using exactly the same rule as invert().
-    const active = localActiveCurve(store);
-    if (m.sample_type === "unknown" && active) {
-      if (active.config_fingerprint !== m.config_fingerprint) {
-        m.flags.push("STALE_CONFIG");
-      } else {
-        const { status } = localInverseCore(m.fluorescence, active, store.curve_private[active.curve_id]);
-        if (status === "below_lod") m.flags.push("BELOW_LOD");
-        if (status === "above_range") m.flags.push("ABOVE_RANGE");
-      }
-    }
-
-    localSave(store);
     return m;
   },
 
-  createCalibrationPlan(input, configFingerprint) {
+  // ---- Calibration runs ---------------------------------------------------
+
+  createCalibrationPlan(input, configFingerprint, signal) {
     const store = localLoad();
-    const { concentrations_nM, replicates, blanks, timepoint } = input ?? {};
-    if (!configFingerprint) localFail("Instrument config unknown: a plan must be bound to the device's config.");
+    const { concentrations_nM, replicates, blanks } = input ?? {};
+    if (!configFingerprint) localFail("Instrument config unknown: a run must be bound to the device's config.");
+    if (!signal) localFail("Signal definition unknown.");
+    const conditions = localConditions(input?.conditions);
     if (!Array.isArray(concentrations_nM) || concentrations_nM.length === 0) localFail("Enter at least one concentration.");
     if (!concentrations_nM.every((c) => Number.isFinite(c) && c > 0)) localFail("Concentrations must be positive numbers.");
     const concentrations = [...new Set(concentrations_nM)].sort((a, b) => a - b);
     if (concentrations.length < 4) localFail("A 4PL fit needs at least 4 distinct concentrations.");
     if (!(Number.isInteger(replicates) && replicates >= 1 && replicates <= 10)) localFail("Replicates must be an integer from 1 to 10.");
     if (!(Number.isInteger(blanks) && blanks >= 2 && blanks <= 10)) localFail("Blanks must be an integer from 2 to 10 (LOD needs a blank SD).");
-    if (!timepoint || !String(timepoint).trim()) localFail("Describe the timepoint.");
 
     // Interleaved by "replicate round": each round is a blank, then concentrations low to high.
     // This keeps instrument drift from concentrating on any one concentration, and makes carryover
@@ -648,12 +716,13 @@ const HardwareLocal = {
     }
 
     const plan = {
-      plan_id: localId("PLAN"),
+      plan_id: localId("RUN"),
       created_at: new Date().toISOString(),
       source: "device",
       measured_on: null,
       config_fingerprint: configFingerprint,
-      timepoint: String(timepoint).trim(),
+      signal,
+      conditions,
       items: items.map((item, i) => ({ slot: i + 1, ...item, measurement: null })),
     };
     store.plans[plan.plan_id] = plan;
@@ -661,15 +730,16 @@ const HardwareLocal = {
     return plan;
   },
 
-  // Readings recorded earlier and entered by hand, stored as a plan whose every slot is already
-  // filled, so fitting, exclusions, and saving run exactly as they do for a device run. Slots
+  // Readings recorded earlier and entered by hand, stored as a run whose every slot is already
+  // filled, so fitting, exclusions, and saving work exactly as they do for a device run. Slots
   // keep the order the rows were entered in. Nothing that wasn't recorded (read-noise SD,
   // scatter, channels) is filled in: those fields stay null.
-  createManualDataset(input, configFingerprint) {
+  createManualDataset(input, configFingerprint, signal) {
     const store = localLoad();
-    const { timepoint, measured_on, rows } = input ?? {};
+    const { measured_on, rows } = input ?? {};
     if (!/^[0-9a-f]{6}$/.test(String(configFingerprint))) localFail("Instrument config unknown: a dataset must be bound to a config.");
-    if (!timepoint || !String(timepoint).trim()) localFail("Describe the timepoint.");
+    if (!signal) localFail("Signal definition unknown.");
+    const conditions = localConditions(input?.conditions);
     if (!localIsPastDate(measured_on)) localFail("Measured on must be a date no later than today.");
     if (!Array.isArray(rows) || rows.length === 0) localFail("Enter at least one row.");
 
@@ -687,7 +757,7 @@ const HardwareLocal = {
     if (concentrations.size < 4) localFail("A 4PL fit needs at least 4 distinct concentrations.");
     if (rows.filter((row) => row.sample_type === "blank").length < 2) localFail("Enter at least 2 blanks: LOD needs a blank SD.");
 
-    const plan_id = localId("PLAN");
+    const plan_id = localId("RUN");
     const replicateCount = new Map();
     const items = rows.map((row, i) => {
       const slot = i + 1;
@@ -705,6 +775,7 @@ const HardwareLocal = {
           timestamp_utc: measured_on,
           sample_type: row.sample_type,
           known_concentration_nM: blank ? null : row.concentration_nM,
+          signal,
           fluorescence: row.fluorescence,
           fluorescence_sd: null,
           scatter: null,
@@ -722,7 +793,8 @@ const HardwareLocal = {
       source: "manual",
       measured_on,
       config_fingerprint: configFingerprint,
-      timepoint: String(timepoint).trim(),
+      signal,
+      conditions,
       items,
     };
     store.plans[plan_id] = plan;
@@ -732,14 +804,16 @@ const HardwareLocal = {
 
   getCalibrationPlan(plan_id) {
     const plan = localLoad().plans[plan_id];
-    if (!plan) localFail(`Plan ${plan_id} not found.`);
+    if (!plan) localFail(`Run ${plan_id} not found.`);
     return plan;
   },
 
   // Newest first. Only what a list needs, so a page doesn't have to hold every reading in memory
   // to show a row per run.
   listCalibrationPlans() {
-    return Object.values(localLoad().plans)
+    const store = localLoad();
+    const curves = Object.values(store.curves);
+    return Object.values(store.plans)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .map((plan) => ({
         plan_id: plan.plan_id,
@@ -747,17 +821,18 @@ const HardwareLocal = {
         source: plan.source,
         measured_on: plan.measured_on,
         config_fingerprint: plan.config_fingerprint,
-        timepoint: plan.timepoint,
+        signal: plan.signal,
+        conditions: plan.conditions,
         total: plan.items.length,
         read: plan.items.filter((item) => item.measurement !== null).length,
+        curve_ids: curves.filter((curve) => curve.plan_id === plan.plan_id).map((curve) => curve.curve_id),
       }));
   },
-
 
   recordPlanMeasurement(plan_id, slot, m) {
     const store = localLoad();
     const plan = store.plans[plan_id];
-    if (!plan) localFail(`Plan ${plan_id} not found.`);
+    if (!plan) localFail(`Run ${plan_id} not found.`);
     if (plan.source === "manual") localFail(`${plan_id} holds entered data; its values can't be replaced.`);
     const item = plan.items.find((it) => it.slot === slot);
     if (!item) localFail(`Slot ${slot} does not exist in ${plan_id}.`);
@@ -771,6 +846,9 @@ const HardwareLocal = {
     if (item.sample_type === "standard" && m.known_concentration_nM !== item.concentration_nM) {
       localFail(`Slot ${slot} expects ${item.concentration_nM} nM.`);
     }
+    if (m.signal !== plan.signal) {
+      localFail(`This run measures signal ${plan.signal}, but the page now reads ${m.signal}. Reload the page, or start a new run.`);
+    }
 
     const recorded = { ...m, flags: [...m.flags] };
     if (recorded.config_fingerprint !== plan.config_fingerprint && !recorded.flags.includes("STALE_CONFIG")) {
@@ -781,16 +859,18 @@ const HardwareLocal = {
     return plan;
   },
 
+  // ---- Curves --------------------------------------------------------------
+
   fitCurve(plan_id, excluded_sample_ids) {
     const store = localLoad();
     const plan = store.plans[plan_id];
-    if (!plan) localFail(`Plan ${plan_id} not found.`);
+    if (!plan) localFail(`Run ${plan_id} not found.`);
     const pending = plan.items.filter((it) => it.measurement === null).length;
     if (pending > 0) localFail(`${pending} tube(s) in ${plan_id} are still unread.`);
 
     const excluded = new Set(excluded_sample_ids ?? []);
     const sampleIds = new Set(plan.items.map((it) => it.measurement.sample_id));
-    for (const id of excluded) if (!sampleIds.has(id)) localFail(`Excluded sample ${id} is not in this plan.`);
+    for (const id of excluded) if (!sampleIds.has(id)) localFail(`Excluded sample ${id} is not in this run.`);
 
     const included = plan.items.filter((it) => !excluded.has(it.measurement.sample_id));
     const stale = included.filter((it) => it.measurement.config_fingerprint !== plan.config_fingerprint);
@@ -849,23 +929,22 @@ const HardwareLocal = {
     };
     if (!(range_nM.min < range_nM.max)) localFail("No usable range: LOD is above the curve's upper limit.");
 
-    const rmse = Math.sqrt(residualSs / points.length);
-
     const curve = {
       curve_id: localId("CURVE"),
       fitted_at: new Date().toISOString(),
-      source: plan.source === "manual" ? "manual" : "device",
+      plan_id: plan.plan_id,
+      source: plan.source,
       model: "4PL",
       params,
       lod_nM,
       loq_nM,
-      rmse,
+      rmse: Math.sqrt(residualSs / points.length),
       range_nM,
       // Reasons are filled in by the page when saveCurve is called; fitCurve's own signature only takes sample ids.
       excluded: [...excluded].map((sample_id) => ({ sample_id, reason: "" })),
       config_fingerprint: plan.config_fingerprint,
-      timepoint: plan.timepoint,
-      is_active: false,
+      signal: plan.signal,
+      conditions: plan.conditions,
     };
     store.drafts[curve.curve_id] = { curve, cov, noise: readingNoise };
     // Keeps only the last 10 drafts, so localStorage doesn't keep growing.
@@ -875,46 +954,24 @@ const HardwareLocal = {
     return curve;
   },
 
-  // A new curve (draft): saved along with its exclusion reasons. An existing curve: only
-  // accepts toggling is_active, and its parameters always defer to the stored version.
-  // currentFingerprint is the device's current config, used to confirm the curve still
-  // applies when setting it active; it's null when the device is unreachable, in which case
-  // setting active is not allowed.
-  saveCurve(curve, currentFingerprint) {
+  // Saves a fitted draft along with its exclusion reasons. A saved curve never changes afterwards:
+  // batches refer to it by id, and what they converted has to stay reproducible.
+  saveCurve(curve) {
     const store = localLoad();
     if (!curve || !curve.curve_id) localFail("curve_id is required.");
-    const setActive = (target) => {
-      if (curve.is_active) {
-        if (!currentFingerprint) {
-          localFail("Device not reachable, so its current config can't be checked. A curve can only be set as active while the device is online.");
-        }
-        if (target.config_fingerprint !== currentFingerprint) {
-          localFail(`Curve ${target.curve_id} is bound to config ${target.config_fingerprint}; the instrument is now ${currentFingerprint}.`);
-        }
-        for (const other of Object.values(store.curves)) other.is_active = false;
-      }
-      target.is_active = Boolean(curve.is_active);
-    };
-
-    const existing = store.curves[curve.curve_id];
-    if (existing) {
-      setActive(existing);
-      localSave(store);
-      return existing;
-    }
+    if (store.curves[curve.curve_id]) localFail(`${curve.curve_id} is already saved.`);
 
     const draft = store.drafts[curve.curve_id];
     if (!draft) localFail(`Curve ${curve.curve_id} was never fitted.`);
     const reasons = new Map((curve.excluded ?? []).map((e) => [e.sample_id, String(e.reason ?? "").trim()]));
     const draftIds = draft.curve.excluded.map((e) => e.sample_id);
     if (reasons.size !== draftIds.length || !draftIds.every((id) => reasons.has(id))) {
-      localFail("Excluded samples differ from the fit; fit again before saving.");
+      localFail("Excluded tubes differ from the fit; fit again before saving.");
     }
     const missing = draftIds.filter((id) => !reasons.get(id));
-    if (missing.length > 0) localFail(`Give a reason for every excluded sample (${missing.join(", ")}).`);
+    if (missing.length > 0) localFail(`Give a reason for every excluded tube (${missing.join(", ")}).`);
 
-    const saved = { ...draft.curve, excluded: draftIds.map((id) => ({ sample_id: id, reason: reasons.get(id) })), is_active: false };
-    setActive(saved);
+    const saved = { ...draft.curve, excluded: draftIds.map((id) => ({ sample_id: id, reason: reasons.get(id) })) };
     store.curves[saved.curve_id] = saved;
     store.curve_private[saved.curve_id] = { cov: draft.cov, noise: draft.noise };
     delete store.drafts[saved.curve_id];
@@ -926,73 +983,144 @@ const HardwareLocal = {
     return Object.values(localLoad().curves).sort((a, b) => b.fitted_at.localeCompare(a.fitted_at));
   },
 
-
-  getActiveCurve() {
-    return localActiveCurve(localLoad());
+  getCurve(curve_id) {
+    const curve = localLoad().curves[curve_id];
+    if (!curve) localFail(`Curve ${curve_id} not found.`);
+    return curve;
   },
 
-  invert(fluorescence, config_fingerprint) {
+  // ---- Measurement batches ---------------------------------------------------
+  // One sitting at the instrument: the curve is chosen once, blanks are read first, then each
+  // sample in replicate tubes. Every tube is stored the moment it is read — it is already spent —
+  // and each sample's estimate is the mean of its tubes converted once.
+
+  createBatch(input, configFingerprint, signal) {
     const store = localLoad();
-    if (!Number.isFinite(fluorescence)) localFail("fluorescence must be a number.");
-    const active = localActiveCurve(store);
-    if (!active) return { concentration_nM: null, ci95_nM: null, status: "no_curve", curve_id: null };
-    if (active.config_fingerprint !== config_fingerprint) {
-      return { concentration_nM: null, ci95_nM: null, status: "config_mismatch", curve_id: active.curve_id };
+    const curve = store.curves[input?.curve_id];
+    if (!curve) localFail("Choose a saved curve.");
+    if (!configFingerprint) localFail("The instrument is unreachable, so its config can't be checked against the curve.");
+    if (curve.config_fingerprint !== configFingerprint) {
+      localFail(`${curve.curve_id} was fitted under config ${curve.config_fingerprint}; the instrument now runs ${configFingerprint}.`);
     }
-    const result = localInverseCore(fluorescence, active, store.curve_private[active.curve_id]);
-    return {
-      concentration_nM: result.status === "ok" ? result.concentration_nM : null,
-      ci95_nM: result.status === "ok" ? result.ci95_nM : null,
-      status: result.status,
-      curve_id: active.curve_id,
-    };
-  },
+    if (curve.signal !== signal) localFail(`${curve.curve_id} was fitted on signal ${curve.signal}; readings are now ${signal}.`);
+    const tubes = Number(input?.tubes_per_sample);
+    if (!(Number.isInteger(tubes) && tubes >= 1 && tubes <= 10)) localFail("Tubes per sample must be an integer from 1 to 10.");
+    const notes = String(input?.notes ?? "").trim();
+    if (notes.length > LOCAL_TEXT_LIMIT * 5) localFail("Notes are too long.");
+    localMakeRoomForBatch(store);
 
-  // ---- The Measure page's reading log -------------------------------------
-  // Measure otherwise shows one reading and then overwrites it, which is no way to keep data that
-  // took a wet-lab run to produce. This is the working copy only: a browser's storage is one
-  // "clear site data" away from empty, so a CSV export is what actually preserves a reading.
-
-  // The estimate is stored as it was reported, never recomputed later: the active curve can be
-  // swapped, restricted or deleted afterwards, and the record has to keep the number that was
-  // actually read off the screen together with the curve it came from. The same goes for the
-  // curve's own limits, so an exported row can be read without still having the curve.
-  recordMeasurement(m, estimate, curve) {
-    const store = localLoad();
-    const record = {
-      record_id: localId("READ"),
-      recorded_at: new Date().toISOString(),
-      measurement: m,
-      estimate,
-      curve: curve
-        ? { curve_id: curve.curve_id, timepoint: curve.timepoint, lod_nM: curve.lod_nM, range_nM: curve.range_nM }
-        : null,
+    const batch = {
+      batch_id: localId("BATCH"),
+      created_at: new Date().toISOString(),
+      finished_at: null,
       exported_at: null,
+      curve_id: curve.curve_id,
+      curve: localCurveSnapshot(curve),
+      tubes_per_sample: tubes,
+      notes,
+      blanks: [],
+      blank_estimate: null,
+      samples: [],
     };
-    store.measurements.push(record);
-    // Drops the oldest, which is why the page keeps the unexported count in front of the user.
-    if (store.measurements.length > LOCAL_MEASUREMENT_LIMIT) {
-      store.measurements = store.measurements.slice(-LOCAL_MEASUREMENT_LIMIT);
-    }
+    localRecomputeBatch(store, batch);
+    store.batches[batch.batch_id] = batch;
     localSave(store);
-    return record;
+    return batch;
   },
 
-  listMeasurements() {
-    return localLoad().measurements;
+  getBatch(batch_id) {
+    const batch = localLoad().batches[batch_id];
+    if (!batch) localFail(`Batch ${batch_id} not found.`);
+    return batch;
   },
 
-  // Called once the rows have been handed to the browser as a file, so the page can keep saying
-  // how many readings still exist nowhere but here.
-  markMeasurementsExported(record_ids) {
+  listBatches() {
+    return Object.values(localLoad().batches)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(localBatchSummary);
+  },
+
+  // role "blank" adds to the batch's blanks; role "sample" adds a tube to the named sample,
+  // creating it on its first tube.
+  recordBatchReading(batch_id, role, sample_name, m) {
     const store = localLoad();
-    const ids = new Set(record_ids ?? []);
-    const at = new Date().toISOString();
-    for (const record of store.measurements) {
-      if (ids.has(record.record_id)) record.exported_at = at;
+    const batch = store.batches[batch_id];
+    if (!batch) localFail(`Batch ${batch_id} not found.`);
+    if (batch.finished_at) localFail(`${batch_id} is finished; start a new batch to read more.`);
+    const expected = role === "blank" ? "blank" : role === "sample" ? "unknown" : null;
+    if (!expected) localFail(`Unknown role "${role}".`);
+    if (!m || m.sample_type !== expected) localFail(`A ${role} tube must be read as ${expected}.`);
+
+    // The tube is spent, so it is kept even when it can't count: left out, saying why.
+    let excluded_reason = null;
+    if (m.config_fingerprint !== batch.curve.config_fingerprint) {
+      excluded_reason = `Read under config ${m.config_fingerprint}, not the curve's ${batch.curve.config_fingerprint}.`;
+    } else if (m.signal !== batch.curve.signal) {
+      excluded_reason = `Signal ${m.signal}, not the curve's ${batch.curve.signal}.`;
     }
+    const tube = { measurement: { ...m, flags: [...m.flags] }, excluded_reason };
+    if (excluded_reason && !tube.measurement.flags.includes("STALE_CONFIG")) tube.measurement.flags.push("STALE_CONFIG");
+
+    if (role === "blank") {
+      batch.blanks.push(tube);
+    } else {
+      const name = String(sample_name ?? "").trim();
+      if (!name) localFail("Enter the sample name.");
+      if (name.length > LOCAL_TEXT_LIMIT) localFail("The sample name is too long.");
+      let sample = batch.samples.find((s) => s.name === name);
+      if (!sample) {
+        sample = { name, tubes: [], estimate: null };
+        batch.samples.push(sample);
+      }
+      sample.tubes.push(tube);
+    }
+    localRecomputeBatch(store, batch);
+    batch.exported_at = null; // what was exported no longer holds everything
     localSave(store);
-    return store.measurements;
+    return batch;
+  },
+
+  // reason null puts a tube back; a string leaves it out. A tube left out automatically (wrong
+  // config or signal) can't be put back.
+  setBatchTubeExclusion(batch_id, sample_id, reason) {
+    const store = localLoad();
+    const batch = store.batches[batch_id];
+    if (!batch) localFail(`Batch ${batch_id} not found.`);
+    if (batch.finished_at) localFail(`${batch_id} is finished; its tubes can't change.`);
+    const tube = localFindTube(batch, sample_id);
+    if (!tube) localFail(`Tube ${sample_id} is not in this batch.`);
+    const m = tube.measurement;
+    const automatic = m.config_fingerprint !== batch.curve.config_fingerprint || m.signal !== batch.curve.signal;
+    if (automatic) localFail(`${sample_id} was read under a different config or signal and can't be included.`);
+    if (reason === null) {
+      tube.excluded_reason = null;
+    } else {
+      const text = String(reason).trim();
+      if (!text) localFail("Give a reason for leaving the tube out.");
+      tube.excluded_reason = text;
+    }
+    localRecomputeBatch(store, batch);
+    batch.exported_at = null;
+    localSave(store);
+    return batch;
+  },
+
+  finishBatch(batch_id) {
+    const store = localLoad();
+    const batch = store.batches[batch_id];
+    if (!batch) localFail(`Batch ${batch_id} not found.`);
+    if (!batch.finished_at) batch.finished_at = new Date().toISOString();
+    localSave(store);
+    return batch;
+  },
+
+  // Called once the rows have been handed to the browser as a file, so the pages can say which
+  // batches still exist nowhere but here.
+  markBatchesExported(batch_ids) {
+    const store = localLoad();
+    const at = new Date().toISOString();
+    for (const id of batch_ids ?? []) if (store.batches[id]) store.batches[id].exported_at = at;
+    localSave(store);
   },
 
   // ---- Reset ----------------------------------------------------------------
@@ -1008,11 +1136,12 @@ const HardwareLocal = {
     } catch (err) {
       // Storage is unavailable, so nothing is persisted; only the memory copy can hold data.
     }
+    const batches = Object.values(store.batches);
     return {
       runs: Object.keys(store.plans).length,
       curves: Object.keys(store.curves).length,
-      readings: store.measurements.length,
-      unexported_readings: store.measurements.filter((record) => !record.exported_at).length,
+      batches: batches.length,
+      unexported_batches: batches.filter((batch) => !batch.exported_at).length,
       keys,
       in_memory: localMemoryStore !== null,
     };
@@ -1041,9 +1170,8 @@ const HardwareLocal = {
 
   // ---- Backup -------------------------------------------------------------
 
-  // Everything this browser holds, in one file. Deliberately one file and not three: a curve is
-  // meaningless without the run it was fitted from, and it took only forgetting one of two
-  // downloads to end up with exactly that.
+  // Everything this browser holds, in one file: a curve is meaningless without the run it was
+  // fitted from, and a batch without the curve that converted it.
   //
   // blank_scatter is left out on purpose. It is not data but derived state — the scatter of the
   // last blank read — and the next blank re-establishes it. Restoring a stale one from another
@@ -1058,44 +1186,45 @@ const HardwareLocal = {
       curves: Object.values(store.curves)
         .sort((a, b) => b.fitted_at.localeCompare(a.fitted_at))
         // curve_private rides along: the covariance and noise model are not part of the data
-        // contract, but without them a restored curve inverts and never gives a interval.
+        // contract, but without them a restored curve can't convert anything.
         .map((curve) => ({ ...curve, private: store.curve_private[curve.curve_id] ?? null })),
-      measurements: [...store.measurements],
+      batches: Object.values(store.batches).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     };
   },
 
-  // Restores a backup. The file is untrusted throughout — hand-edited, from another build, or not
-  // ours at all — so every entry is validated before it is stored. Sections are independent: one
-  // bad curve must not cost you the runs in the same file. A section missing from the file comes
-  // back as null, which is not the same as one that was present and empty.
+  // Restores a backup. The file is untrusted throughout, so every entry is validated before it is
+  // stored. Sections are independent: one bad curve must not cost you the runs in the same file.
   importBackup(payload) {
-    if (!payload || typeof payload !== "object") localFail("That file is not a LasReader backup.");
-
-    // Curves and runs were exported separately before the combined backup existed; those files
-    // still restore, so an earlier download never becomes unreadable.
-    const legacy = {
-      [LOCAL_CURVES_EXPORT_FORMAT]: { key: "curves", max: LOCAL_CURVES_EXPORT_VERSION },
-      [LOCAL_PLANS_EXPORT_FORMAT]: { key: "plans", max: LOCAL_PLANS_EXPORT_VERSION },
-    }[payload.format];
-    const { key, max } = legacy ?? { key: null, max: LOCAL_BACKUP_VERSION };
-    if (!legacy && payload.format !== LOCAL_BACKUP_FORMAT) localFail("That file is not a LasReader backup.");
-
+    if (!payload || typeof payload !== "object" || payload.format !== LOCAL_BACKUP_FORMAT) {
+      localFail("That file is not a LasReader backup.");
+    }
     // A missing version is a malformed file, not a newer one; saying "newer" would send the user
     // looking for a build that doesn't exist.
     if (!Number.isInteger(payload.version)) localFail("That file carries no version number.");
-    if (payload.version > max) localFail(`That file is version ${payload.version}, newer than this build understands.`);
+    if (payload.version > LOCAL_BACKUP_VERSION) localFail(`That file is version ${payload.version}, newer than this build understands.`);
+    if (payload.version < LOCAL_BACKUP_VERSION) {
+      localFail(`That file is version ${payload.version}, from the earlier workflow. Its runs carry no biosensor or induction time, so this build can't use them.`);
+    }
 
-    const section = (name) => (key === null || key === name) && Array.isArray(payload[name]) ? payload[name] : null;
-    const plans = section("plans");
-    const curves = section("curves");
-    const measurements = section("measurements");
-    if (!plans?.length && !curves?.length && !measurements?.length) localFail("That file holds nothing to restore.");
+    const plans = Array.isArray(payload.plans) ? payload.plans : [];
+    const curves = Array.isArray(payload.curves) ? payload.curves : [];
+    const batches = Array.isArray(payload.batches) ? payload.batches : [];
+    if (!plans.length && !curves.length && !batches.length) localFail("That file holds nothing to restore.");
 
     const store = localLoad();
     const result = {
-      plans: plans ? localImportPlansInto(store, plans) : null,
-      curves: curves ? localImportCurvesInto(store, curves) : null,
-      measurements: measurements ? localImportMeasurementsInto(store, measurements) : null,
+      plans: localImportSection(plans, "plan_id", localPlanProblem, (id) => Boolean(store.plans[id]), (entry) => {
+        // Slot order is what the run walks through, and a hand-edited file could have reordered it.
+        store.plans[entry.plan_id] = { ...entry, items: [...entry.items].sort((a, b) => a.slot - b.slot) };
+      }),
+      curves: localImportSection(curves, "curve_id", localCurveProblem, (id) => Boolean(store.curves[id]), (entry) => {
+        const { private: priv, ...curve } = entry;
+        store.curves[curve.curve_id] = curve;
+        store.curve_private[curve.curve_id] = { cov: priv.cov, noise: priv.noise };
+      }),
+      batches: localImportSection(batches, "batch_id", localBatchProblem, (id) => Boolean(store.batches[id]), (entry) => {
+        store.batches[entry.batch_id] = entry;
+      }),
     };
     localSave(store);
     return result;

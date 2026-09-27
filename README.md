@@ -3,7 +3,7 @@
 Wet-lab data tools for NCKU-Tainan iGEM 2026 (Capture): a frontend/backend-split web application.
 
 - **AHL dose-response analysis** — upload a raw plate reader export, run the whole analysis pipeline automatically, and get each strain's EC50, Hill coefficient, 95% confidence interval, R², LOD/LOQ, and whether that strain responds to AHL at all.
-- **CAPTURE-Screen hardware interface** — the team's own AS7341 fluorescence reader: once the device powers on and joins Wi-Fi it connects itself to the backend, the landing page shows all ten spectral channels live, and the other pages go through the backend for instrument checks, per-tube calibration, 4PL fitting, and measurement. Everything shown is a real reading from the device — no simulated data; calibration plans and curves currently live in the browser's localStorage.
+- **CAPTURE-Screen hardware interface** — the team's own AS7341 fluorescence reader: once the device powers on and joins Wi-Fi it connects itself to the backend, the landing page shows all ten spectral channels live, and four pages, used in order, go through the backend for instrument checks, per-tube calibration with a 4PL fit, and measuring samples in replicate through a chosen curve. Everything shown is a real reading from the device — no simulated data; calibration runs, curves and measurement batches currently live in the browser's localStorage.
 
 The frontend is a plain static site (deployed on GitHub Pages), the backend is FastAPI (deployed on Render), and the two talk over HTTP/CORS and WebSocket — there's no shared build step.
 
@@ -19,8 +19,8 @@ flowchart LR
     subgraph FE["frontend/ — static site (GitHub Pages)"]
         IDX["index.html<br/>entry page + live spectrum"]
         DR["dose-response.html"]
-        HW["hardware*.html<br/>CAPTURE-Screen, five pages"]
-        LOCAL["js/hardware_local.js<br/>calibration plans & curves (localStorage)"]
+        HW["hardware*.html<br/>CAPTURE-Screen, four steps + Data"]
+        LOCAL["js/hardware_local.js<br/>runs, curves & batches (localStorage)"]
         IDX --> DR
         IDX --> HW
         HW --> LOCAL
@@ -51,11 +51,11 @@ flowchart LR
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
 ├── dose-response.html        dose-response analysis page
-├── hardware.html             CAPTURE-Screen: instrument status (hardware section home)
-├── hardware-measure.html     CAPTURE-Screen: measure an unknown sample
-├── hardware-calibration.html CAPTURE-Screen: calibration run (measure tube-by-tube by slot)
-├── hardware-calibration-fit.html  CAPTURE-Screen: 4PL fit, exclusions, save
-├── hardware-curves.html      CAPTURE-Screen: curve list
+├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-checks
+├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
+├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
+├── hardware-measure.html     CAPTURE-Screen step 4: read samples in replicate through one curve
+├── hardware-data.html        CAPTURE-Screen: backup, restore, reset
 ├── css/style.css
 └── js/                       config / dose_response / backend_status / device_live
                               hardware_processing → hardware_local → hardware_api → hardware_common → each page's script
@@ -215,21 +215,23 @@ The backend needs to be reachable from a device on the local network: run `uvico
 
 ### Pages
 
-Calibration plans, curves, fitting, and inversion currently live in the browser's localStorage via `hardware_local.js`, not yet moved to a backend database.
+The hardware pages are one workflow used in order. A step bar at the top of every page shows the four steps, the state of each, and which comes next; within a page, numbered step cards do the same, and a step that can't start yet says what it is waiting for.
 
-| Page | Purpose |
-|---|---|
-| `hardware.html` | Connection status, config and fingerprint, active curve summary, Dark read / Blank read self-checks |
-| `hardware-calibration.html` | Creates a calibration list, measures tube-by-tube in slot order (only one cuvette, so "next tube" is pinned at the top) |
-| `hardware-calibration-fit.html` | 4PL fit, excludes individual tubes (a reason is required), saves and sets active |
-| `hardware-measure.html` | Measures a sample, inverts through the active curve to a concentration with a 95% CI |
-| `hardware-curves.html` | Every curve, marked active / available / stale |
+| Step | Page | Purpose |
+|---|---|---|
+| 1 Instrument | `hardware.html` | Connection, config and fingerprint, Dark read / Blank read self-checks |
+| 2 Calibrate | `hardware-calibration.html` | Set up a run with its conditions (biosensor strain, induction time) → read the standards tube by tube, or enter recorded data → 4PL fit, excluding tubes only with a reason → save the curve |
+| 3 Curves | `hardware-curves.html` | Every saved curve, what it is valid for, and whether it matches the instrument now |
+| 4 Measure | `hardware-measure.html` | A batch: choose a curve → read a blank → read each sample in replicate tubes → per-sample inferred AHL with a 95% CI, exported as CSV |
+| — | `hardware-data.html` | One backup file for runs, curves and batches; restore; delete everything |
+
+Runs, curves, fitting, batches and conversion currently live in the browser's localStorage via `hardware_local.js`, not yet moved to a backend database.
 
 The frontend is layered so that once a storage backend exists, only the API layer needs to change:
 
 - `js/hardware_processing.js` — pure functions: raw device reading → `Measurement` (dark subtraction, normalization, saturation check, unmixing, QC flags, config fingerprint).
-- `js/hardware_local.js` — temporary storage for calibration plans and curves, weighted 4PL fitting, LOD/LOQ, inversion with a 95% CI.
-- `js/hardware_api.js` — the one interface all five pages call: anything device-related goes through the backend, everything else through `hardware_local.js`; also defines the data contract via JSDoc (`Measurement`, `CalibrationPlan`, `CalibrationCurve`, `InverseEstimate`, etc.).
+- `js/hardware_local.js` — temporary storage for calibration runs, curves and measurement batches, weighted 4PL fitting, LOD/LOQ, inversion with a 95% CI.
+- `js/hardware_api.js` — the one interface every hardware page calls: anything device-related goes through the backend, everything else through `hardware_local.js`; also defines the data contract via JSDoc (`Measurement`, `CalibrationPlan`, `CalibrationCurve`, `MeasurementBatch`, `InverseEstimate`, etc.).
 - `js/device_live.js` — the landing page's live spectrum: a ten-channel bar chart of the latest frame. Display only, never stores any live frame.
 
 ### Backend configuration
@@ -249,7 +251,7 @@ Two rules that must never be broken: **no numeric concentration is ever shown** 
 
 **Adding a backend feature**: create a folder under `backend/app/` containing its own `router.py` (defining an `APIRouter` with its own path prefix), put the computation logic in other modules alongside it, then add one `include_router()` line in `app/main.py`. There's no shared base class or plugin registry — it's wired in by hand. Please don't add routes directly to `main.py`.
 
-**Adding a frontend page**: add an `.html` file under `frontend/`, load `js/config.js` first (it must come before everything else, since it defines `BACKEND_BASE_URL`), then that page's own script, and link to it from `index.html`. Each script only handles its own page and never calls another; the only thing they share is `BACKEND_BASE_URL`. The exception is CAPTURE-Screen's five hardware pages, which share `hardware_api.js` and `hardware_common.js` (see the Hardware section above). No deployment config changes are needed — GitHub Actions just uploads the whole `frontend/` folder as-is.
+**Adding a frontend page**: add an `.html` file under `frontend/`, load `js/config.js` first (it must come before everything else, since it defines `BACKEND_BASE_URL`), then that page's own script, and link to it from `index.html`. Each script only handles its own page and never calls another; the only thing they share is `BACKEND_BASE_URL`. The exception is CAPTURE-Screen's hardware pages, which share `hardware_api.js` and `hardware_common.js` (see the Hardware section above). No deployment config changes are needed — GitHub Actions just uploads the whole `frontend/` folder as-is.
 
 ## Dependencies
 

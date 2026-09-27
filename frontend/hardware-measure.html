@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Measure · CAPTURE-Screen · LasReader</title>
-  <meta name="description" content="Read a sample on the CAPTURE-Screen fluorescence reader and convert its sfGFP signal through the active calibration curve." />
+  <meta name="description" content="Step 4 of the CAPTURE-Screen workflow: choose a curve, read a blank, read each sample in replicate tubes, and convert its sfGFP signal to inferred AHL." />
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" type="image/png" href="assets/images/favicon.png" />
   <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
@@ -18,123 +18,227 @@
         <div class="site-header-text">
           <p class="eyebrow">iGEM NCKU-Tainan 2026 · CAPTURE-Screen</p>
           <h1>Measure</h1>
-          <p class="subtitle">Read a sample and convert its sfGFP signal through the active calibration curve</p>
+          <p class="subtitle">Read samples in replicate and convert them through one curve</p>
         </div>
         <img class="site-logo" src="assets/images/logo-wordmark.png"
              alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
       </div>
     </header>
 
-    <nav class="hw-subnav" id="hardware-subnav" data-page="measure" aria-label="Hardware sections"></nav>
+    <nav class="hw-steps" id="hardware-subnav" data-page="measure" aria-label="CAPTURE-Screen workflow"></nav>
 
     <main>
-      <section class="card">
-        <div class="section-heading">
-          <p class="section-label">Sample</p>
-          <!-- The curve every reading on this page is converted through. -->
-          <div class="curve-chip" id="measure-curve" aria-live="polite">Loading curve...</div>
+      <!-- 1. Curve: chosen once per batch. -->
+      <section class="card step-card" id="curve-card">
+        <div class="step-card-head">
+          <span class="step-card-num">1</span>
+          <div>
+            <p class="section-label">Curve</p>
+            <h2 id="curve-title">Choose a curve</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
 
-        <form id="measure-form">
-          <div class="form-grid">
-            <div class="field">
-              <label for="measure-sample-id">Sample ID</label>
-              <input type="text" id="measure-sample-id" value="S-001" autocomplete="off" required />
+        <div class="step-card-body">
+          <form id="batch-form" novalidate>
+            <p class="status-message" id="batch-curves-status" aria-live="polite">Loading curves...</p>
+            <fieldset class="plain-fieldset">
+              <legend class="visually-hidden">Curve</legend>
+              <ul class="choice-list" id="batch-curve-list"></ul>
+            </fieldset>
+            <p class="plan-meta">Samples must be the same biosensor strain, read after the same induction time.</p>
+
+            <div class="form-grid">
+              <div class="field">
+                <label for="batch-tubes">Tubes per sample</label>
+                <input type="number" id="batch-tubes" min="1" max="10" step="1" value="3" />
+              </div>
+              <div class="field">
+                <label for="batch-notes">Notes (optional)</label>
+                <input type="text" id="batch-notes" autocomplete="off" />
+              </div>
             </div>
-            <div class="field">
-              <label for="measure-sample-type">Sample type</label>
-              <select id="measure-sample-type">
-                <option value="unknown" selected>Unknown</option>
-                <option value="standard">Standard</option>
-                <option value="blank">Blank</option>
-              </select>
+
+            <button type="submit" id="batch-start-button">Start batch</button>
+            <p class="blocked-reason" id="batch-start-reason" hidden></p>
+          </form>
+          <p class="status-message" id="batch-start-status" aria-live="polite"></p>
+
+          <div id="batch-summary" hidden>
+            <div class="table-wrapper">
+              <table class="kv-table">
+                <tbody id="batch-summary-body"></tbody>
+              </table>
             </div>
-            <div class="field" id="measure-known-field" hidden>
-              <label for="measure-known-concentration">Known concentration (nM)</label>
-              <input type="number" id="measure-known-concentration" min="0" step="any" />
-            </div>
+            <p class="link-row"><a class="text-link" href="hardware-measure.html">Start a new batch</a></p>
           </div>
-
-          <!-- Filled by applySampleType(): a sample type whose effect outlasts this one reading has to say so. -->
-          <p class="plan-meta" id="measure-type-note" hidden></p>
-
-          <button type="submit" id="measure-read-button">Read</button>
-          <p class="blocked-reason" id="measure-read-reason" hidden></p>
-        </form>
-
-        <p class="status-message" id="measure-status" aria-live="polite"></p>
-
-        <div class="result-block" id="measure-result" hidden>
-          <div class="sensor-stats">
-            <div class="sensor-stat">
-              <span class="sensor-stat-label">sfGFP signal · F4 515 nm</span>
-              <span class="sensor-stat-value is-large" id="measure-signal">--</span>
-              <span class="sensor-stat-sub" id="measure-signal-sub"></span>
-              <span class="sensor-stat-sub" data-basis-note hidden></span>
-            </div>
-            <div class="sensor-stat">
-              <span class="sensor-stat-label">Inferred AHL</span>
-              <span class="sensor-stat-value is-large" id="measure-concentration">--</span>
-              <span class="sensor-stat-sub" id="measure-concentration-sub"></span>
-            </div>
-          </div>
-
-          <div id="measure-flags"></div>
-
-          <h3 class="subsection-heading table-heading">Spectral channels</h3>
-          <p class="chart-note">
-            Dark-subtracted, normalized basic counts per AS7341 channel. F4 (515 nm) carries the sfGFP
-            emission; F3 (480 nm) is excitation leakage and does not change with concentration.
-          </p>
-          <!-- No height attribute on the canvas: Chart.js ignores aspectRatio when
-               the canvas carries one. See js/dose_response.js. -->
-          <div class="chart-plate">
-            <canvas id="measure-channel-chart"></canvas>
-          </div>
-
-          <div class="provenance" id="measure-provenance"></div>
         </div>
       </section>
 
-      <section class="card">
-        <div class="section-heading">
+      <!-- 2. Blank: the same cells without AHL, before any sample. -->
+      <section class="card step-card" id="blank-card">
+        <div class="step-card-head">
+          <span class="step-card-num">2</span>
           <div>
-            <p class="section-label">Readings</p>
-            <h2>Reading log</h2>
+            <p class="section-label">Blank</p>
+            <h2>Cells without AHL</h2>
           </div>
-          <span class="flag-chip" id="log-count" aria-live="polite">--</span>
+          <span class="flag-chip step-card-state">--</span>
         </div>
-        <p class="section-description">
-          Kept in this browser only, newest 500. Clearing site data deletes them, so export a copy.
-        </p>
+        <p class="blocked-reason step-card-waiting" hidden></p>
 
-        <div class="button-row">
-          <button type="button" id="log-export-button">Export CSV</button>
+        <div class="step-card-body">
+          <p class="plan-meta">Same strain and induction time as the samples. Sets the HIGH_SCATTER baseline.</p>
+          <div class="button-row">
+            <button type="button" id="blank-read-button">Read blank</button>
+          </div>
+          <p class="blocked-reason" id="blank-read-reason" hidden></p>
+          <p class="status-message" id="blank-status" aria-live="polite"></p>
+          <p class="status-message" id="blank-check" hidden></p>
+          <div class="table-wrapper table-spaced" id="blank-table-wrapper" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Tube</th>
+                  <th scope="col">Read at</th>
+                  <th scope="col">Signal</th>
+                  <th scope="col">Scatter</th>
+                  <th scope="col">QC</th>
+                  <th scope="col">Counted</th>
+                </tr>
+              </thead>
+              <tbody id="blank-table-body"></tbody>
+            </table>
+          </div>
         </div>
-        <p class="blocked-reason" id="log-export-reason" hidden></p>
-        <p class="status-message" id="log-status" aria-live="polite"></p>
+      </section>
 
-        <div class="empty-state" id="log-empty" hidden>
-          <p>No readings yet.</p>
+      <!-- 3. Samples: each in replicate tubes, one cuvette at a time. -->
+      <section class="card step-card" id="sample-card">
+        <div class="step-card-head">
+          <span class="step-card-num">3</span>
+          <div>
+            <p class="section-label">Samples</p>
+            <h2>Read each sample</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
         </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
 
-        <div class="table-wrapper table-spaced" id="log-table-wrapper" hidden>
+        <div class="step-card-body">
+          <div class="next-tube" id="sample-next">
+            <p class="next-tube-label">Next tube</p>
+            <p class="next-tube-value" id="sample-next-value" aria-live="polite">--</p>
+            <div class="form-grid">
+              <div class="field">
+                <label for="sample-name">Sample</label>
+                <input type="text" id="sample-name" value="S-001" autocomplete="off" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" id="sample-read-button">Read</button>
+            </div>
+            <p class="blocked-reason" id="sample-read-reason" hidden></p>
+            <p class="status-message" id="sample-status" aria-live="polite"></p>
+          </div>
+
+          <div class="result-block" id="last-tube" hidden>
+            <h3 class="subsection-heading table-heading" id="last-tube-heading">Last tube</h3>
+            <div class="sensor-stats">
+              <div class="sensor-stat">
+                <span class="sensor-stat-label" id="last-tube-signal-label">sfGFP signal</span>
+                <span class="sensor-stat-value" id="last-tube-signal">--</span>
+                <span class="sensor-stat-sub" id="last-tube-signal-sub"></span>
+                <span class="sensor-stat-sub" data-basis-note hidden></span>
+              </div>
+            </div>
+            <div id="last-tube-flags"></div>
+            <p class="chart-note table-spaced">
+              Dark-subtracted basic counts per AS7341 channel. F4 (515 nm) carries the sfGFP emission;
+              F3 (480 nm) is excitation leakage.
+            </p>
+            <div class="chart-plate">
+              <canvas id="measure-channel-chart"></canvas>
+            </div>
+            <div class="provenance" id="last-tube-provenance"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Results: one row per sample, the mean of its tubes converted once. -->
+      <section class="card step-card" id="results-card">
+        <div class="step-card-head">
+          <span class="step-card-num">4</span>
+          <div>
+            <p class="section-label">Results</p>
+            <h2>Inferred AHL</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta">
+            Each sample: the mean of its counted tubes, converted through the curve. No number outside
+            the usable range.
+          </p>
+          <div class="table-wrapper table-spaced">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Sample</th>
+                  <th scope="col">Tubes</th>
+                  <th scope="col">Mean signal ± SD</th>
+                  <th scope="col">CV</th>
+                  <th scope="col">Inferred AHL</th>
+                  <th scope="col">95% CI</th>
+                  <th scope="col">QC</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="results-table-body"></tbody>
+            </table>
+          </div>
+
+          <div class="button-row">
+            <button type="button" id="results-export-button">Export CSV</button>
+            <button type="button" class="btn-secondary" id="batch-finish-button">Finish batch</button>
+          </div>
+          <p class="blocked-reason" id="results-export-reason" hidden></p>
+          <p class="blocked-reason" id="batch-finish-reason" hidden></p>
+          <p class="status-message" id="results-status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <!-- Always visible: every batch in this browser. -->
+      <section class="card">
+        <p class="section-label">Batches</p>
+        <p class="status-message" id="batches-status" aria-live="polite">Loading batches...</p>
+        <div class="empty-state" id="batches-empty" hidden>
+          <p>No batches yet.</p>
+        </div>
+        <div class="table-wrapper table-spaced" id="batches-table-wrapper" hidden>
           <table>
             <thead>
               <tr>
-                <th scope="col">Read at</th>
-                <th scope="col">Sample</th>
-                <th scope="col">Type</th>
-                <th scope="col">sfGFP signal</th>
-                <th scope="col">Inferred AHL</th>
+                <th scope="col">Batch</th>
+                <th scope="col">Started</th>
+                <th scope="col">Conditions</th>
                 <th scope="col">Curve</th>
-                <th scope="col">QC</th>
+                <th scope="col">Samples</th>
+                <th scope="col">State</th>
                 <th scope="col">Exported</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
               </tr>
             </thead>
-            <tbody id="log-table-body"></tbody>
+            <tbody id="batches-table-body"></tbody>
           </table>
         </div>
+        <p class="plan-meta">
+          Kept in this browser only; export each batch as CSV.
+          <a class="text-link" href="hardware-data.html">Back up everything on the Data page &rarr;</a>
+        </p>
       </section>
     </main>
 

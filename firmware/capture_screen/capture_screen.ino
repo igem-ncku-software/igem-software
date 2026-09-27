@@ -1,5 +1,5 @@
 // =========================================================
-// CAPTURE-Screen firmware 7.1.0 -- serves the LasReader website
+// CAPTURE-Screen firmware -- serves the LasReader website
 //
 // P1-PROTO-01: a single-cuvette, 90-degree fluorescence reader.
 //   Excitation: Cree C503B 470 nm, 2N7000 low-side switch on GPIO 25,
@@ -13,7 +13,7 @@
 // reports. Boot -> Wi-Fi -> dial out to the backend's WebSocket and keep it
 // open. Every measurement is requested by a page; Live is one switch shared
 // by the button and every page. While Live is on, a page can also switch the
-// LED off to stream dark / ambient counts (7.1.0).
+// LED off to stream dark / ambient counts.
 //
 // Sections: 1 configuration, 2 sensor, 3 button, 4 OLED, 5 backend link,
 // 6 controller (the only code that drives the LED), 7 Serial diagnostics,
@@ -54,10 +54,10 @@
 // =========================================================
 // 1. Configuration
 //
-// FIRMWARE_VERSION, BUILD_ID, LED_CURRENT_MA and the three sensor settings
-// feed the website's config fingerprint: changing any of them makes every
-// saved calibration curve stale, which is intended whenever the reading
-// path itself changes.
+// BUILD_ID, LED_CURRENT_MA and the three sensor settings feed the website's
+// config fingerprint: changing any of them makes every saved calibration
+// curve stale. There is no firmware version number; when a change alters the
+// reading path itself, stale the curves on purpose by changing BUILD_ID.
 // =========================================================
 
 // ---- Backend: defaults to the production backend on Render; secrets.h can override ----
@@ -75,7 +75,6 @@
 // ---- Identity: sent unchanged in every status and measurement ----
 #define DEVICE_ID        "capture-screen-p1"
 #define BUILD_ID         "P1-PROTO-01"
-#define FIRMWARE_VERSION "7.1.0"
 #define LED_CURRENT_MA   5.553f     // bench-measured 2026-08-25; the firmware can't read it back
 
 // ---- Pins ----
@@ -596,7 +595,6 @@ String linkIp()        { return wifiUp ? WiFi.localIP().toString() : String("");
 static void addIdentity(JsonDocument &doc) {
   doc["device_id"] = DEVICE_ID;
   doc["build_id"] = BUILD_ID;
-  doc["firmware_version"] = FIRMWARE_VERSION;
 }
 
 // The format is part of the fingerprint contract: the website hashes
@@ -1200,13 +1198,13 @@ void setup() {
   digitalWrite(LED_PIN, LOW);            // excitation off as early as possible
 
   Serial.begin(115200);
-  Serial.printf("# CAPTURE-Screen %s (%s)  LED %.3f mA\n", FIRMWARE_VERSION, BUILD_ID, LED_CURRENT_MA);
+  Serial.printf("# CAPTURE-Screen %s  LED %.3f mA\n", BUILD_ID, LED_CURRENT_MA);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   i2cScan();
 
   displayBegin();
-  displayMessage("CAPTURE-Screen", "FW " FIRMWARE_VERSION);
+  displayMessage("CAPTURE-Screen", BUILD_ID);
 
   if (!sensorBegin()) { displayMessage("AS7341 not found", "Check I2C wiring"); delay(2000); }
 

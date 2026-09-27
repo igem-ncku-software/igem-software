@@ -7,9 +7,9 @@
 //   GET  /api/hardware/status  whether the device is online, and its config
 //   POST /api/hardware/read    takes one measurement, returning the device's raw reading,
 //                              which js/hardware_processing.js then converts to a Measurement
-// plan / manual dataset / curve / fit / invert: js/hardware_local.js (the browser-side stand-in storage).
-// Once the backend has storage, swapping those functions for fetch calls is enough — pages
-// don't need to change.
+// runs / curves / batches / fitting / conversion: js/hardware_local.js (the browser-side
+// stand-in storage). Once the backend has storage, swapping those functions for fetch calls is
+// enough — pages don't need to change.
 //
 // Every value going in or out of storage is structuredClone'd: a page mutating the returned
 // object can never quietly mutate storage's own internal state.
@@ -20,7 +20,7 @@
 // ---- Data contract (shared between frontend and backend — don't rename these fields) -------------------------
 
 /**
- * @typedef {"SATURATED" | "NO_DARK_PAIR" | "HIGH_SCATTER" | "STALE_CONFIG" | "BELOW_LOD" | "ABOVE_RANGE"} QCFlag
+ * @typedef {"SATURATED" | "NO_DARK_PAIR" | "HIGH_SCATTER" | "STALE_CONFIG"} QCFlag
  */
 
 /**
@@ -30,9 +30,16 @@
  * @property {number} gain
  * @property {number} atime
  * @property {number} astep
- * @property {string} build_id           "P1-PROTO-01"
- * @property {string} firmware_version
+ * @property {string} build_id           "P1-PROTO-01"; changed on purpose when the reading path changes
  * @property {string | null} emission_filter  currently null, not yet chosen
+ */
+
+/**
+ * What a curve is valid for beyond the instrument config.
+ * @typedef {Object} Conditions
+ * @property {string} sensor             the biosensor strain / construct
+ * @property {number} induction_h        hours from adding AHL to reading
+ * @property {string} notes              free text, may be empty
  */
 
 /**
@@ -41,7 +48,8 @@
  * @property {string} timestamp_utc      ISO time of the read; a manual entry carries only its date (YYYY-MM-DD)
  * @property {"blank" | "standard" | "unknown"} sample_type
  * @property {number | null} known_concentration_nM  only set when sample_type is standard
- * @property {number} fluorescence       the unmixed sfGFP signal, basic counts
+ * @property {string} signal             what fluorescence is (HardwareProcessing.signalId), e.g. "F4"
+ * @property {number} fluorescence       the sfGFP signal, basic counts
  * @property {number | null} fluorescence_sd  estimated standard deviation of read noise (from the two dark frames), basic counts; null for a manual entry
  * @property {number | null} scatter     the scatter component, an interference indicator, basic counts; null for a manual entry
  * @property {QCFlag[]} flags
@@ -60,13 +68,15 @@
  */
 
 /**
+ * A calibration run.
  * @typedef {Object} CalibrationPlan
  * @property {string} plan_id
  * @property {string} created_at
  * @property {"device" | "manual"} source  a run read on the instrument, or a dataset entered by hand (every slot already filled)
  * @property {string | null} measured_on  manual datasets only: the date the readings were taken (YYYY-MM-DD)
  * @property {string} config_fingerprint
- * @property {string} timepoint          e.g. "t=6h endpoint"
+ * @property {string} signal
+ * @property {Conditions} conditions
  * @property {CalibrationPlanItem[]} items
  */
 
@@ -74,37 +84,53 @@
  * @typedef {Object} CalibrationCurve
  * @property {string} curve_id
  * @property {string} fitted_at
- * @property {"device" | "manual"} source  the source of the plan it was fitted from
+ * @property {string} plan_id            the run it was fitted from
+ * @property {"device" | "manual"} source  the source of that run
  * @property {"4PL"} model
  * @property {{top: number, bottom: number, ec50_nM: number, hill: number}} params
  * @property {number} lod_nM
  * @property {number} loq_nM
  * @property {number} rmse
- * @property {{min: number, max: number}} range_nM  the trusted inversion range
+ * @property {{min: number, max: number}} range_nM  the trusted conversion range
  * @property {{sample_id: string, reason: string}[]} excluded
  * @property {string} config_fingerprint
- * @property {string} timepoint
- * @property {boolean} is_active
+ * @property {string} signal
+ * @property {Conditions} conditions
  */
 
 /**
+ * One group of tubes converted once: a sample's replicates, or a batch's blanks.
  * @typedef {Object} InverseEstimate
- * @property {number | null} concentration_nM
+ * @property {"ok" | "below_lod" | "above_range" | "no_tubes"} status
+ * @property {number | null} concentration_nM  only for "ok"; never extrapolated
  * @property {[number, number] | null} ci95_nM
- * @property {"ok" | "below_lod" | "above_range" | "no_curve" | "config_mismatch"} status
- * @property {string | null} curve_id
+ * @property {string} curve_id
+ * @property {number} n                  tubes included
+ * @property {number | null} mean_signal
+ * @property {number | null} sd_signal   null below 2 tubes
  */
 
 /**
- * One entry in the Measure page's reading log. The estimate and the curve's limits are kept as
- * they were at the time, so an exported row still means what it meant when it was read.
- * @typedef {Object} MeasurementRecord
- * @property {string} record_id
- * @property {string} recorded_at
+ * @typedef {Object} BatchTube
  * @property {Measurement} measurement
- * @property {InverseEstimate} estimate  exactly as reported, never recomputed against a later curve
- * @property {{curve_id: string, timepoint: string, lod_nM: number, range_nM: {min: number, max: number}} | null} curve
- * @property {string | null} exported_at  when it was written to a file; null while it exists only in this browser
+ * @property {string | null} excluded_reason  null while it counts
+ */
+
+/**
+ * One sitting at the instrument, converted through one curve.
+ * @typedef {Object} MeasurementBatch
+ * @property {string} batch_id
+ * @property {string} created_at
+ * @property {string | null} finished_at
+ * @property {string | null} exported_at  cleared whenever a tube changes after an export
+ * @property {string} curve_id
+ * @property {{curve_id: string, conditions: Conditions, signal: string, config_fingerprint: string,
+ *   lod_nM: number, loq_nM: number, range_nM: {min: number, max: number}}} curve  kept so an export reads without the curve
+ * @property {number} tubes_per_sample
+ * @property {string} notes
+ * @property {BatchTube[]} blanks
+ * @property {InverseEstimate} blank_estimate
+ * @property {{name: string, tubes: BatchTube[], estimate: InverseEstimate}[]} samples
  */
 
 /**
@@ -178,12 +204,8 @@ function loadUnmixBasis() {
   return hardwareBasisPromise.then((basis) => structuredClone(basis));
 }
 
-async function hardwareCurrentFingerprint() {
-  try {
-    return (await HardwareApi.getDeviceStatus()).config.fingerprint;
-  } catch (err) {
-    return null;
-  }
+async function hardwareCurrentSignal() {
+  return HardwareProcessing.signalId(await loadUnmixBasis());
 }
 
 // ---- Functions exposed to pages -----------------------------------------------
@@ -229,10 +251,10 @@ const HardwareApi = {
 
   /**
    * Instrument check: one blank cuvette through the whole measurement path, shown once and then
-   * discarded. Deliberately not readSample({sample_type: "blank"}) — the status page's blank is a
-   * buffer-only cuvette, while HIGH_SCATTER's baseline has to come from a calibration blank (cells
-   * at the standards' OD, no AHL). Going through readSample would let a buffer check run after a
-   * calibration drop the baseline to a cell-free cuvette and flag every sample read afterwards.
+   * discarded. Deliberately not readSample({sample_type: "blank"}) — the Instrument page's blank is
+   * a buffer-only cuvette, while HIGH_SCATTER's baseline has to come from a cell blank (cells at
+   * the standards' OD, no AHL). Going through readSample would let a buffer check drop the
+   * baseline to a cell-free cuvette and flag every sample read afterwards.
    * So this never reaches HardwareLocal: the baseline is neither read nor written, and nothing is stored.
    * @returns {Promise<Measurement>}
    */
@@ -266,47 +288,52 @@ const HardwareApi = {
     return structuredClone(HardwareLocal.finalizeMeasurement(m));
   },
 
+  /** The signal id every new reading carries (HardwareProcessing.signalId). @returns {Promise<string>} */
+  getCurrentSignal: () => hardwareCurrentSignal(),
+
+  // ---- Calibration runs -----------------------------------------------------
+
   /**
-   * A plan is bound to the device's current config, so the device has to be checked before creating one.
-   * @param {{concentrations_nM: number[], replicates: number, blanks: number, timepoint: string}} input
+   * A run is bound to the device's current config, so the device has to be checked before creating one.
+   * @param {{concentrations_nM: number[], replicates: number, blanks: number, conditions: Conditions}} input
    * @returns {Promise<CalibrationPlan>}
    */
   async createCalibrationPlan(input) {
-    const status = await HardwareApi.getDeviceStatus();
-    return hardwareLocalCall(HardwareLocal.createCalibrationPlan, input, status.config.fingerprint);
+    const [status, signal] = await Promise.all([HardwareApi.getDeviceStatus(), hardwareCurrentSignal()]);
+    return hardwareLocalCall(HardwareLocal.createCalibrationPlan, input, status.config.fingerprint, signal);
   },
 
   /**
    * Fingerprint of a config entered by hand. Throws a displayable message for the first invalid field.
-   * @param {{led_current_mA: number, gain: number, atime: number, astep: number, build_id: string, firmware_version: string}} config
+   * @param {{led_current_mA: number, gain: number, atime: number, astep: number, build_id: string}} config
    * @returns {string}
    */
   fingerprintConfig(config) {
     const { led_current_mA, gain, atime, astep } = config ?? {};
     const build_id = String(config?.build_id ?? "").trim();
-    const firmware_version = String(config?.firmware_version ?? "").trim();
     if (!(Number.isFinite(led_current_mA) && led_current_mA >= 0)) throw new Error("LED current must be a number ≥ 0.");
     if (!(Number.isFinite(gain) && gain > 0)) throw new Error("Gain must be a positive number.");
     if (!(Number.isInteger(atime) && atime >= 0)) throw new Error("ATIME must be an integer ≥ 0.");
     if (!(Number.isInteger(astep) && astep >= 0)) throw new Error("ASTEP must be an integer ≥ 0.");
     if (!build_id) throw new Error("Enter the build ID.");
-    if (!firmware_version) throw new Error("Enter the firmware version.");
-    return HardwareProcessing.configFingerprint({ led_current_mA, gain, atime, astep, build_id, firmware_version });
+    return HardwareProcessing.configFingerprint({ led_current_mA, gain, atime, astep, build_id });
   },
 
   /**
    * Readings recorded earlier, entered by hand. config null binds the dataset to the instrument's
    * current config (so the device must be online); otherwise the entered config is fingerprinted.
-   * @param {{timepoint: string, measured_on: string,
-   *   config: {led_current_mA: number, gain: number, atime: number, astep: number, build_id: string, firmware_version: string} | null,
+   * The values are taken to be the current signal definition's.
+   * @param {{conditions: Conditions, measured_on: string,
+   *   config: {led_current_mA: number, gain: number, atime: number, astep: number, build_id: string} | null,
    *   rows: {sample_type: "blank" | "standard", concentration_nM: number | null, fluorescence: number}[]}} input
    * @returns {Promise<CalibrationPlan>}
    */
   async createManualDataset(input) {
+    const signal = await hardwareCurrentSignal();
     const fingerprint = input?.config
       ? HardwareApi.fingerprintConfig(input.config)
       : (await HardwareApi.getDeviceStatus()).config.fingerprint;
-    return hardwareLocalCall(HardwareLocal.createManualDataset, input, fingerprint);
+    return hardwareLocalCall(HardwareLocal.createManualDataset, input, fingerprint, signal);
   },
 
   /** @param {string} plan_id @returns {Promise<CalibrationPlan>} */
@@ -315,17 +342,18 @@ const HardwareApi = {
   /**
    * Every saved run, newest first, summarised for a list (no readings).
    * @returns {Promise<{plan_id: string, created_at: string, source: "device" | "manual",
-   *   measured_on: string | null, config_fingerprint: string, timepoint: string,
-   *   total: number, read: number}[]>}
+   *   measured_on: string | null, config_fingerprint: string, signal: string, conditions: Conditions,
+   *   total: number, read: number, curve_ids: string[]}[]>}
    */
   listCalibrationPlans: () => hardwareLocalCall(HardwareLocal.listCalibrationPlans),
-
 
   /**
    * @param {string} plan_id @param {number} slot @param {Measurement} m
    * @returns {Promise<CalibrationPlan>}
    */
   recordPlanMeasurement: (plan_id, slot, m) => hardwareLocalCall(HardwareLocal.recordPlanMeasurement, plan_id, slot, m),
+
+  // ---- Curves -------------------------------------------------------------------
 
   /**
    * @param {string} plan_id @param {string[]} excluded_sample_ids
@@ -334,24 +362,67 @@ const HardwareApi = {
   fitCurve: (plan_id, excluded_sample_ids) => hardwareLocalCall(HardwareLocal.fitCurve, plan_id, excluded_sample_ids),
 
   /**
-   * A newly fitted curve: saved (excluded entries need a reason). An already-saved curve: only toggles is_active.
-   * Setting it active confirms the current config against the device.
+   * Saves a fitted curve; every excluded tube needs a reason. A saved curve never changes.
    * @param {CalibrationCurve} curve @returns {Promise<CalibrationCurve>}
    */
-  async saveCurve(curve) {
-    const fingerprint = curve?.is_active ? await hardwareCurrentFingerprint() : null;
-    return hardwareLocalCall(HardwareLocal.saveCurve, curve, fingerprint);
-  },
+  saveCurve: (curve) => hardwareLocalCall(HardwareLocal.saveCurve, curve),
 
-  /** @returns {Promise<CalibrationCurve[]>} */
+  /** Newest first. @returns {Promise<CalibrationCurve[]>} */
   listCurves: () => hardwareLocalCall(HardwareLocal.listCurves),
 
-  /** @returns {Promise<CalibrationCurve | null>} */
-  getActiveCurve: () => hardwareLocalCall(HardwareLocal.getActiveCurve),
+  /** @param {string} curve_id @returns {Promise<CalibrationCurve>} */
+  getCurve: (curve_id) => hardwareLocalCall(HardwareLocal.getCurve, curve_id),
+
+  // ---- Measurement batches --------------------------------------------------------
+
+  /**
+   * Starts a batch on one curve. The curve has to match the instrument's config and the current
+   * signal, so the device must be online.
+   * @param {{curve_id: string, tubes_per_sample: number, notes: string}} input
+   * @returns {Promise<MeasurementBatch>}
+   */
+  async createBatch(input) {
+    const [status, signal] = await Promise.all([HardwareApi.getDeviceStatus(), hardwareCurrentSignal()]);
+    return hardwareLocalCall(HardwareLocal.createBatch, input, status.config.fingerprint, signal);
+  },
+
+  /** @param {string} batch_id @returns {Promise<MeasurementBatch>} */
+  getBatch: (batch_id) => hardwareLocalCall(HardwareLocal.getBatch, batch_id),
+
+  /**
+   * Newest first, summarised for a list.
+   * @returns {Promise<{batch_id: string, created_at: string, finished_at: string | null, exported_at: string | null,
+   *   curve_id: string, conditions: Conditions, blanks: number, samples: number, tubes: number}[]>}
+   */
+  listBatches: () => hardwareLocalCall(HardwareLocal.listBatches),
+
+  /**
+   * Stores one tube the moment it is read. role "blank" or "sample"; sample_name is ignored for a blank.
+   * @param {string} batch_id @param {"blank" | "sample"} role @param {string | null} sample_name @param {Measurement} m
+   * @returns {Promise<MeasurementBatch>}
+   */
+  recordBatchReading: (batch_id, role, sample_name, m) =>
+    hardwareLocalCall(HardwareLocal.recordBatchReading, batch_id, role, sample_name, m),
+
+  /**
+   * reason null puts the tube back; a non-empty string leaves it out.
+   * @param {string} batch_id @param {string} sample_id @param {string | null} reason
+   * @returns {Promise<MeasurementBatch>}
+   */
+  setBatchTubeExclusion: (batch_id, sample_id, reason) =>
+    hardwareLocalCall(HardwareLocal.setBatchTubeExclusion, batch_id, sample_id, reason),
+
+  /** No more tubes after this. @param {string} batch_id @returns {Promise<MeasurementBatch>} */
+  finishBatch: (batch_id) => hardwareLocalCall(HardwareLocal.finishBatch, batch_id),
+
+  /** @param {string[]} batch_ids */
+  markBatchesExported: (batch_ids) => hardwareLocalCall(HardwareLocal.markBatchesExported, batch_ids),
+
+  // ---- Data --------------------------------------------------------------------
 
   /**
    * What a reset would delete, for showing before the user confirms. Deletes nothing.
-   * @returns {Promise<{runs: number, curves: number, readings: number, unexported_readings: number,
+   * @returns {Promise<{runs: number, curves: number, batches: number, unexported_batches: number,
    *   keys: number, in_memory: boolean}>}
    */
   getResetPreview: () => hardwareLocalCall(HardwareLocal.resetPreview),
@@ -366,44 +437,21 @@ const HardwareApi = {
 
   /**
    * Everything this browser holds, as one backup file: runs, curves (with the fit internals
-   * listCurves() leaves out) and the Measure reading log.
+   * listCurves() leaves out) and batches.
    * @returns {Promise<{format: string, version: number, exported_at: string,
-   *   plans: CalibrationPlan[], curves: CalibrationCurve[], measurements: MeasurementRecord[]}>}
+   *   plans: CalibrationPlan[], curves: CalibrationCurve[], batches: MeasurementBatch[]}>}
    */
   exportBackup: () => hardwareLocalCall(HardwareLocal.exportBackup),
 
   /**
-   * Restores a parsed backup file, and still reads the older curves-only and runs-only exports.
-   * The payload is untrusted and validated entry by entry; an id already stored is skipped rather
-   * than replaced, and no curve is ever restored as active. A section absent from the file comes
-   * back as null. Throws with a displayable message when the file itself isn't one of ours.
+   * Restores a parsed backup file. The payload is untrusted and validated entry by entry; an id
+   * already stored is skipped rather than replaced. Throws with a displayable message when the
+   * file itself isn't one this build reads.
    * @param {unknown} payload
-   * @returns {Promise<{
-   *   plans: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[]} | null,
-   *   curves: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[]} | null,
-   *   measurements: {imported: string[], skipped: string[], rejected: {id: string, reason: string}[], dropped: number} | null}>}
+   * @returns {Promise<Record<"plans" | "curves" | "batches",
+   *   {imported: string[], skipped: string[], rejected: {id: string, reason: string}[]}>>}
    */
   importBackup: (payload) => hardwareLocalCall(HardwareLocal.importBackup, payload),
-
-  /**
-   * @param {number} fluorescence @param {string} config_fingerprint
-   * @returns {Promise<InverseEstimate>}
-   */
-  invert: (fluorescence, config_fingerprint) => hardwareLocalCall(HardwareLocal.invert, fluorescence, config_fingerprint),
-
-  /**
-   * Appends one Measure reading to the browser-local log. curve is the curve the estimate actually
-   * came from, or null; its limits are copied into the record so an exported row stays readable.
-   * @param {Measurement} m @param {InverseEstimate} estimate @param {CalibrationCurve | null} curve
-   * @returns {Promise<MeasurementRecord>}
-   */
-  recordMeasurement: (m, estimate, curve) => hardwareLocalCall(HardwareLocal.recordMeasurement, m, estimate, curve),
-
-  /** Oldest first. @returns {Promise<MeasurementRecord[]>} */
-  listMeasurements: () => hardwareLocalCall(HardwareLocal.listMeasurements),
-
-  /** @param {string[]} record_ids @returns {Promise<MeasurementRecord[]>} */
-  markMeasurementsExported: (record_ids) => hardwareLocalCall(HardwareLocal.markMeasurementsExported, record_ids),
 
   /** @returns {Promise<UnmixBasis>} */
   getUnmixBasis: () => loadUnmixBasis(),

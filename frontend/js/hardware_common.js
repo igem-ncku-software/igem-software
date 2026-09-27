@@ -1,18 +1,23 @@
 // =========================================================
-// Shared across all five hardware pages: the subnav + the instrument connection badge in the
-// top right, number formatting, QC flag chips, the AS7341 channel table, disabled-button
-// reason text, sensor health, and the unmixing-basis note.
-// Target elements: #hardware-subnav (data-page marks the current page), [data-basis-note]
+// Shared across the hardware pages: the step bar (the four workflow steps in order, each with
+// its live state, plus the Data page off to the side), the "Next step" link at the bottom of a
+// page, number formatting, QC flag chips, the AS7341 channel table, disabled-button reason text,
+// sensor health, and the unmixing-basis note.
+// Target elements: #hardware-subnav (data-page marks the current page), #hardware-next
+//   (data-next names the step after this page), [data-basis-note]
 // Depends on js/hardware_api.js's HardwareApi, so this must load after it and before every page's own script.
 // =========================================================
 
-const HARDWARE_PAGES = [
-  { key: "status", href: "hardware.html", label: "Status" },
-  { key: "measure", href: "hardware-measure.html", label: "Measure" },
-  { key: "calibration", href: "hardware-calibration.html", label: "Calibration" },
-  { key: "fit", href: "hardware-calibration-fit.html", label: "Fit" },
-  { key: "curves", href: "hardware-curves.html", label: "Curves" },
+// The workflow, in the order it is used. Every page shows all four with their state, so a user
+// always sees where they are and what comes next.
+const HARDWARE_STEPS = [
+  { key: "instrument", href: "hardware.html", label: "Instrument", next: "Check the reader and its config" },
+  { key: "calibration", href: "hardware-calibration.html", label: "Calibrate", next: "Read standards and fit a curve" },
+  { key: "curves", href: "hardware-curves.html", label: "Curves", next: "Review the saved curves" },
+  { key: "measure", href: "hardware-measure.html", label: "Measure", next: "Read samples through a curve" },
 ];
+// Not a step: backup, restore and reset serve the whole workflow.
+const HARDWARE_DATA_PAGE = { key: "data", href: "hardware-data.html", label: "Data" };
 
 const DEVICE_STATUS_POLL_INTERVAL_MS = 12000;
 
@@ -42,8 +47,6 @@ const FLAG_SEVERITY = {
   NO_DARK_PAIR: "error",
   STALE_CONFIG: "error",
   HIGH_SCATTER: "warn",
-  BELOW_LOD: "warn",
-  ABOVE_RANGE: "warn",
 };
 
 // Chart.js needs an actual color code and can't consume a CSS variable directly, so it's
@@ -101,6 +104,37 @@ function formatAgo(utc) {
   return `${Math.round(hours / 24)} d ago`;
 }
 
+function formatHours(h) {
+  return Number.isFinite(h) ? `${+h.toFixed(2)} h` : "--";
+}
+
+// A curve's or run's conditions on one line: the two things a sample has to match.
+function formatConditions(conditions) {
+  if (!conditions) return "--";
+  return `${conditions.sensor} · ${formatHours(conditions.induction_h)} induction`;
+}
+
+// An InverseEstimate as text. A number only for "ok": outside the range only the bound is shown,
+// never an extrapolation. limits is the curve (or a batch's snapshot of it).
+function formatEstimate(estimate, limits) {
+  switch (estimate?.status) {
+    case "ok": return formatConcentration(estimate.concentration_nM);
+    case "below_lod": return limits ? `< ${formatConcentration(limits.range_nM.min)}` : "< LOD";
+    case "above_range": return limits ? `> ${formatConcentration(limits.range_nM.max)}` : "> range";
+    case "no_tubes": return "No tubes";
+    default: return "--";
+  }
+}
+
+// Why a curve can't convert readings on the instrument as it is now, or null if it can.
+// fingerprint / signal null means the instrument (or the basis) couldn't be reached.
+function curveBlockReason(curve, fingerprint, signal) {
+  if (fingerprint === null) return "Instrument unreachable, so its config can't be checked.";
+  if (curve.config_fingerprint !== fingerprint) return `Fitted under config ${curve.config_fingerprint}; the instrument now runs ${fingerprint}.`;
+  if (signal !== null && curve.signal !== signal) return `Fitted on signal ${curve.signal}; readings are now ${signal}.`;
+  return null;
+}
+
 // The 4PL equation itself (no fitting). Parameters always come from the API's returned CalibrationCurve.
 function fourPL(c, params) {
   if (c <= 0) return params.bottom;
@@ -140,6 +174,27 @@ function setBlocked(button, reasonEl, reason) {
   if (reasonEl) {
     reasonEl.textContent = reason || "";
     reasonEl.hidden = !reason;
+  }
+}
+
+// A numbered step card within a page (.step-card): "done", "current", or "waiting" — a waiting
+// step keeps its body hidden and says what it is waiting for, the same rule as a blocked button.
+const STEP_CARD_CHIP = { done: ["Done", "ok"], current: ["Now", "warn"], waiting: ["Waiting", ""] };
+
+function setStepCard(card, state, waitingReason = null) {
+  card.dataset.state = state;
+  const [text, tone] = STEP_CARD_CHIP[state];
+  const chip = card.querySelector(".step-card-state");
+  if (chip) {
+    chip.textContent = text;
+    chip.className = `flag-chip step-card-state ${tone}`.trim();
+  }
+  const body = card.querySelector(".step-card-body");
+  if (body) body.hidden = state === "waiting";
+  const reason = card.querySelector(".step-card-waiting");
+  if (reason) {
+    reason.textContent = state === "waiting" ? waitingReason ?? "" : "";
+    reason.hidden = state !== "waiting" || !waitingReason;
   }
 }
 
@@ -295,14 +350,15 @@ async function fillBasisNotes(root = document) {
 
 // ---- Browser-side scratch memory (just a convenience, not real data) ---------------------------
 
-// v2: the old key pointed at plans and dark reads produced by the now-removed simulated device; cleared by hardware_local.js.
-const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v2.lastPlanId";
+// v3: the step-by-step workflow; hardware_local.js clears the v2 keys.
+const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v3.lastPlanId";
+const HARDWARE_LAST_BATCH_KEY = "lasreader.hardware.v3.lastBatchId";
 // The data contract has no "last dark read time" field yet, so the frontend remembers it for now; switch to the API once the backend adds the field.
-const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v2.lastDarkReadUtc";
-// When "Export everything" last produced a file in this browser. Only the Reset card and the
-// Backup card read it, to say whether what is about to be deleted was ever backed up. Like the two
-// above it starts with "lasreader.", so a reset removes it along with everything else.
-const HARDWARE_LAST_BACKUP_KEY = "lasreader.hardware.v2.lastBackupUtc";
+const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v3.lastDarkReadUtc";
+// When "Export everything" last produced a file in this browser. Only the Data page reads it, to
+// say whether what is about to be deleted was ever backed up. Like the keys above it starts with
+// "lasreader.", so a reset removes it along with everything else.
+const HARDWARE_LAST_BACKUP_KEY = "lasreader.hardware.v3.lastBackupUtc";
 
 function hardwareRemember(key, value) {
   try {
@@ -321,47 +377,112 @@ function hardwareRecall(key) {
   }
 }
 
-// ---- Subnav and instrument status badge -----------------------------------------
+// ---- Step bar -----------------------------------------------------------------
+// Each step shows its own state in a few words, and the first step that isn't done yet is marked
+// as the next one, so the order of use is visible from every page. Every step stays a working
+// link: a step that isn't ready says why rather than refusing to open (a past batch or a saved
+// curve has to stay reachable with the instrument offline).
 
 function renderHardwareSubnav() {
   const nav = document.getElementById("hardware-subnav");
   if (!nav) return;
+  nav.className = "hw-steps";
 
-  const list = hwEl("ul", "hw-subnav-links");
-  for (const page of HARDWARE_PAGES) {
-    const item = hwEl("li");
-    const link = hwEl("a", null, page.label);
-    link.href = page.href;
-    if (page.key === nav.dataset.page) link.setAttribute("aria-current", "page");
+  const list = hwEl("ol", "hw-steps-list");
+  HARDWARE_STEPS.forEach((step, i) => {
+    const item = hwEl("li", "hw-step");
+    item.dataset.step = step.key;
+    const link = hwEl("a");
+    link.href = step.href;
+    if (step.key === nav.dataset.page) link.setAttribute("aria-current", "step");
+    const text = hwEl("span", "hw-step-text");
+    text.append(hwEl("span", "hw-step-label", step.label), hwEl("span", "hw-step-state", "..."));
+    link.append(hwEl("span", "hw-step-num", String(i + 1)), text);
     item.appendChild(link);
     list.appendChild(item);
-  }
+  });
 
-  const badge = hwEl("span", "backend-status-badge", "Device: checking...");
-  badge.id = "device-status-badge";
-  badge.setAttribute("aria-live", "polite");
+  const data = hwEl("a", "hw-data-link", HARDWARE_DATA_PAGE.label);
+  data.href = HARDWARE_DATA_PAGE.href;
+  if (nav.dataset.page === HARDWARE_DATA_PAGE.key) data.setAttribute("aria-current", "page");
 
-  nav.append(list, badge);
+  nav.append(list, data);
 }
 
-async function refreshDeviceBadge() {
-  const badge = document.getElementById("device-status-badge");
-  if (!badge) return;
-  try {
-    const status = await HardwareApi.getDeviceStatus();
-    badge.textContent = `Device online · ${status.config.fingerprint}`;
-    badge.title = "";
-    badge.classList.remove("offline");
-  } catch (err) {
-    badge.textContent = "Device offline";
-    badge.title = err.message;
-    badge.classList.add("offline");
+// [done, text, tone] per step. tone "attention" marks a step that is blocking the ones after it.
+async function hardwareStepStates() {
+  const [statusResult, signalResult, curvesResult, runsResult, batchesResult] = await Promise.allSettled([
+    HardwareApi.getDeviceStatus(),
+    HardwareApi.getCurrentSignal(),
+    HardwareApi.listCurves(),
+    HardwareApi.listCalibrationPlans(),
+    HardwareApi.listBatches(),
+  ]);
+  const status = statusResult.status === "fulfilled" ? statusResult.value : null;
+  const signal = signalResult.status === "fulfilled" ? signalResult.value : null;
+  const curves = curvesResult.status === "fulfilled" ? curvesResult.value : [];
+  const runs = runsResult.status === "fulfilled" ? runsResult.value : [];
+  const batches = batchesResult.status === "fulfilled" ? batchesResult.value : [];
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+  const sensorFault = status && sensorReading(status.sensor_ok).tone === "error";
+  const instrument = status
+    ? [!sensorFault, sensorFault ? "Sensor fault" : `Online · ${status.config.fingerprint}`, sensorFault ? "attention" : null]
+    : [false, "Offline", "attention"];
+
+  const calibration = curves.length > 0
+    ? [true, plural(runs.length, "run"), null]
+    : [false, runs.length > 0 ? "No curve saved yet" : "Not started", null];
+
+  const usable = status ? curves.filter((curve) => !curveBlockReason(curve, status.config.fingerprint, signal)).length : 0;
+  let curvesState;
+  if (curves.length === 0) curvesState = [false, "None yet", null];
+  else if (!status) curvesState = [false, `${plural(curves.length, "curve")} · instrument offline`, null];
+  else if (usable === 0) curvesState = [false, "None matches the instrument", "attention"];
+  else curvesState = [true, `${usable} usable`, null];
+
+  let measureText = "Needs a usable curve";
+  if (batches.length > 0) measureText = `${batches.length} batch${batches.length === 1 ? "" : "es"}`;
+  else if (usable > 0) measureText = "Ready";
+  const measure = [false, measureText, null];
+  return { instrument, calibration, curves: curvesState, measure };
+}
+
+async function refreshHardwareSteps() {
+  const nav = document.getElementById("hardware-subnav");
+  if (!nav) return;
+  const states = await hardwareStepStates();
+  const next = HARDWARE_STEPS.find((step) => !states[step.key][0])?.key ?? "measure";
+  for (const item of nav.querySelectorAll(".hw-step")) {
+    const [done, text, tone] = states[item.dataset.step];
+    item.classList.toggle("is-done", done);
+    item.classList.toggle("is-next", item.dataset.step === next);
+    item.classList.toggle("is-attention", tone === "attention");
+    item.querySelector(".hw-step-state").textContent = text;
+    const label = item.querySelector(".hw-step-label").textContent;
+    item.querySelector("a").setAttribute("aria-label",
+      `Step ${HARDWARE_STEPS.findIndex((s) => s.key === item.dataset.step) + 1}, ${label}: ${text}${done ? ", done" : ""}${item.dataset.step === next ? ", next" : ""}`);
   }
+}
+
+// The link at the bottom of a page to the step after it.
+function renderNextStep() {
+  const el = document.getElementById("hardware-next");
+  if (!el) return;
+  const index = HARDWARE_STEPS.findIndex((step) => step.key === el.dataset.next);
+  if (index < 0) return;
+  const step = HARDWARE_STEPS[index];
+  el.className = "hw-next";
+  const link = hwEl("a", "hw-next-link");
+  link.href = step.href;
+  link.append(hwEl("span", "hw-next-label", "Next step"), hwEl("span", "hw-next-title", `${index + 1} · ${step.label}: ${step.next} →`));
+  el.replaceChildren(link);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   renderHardwareSubnav();
-  refreshDeviceBadge();
-  setInterval(refreshDeviceBadge, DEVICE_STATUS_POLL_INTERVAL_MS);
+  renderNextStep();
+  refreshHardwareSteps();
+  setInterval(refreshHardwareSteps, DEVICE_STATUS_POLL_INTERVAL_MS);
   fillBasisNotes();
 });

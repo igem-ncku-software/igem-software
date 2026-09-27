@@ -62,6 +62,17 @@ def test_status_reflects_the_connected_device():
     assert body["last_seen"] is not None
 
 
+def test_a_firmware_that_still_reports_its_version_stays_online():
+    # Firmware 7.1.0 and earlier send firmware_version; the field was removed, not made invalid.
+    with client.websocket_connect("/api/hardware/device") as device:
+        device.send_json({**STATUS, "firmware_version": "7.1.0"})
+        wait_until_online()
+        body = client.get("/api/hardware/status").json()
+
+    assert body["device"]["build_id"] == "P1-PROTO-01"
+    assert "firmware_version" not in body["device"]
+
+
 def test_status_goes_offline_when_the_device_disconnects():
     with client.websocket_connect("/api/hardware/device") as device:
         device.send_json(STATUS)

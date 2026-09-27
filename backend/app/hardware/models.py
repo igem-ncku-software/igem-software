@@ -41,9 +41,11 @@ class DeviceConfig(BaseModel):
 
 
 class DeviceIdentity(BaseModel):
+    # No firmware version (removed 2026-09-27): build_id names the unit and feeds the config
+    # fingerprint. A firmware that still sends firmware_version validates anyway, because
+    # pydantic ignores unknown fields; that keeps a device flashed before the removal online.
     device_id: str
     build_id: str
-    firmware_version: str
 
 
 class DeviceStatus(DeviceIdentity):

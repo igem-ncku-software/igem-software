@@ -1,32 +1,29 @@
 // =========================================================
-// Backs hardware-curves.html: lists every saved calibration curve, marking it
-// active / available / stale, and lets you switch the active one or expand details.
+// Backs hardware-curves.html: step 3 of the CAPTURE-Screen workflow. Lists every saved curve with
+// what it is valid for (biosensor strain, induction time, config, signal), marks whether it can
+// convert readings on the instrument as it is now, and starts a measurement batch with one.
 // Target elements: #curves-status / #curves-empty / #curves-table-wrapper / #curves-table-body
-// Backing API: listCurves / getDeviceStatus / saveCurve (to toggle is_active)
+// Backing API: listCurves / getDeviceStatus / getCurrentSignal
 //
-// Curves exist only in this browser until the backend has storage. Backing them up is the Status
-// page's job and happens there, in one file with the runs and readings — a curve exported on its
-// own is a curve whose calibration data can still go missing.
+// A saved curve never changes, and there is no "active" curve: Measure asks which curve to use
+// at the start of every batch, so two strains or two induction times can't be mixed up.
 // =========================================================
 
 let curvesList = [];
 let curvesFingerprint = null;
-let curvesBusy = false;
+let curvesSignal = null;
 const openCurveDetails = new Set();
 
-const CURVE_STATUS_CHIP = { active: "ok", available: "", stale: "error" };
 const CURVES_COLUMN_COUNT = 9;
 
-// Stale takes priority: a curve with a mismatched config can't be used even if is_active.
-function curveStatus(curve) {
-  if (curve.config_fingerprint !== curvesFingerprint) return "stale";
-  return curve.is_active ? "active" : "available";
-}
-
-async function loadCurves(message) {
+async function loadCurves() {
   const statusEl = document.getElementById("curves-status");
-  // Curves live in the browser: they still list even when the device is unreachable, just without a stale check.
-  const [curvesResult, statusResult] = await Promise.allSettled([HardwareApi.listCurves(), HardwareApi.getDeviceStatus()]);
+  // Curves live in the browser: they still list when the device is unreachable, just unverified.
+  const [curvesResult, statusResult, signalResult] = await Promise.allSettled([
+    HardwareApi.listCurves(),
+    HardwareApi.getDeviceStatus(),
+    HardwareApi.getCurrentSignal(),
+  ]);
   if (curvesResult.status === "rejected") {
     console.error("Failed to load curves:", curvesResult.reason);
     setHardwareStatus(statusEl, `Could not load curves: ${curvesResult.reason.message}`, "error");
@@ -35,15 +32,15 @@ async function loadCurves(message) {
 
   curvesList = curvesResult.value;
   curvesFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  curvesSignal = signalResult.status === "fulfilled" ? signalResult.value : null;
   renderCurves();
-  if (message) {
-    setHardwareStatus(statusEl, message, "success");
-  } else if (curvesFingerprint === null) {
+  if (curvesFingerprint === null) {
     setHardwareStatus(statusEl,
       `Instrument unreachable (${statusResult.reason.message}), so it can't be checked which curves match its config.`, "warn");
   } else {
     statusEl.textContent = "";
-    statusEl.append("Instrument config is now ", hwFingerprint(curvesFingerprint), ".");
+    statusEl.append("The instrument runs config ", hwFingerprint(curvesFingerprint),
+      curvesSignal ? `, signal ${curvesSignal}.` : ".");
     statusEl.className = "status-message";
   }
 }
@@ -56,47 +53,40 @@ function renderCurves() {
   tbody.innerHTML = "";
 
   for (const curve of curvesList) {
-    const status = curveStatus(curve);
+    const blocked = curveBlockReason(curve, curvesFingerprint, curvesSignal);
 
     const statusCell = hwEl("td");
-    statusCell.appendChild(hwEl("span", `flag-chip ${CURVE_STATUS_CHIP[status]}`.trim(), status));
-    if (status === "stale" && curve.is_active) statusCell.append(" ", hwEl("span", "cell-note", "still marked active"));
+    if (curvesFingerprint === null) statusCell.appendChild(hwEl("span", "flag-chip", "unverified"));
+    else statusCell.appendChild(hwEl("span", `flag-chip ${blocked ? "error" : "ok"}`, blocked ? "not usable" : "usable"));
+    if (blocked && curvesFingerprint !== null) statusCell.append(" ", hwEl("span", "cell-note", blocked));
 
     const actions = hwEl("td", "action-cell");
-    if (curve.is_active) {
-      actions.appendChild(actionButton("Deactivate", () => setCurveActive(curve, false)));
-    } else {
-      const activate = actionButton("Set active", () => setCurveActive(curve, true));
-      if (status === "stale") {
-        activate.disabled = true;
-        activate.classList.add("is-blocked");
-        actions.appendChild(activate);
-        actions.appendChild(hwEl("span", "cell-note", "config mismatch"));
-      } else {
-        actions.appendChild(activate);
-      }
+    if (!blocked) {
+      actions.append(hwLink(`hardware-measure.html?curve=${encodeURIComponent(curve.curve_id)}`, "Measure"), " ");
     }
     const open = openCurveDetails.has(curve.curve_id);
-    const details = actionButton(open ? "Hide details" : "Details", () => {
+    const details = hwEl("button", "btn-secondary table-button", open ? "Hide details" : "Details");
+    details.type = "button";
+    details.setAttribute("aria-expanded", String(open));
+    details.addEventListener("click", () => {
       if (open) openCurveDetails.delete(curve.curve_id);
       else openCurveDetails.add(curve.curve_id);
       renderCurves();
     });
-    details.setAttribute("aria-expanded", String(open));
     actions.appendChild(details);
 
     const configCell = hwEl("td");
-    configCell.appendChild(hwFingerprint(curve.config_fingerprint));
+    configCell.append(hwFingerprint(curve.config_fingerprint), ` ${curve.signal}`);
 
     const row = hwEl("tr");
     row.append(
       hwEl("td", null, curve.curve_id),
-      hwEl("td", null, curve.source === "manual" ? "Manual entry" : "Instrument readings"),
-      hwEl("td", null, formatLocalTime(curve.fitted_at)),
+      hwEl("td", null, curve.conditions.sensor),
+      hwEl("td", null, formatHours(curve.conditions.induction_h)),
       hwEl("td", null, formatConcentration(curve.params.ec50_nM)),
       hwEl("td", null, formatConcentration(curve.lod_nM)),
+      hwEl("td", null, formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])),
       configCell,
-      hwEl("td", null, curve.timepoint),
       statusCell,
       actions,
     );
@@ -104,14 +94,6 @@ function renderCurves() {
 
     if (open) tbody.appendChild(renderCurveDetails(curve));
   }
-}
-
-function actionButton(text, onClick) {
-  const button = hwEl("button", "btn-secondary table-button", text);
-  button.type = "button";
-  button.disabled = curvesBusy;
-  button.addEventListener("click", onClick);
-  return button;
 }
 
 function renderCurveDetails(curve) {
@@ -122,7 +104,10 @@ function renderCurveDetails(curve) {
   const grid = hwEl("div", "detail-grid");
   const item = (label, value) => {
     const box = hwEl("div");
-    box.append(hwEl("span", "sensor-stat-label", label), hwEl("span", "detail-value", value));
+    const valueEl = hwEl("span", "detail-value");
+    if (value instanceof Node) valueEl.appendChild(value);
+    else valueEl.textContent = value;
+    box.append(hwEl("span", "sensor-stat-label", label), valueEl);
     grid.appendChild(box);
   };
   item("Model", curve.model);
@@ -133,7 +118,10 @@ function renderCurveDetails(curve) {
   item("LOD", formatConcentration(curve.lod_nM));
   item("LOQ", formatConcentration(curve.loq_nM));
   item("RMSE", `${formatFluorescence(curve.rmse)} ${HARDWARE_FLUORESCENCE_UNIT}`);
-  item("Usable range", formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max]));
+  item("Fitted", formatLocalTime(curve.fitted_at));
+  item("Source", curve.source === "manual" ? "Recorded data" : "Instrument");
+  item("Run", hwLink(`hardware-calibration.html?plan=${encodeURIComponent(curve.plan_id)}`, curve.plan_id));
+  if (curve.conditions.notes) item("Notes", curve.conditions.notes);
   cell.appendChild(grid);
   cell.appendChild(hwBasisNote("cell-note"));
   fillBasisNotes(cell);
@@ -153,24 +141,6 @@ function renderCurveDetails(curve) {
 
   row.appendChild(cell);
   return row;
-}
-
-async function setCurveActive(curve, active) {
-  const statusEl = document.getElementById("curves-status");
-  curvesBusy = true;
-  renderCurves();
-  setHardwareStatus(statusEl, active ? `Setting ${curve.curve_id} as active...` : `Deactivating ${curve.curve_id}...`, null);
-
-  try {
-    await HardwareApi.saveCurve({ ...curve, is_active: active });
-    curvesBusy = false;
-    await loadCurves(active ? `${curve.curve_id} is now the active curve.` : `${curve.curve_id} is no longer active.`);
-  } catch (err) {
-    console.error("Failed to update curve:", err);
-    curvesBusy = false;
-    renderCurves();
-    setHardwareStatus(statusEl, `Could not update ${curve.curve_id}: ${err.message}`, "error");
-  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -26,7 +26,8 @@ const HardwareProcessing = (() => {
   // Fixed order, fixed format: LED current to 3 decimal places, everything else stringified as-is,
   // joined with "|", then FNV-1a 32-bit over the UTF-8 bytes, keeping the first 6 hex digits.
   // The backend must use the exact same rule, or the same instrument's frontend and backend
-  // would compute different fingerprints.
+  // would compute different fingerprints. There is no firmware version anywhere: a firmware
+  // update that changes the reading path is marked by changing build_id.
   function configFingerprint(config) {
     const canonical = [
       Number(config.led_current_mA).toFixed(3),
@@ -34,7 +35,6 @@ const HardwareProcessing = (() => {
       String(config.atime),
       String(config.astep),
       String(config.build_id),
-      String(config.firmware_version),
     ].join("|");
     let hash = 0x811c9dc5;
     for (const byte of new TextEncoder().encode(canonical)) {
@@ -65,7 +65,6 @@ const HardwareProcessing = (() => {
       atime: body.config.atime,
       astep: body.config.astep,
       build_id: body.build_id,
-      firmware_version: body.firmware_version,
       emission_filter: null, // the firmware doesn't know which filter is installed; none has been chosen yet either
     };
     config.fingerprint = configFingerprint(config);
@@ -90,7 +89,6 @@ const HardwareProcessing = (() => {
 
   function validateIdentity(body) {
     if (typeof body.build_id !== "string") return "build_id is missing";
-    if (typeof body.firmware_version !== "string") return "firmware_version is missing";
     return null;
   }
 
@@ -177,13 +175,22 @@ const HardwareProcessing = (() => {
     return DEVICE_CHANNELS.some((key) => rawLight[key] >= limit);
   }
 
+  // What "the signal" means under a basis, as a short id stored on every Measurement, run and
+  // curve. A curve only converts readings whose signal id equals its own: if the definition
+  // changes later (a ratio, a normalization, a measured unmixing basis), old curves keep saying
+  // what they were fitted on and can't silently convert numbers of a different kind.
+  function signalId(basis) {
+    if (!basis || basis.method !== "single_channel") {
+      throw new Error(`Unmixing method "${basis?.method}" is not implemented.`);
+    }
+    return String(basis.signal_channel);
+  }
+
   // 4. Unmixing. Only single_channel exists so far: the basis hasn't been calibrated with an
   //    sfGFP standard yet, and least-squares unmixing waits until a measured basis vector
   //    exists — no basis values are invented here.
   function unmix(channels, basis) {
-    if (!basis || basis.method !== "single_channel") {
-      throw new Error(`Unmixing method "${basis?.method}" is not implemented.`);
-    }
+    signalId(basis);
     for (const key of [basis.signal_channel, basis.scatter_channel]) {
       if (!Number.isFinite(channels[key])) throw new Error(`Unmixing basis refers to unknown channel ${key}.`);
     }
@@ -212,7 +219,7 @@ const HardwareProcessing = (() => {
   //    context.basis         unmixing basis (config/unmix_basis.json)
   //    context.blankScatter  scatter of the most recent blank under the same config, or null
   //    context.timestampUtc  ISO string
-  //    Flags that need stored state to determine (STALE_CONFIG, BELOW_LOD, ABOVE_RANGE) aren't set here.
+  //    STALE_CONFIG needs the run or batch the reading goes into, so it isn't set here.
   function toMeasurement(reading, input, context) {
     // Live-stream data must never become a Measurement (never stored, never added to a plan, never fitted).
     if (!reading || reading.mode !== "measurement") {
@@ -240,6 +247,7 @@ const HardwareProcessing = (() => {
       timestamp_utc: timestampUtc,
       sample_type: input.sample_type,
       known_concentration_nM: input.sample_type === "standard" ? input.known_concentration_nM : null,
+      signal: signalId(basis),
       fluorescence,
       fluorescence_sd: countsToBasic(readNoiseSdCounts(reading, basis.signal_channel), config),
       scatter,
@@ -270,6 +278,7 @@ const HardwareProcessing = (() => {
       timestamp_utc: timestampUtc,
       sample_type: "blank",
       known_concentration_nM: null,
+      signal: "F4",
       fluorescence: normalized.F4,
       fluorescence_sd: countsToBasic(QUANTIZATION_SD_COUNTS * Math.SQRT2, config),
       scatter: normalized.F3,
@@ -293,6 +302,7 @@ const HardwareProcessing = (() => {
     subtractDark,
     normalize,
     checkSaturation,
+    signalId,
     unmix,
     toMeasurement,
     toDarkCheckMeasurement,
