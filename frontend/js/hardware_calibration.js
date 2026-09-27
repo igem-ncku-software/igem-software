@@ -69,10 +69,11 @@ let deviceState = "checking";  // checking | online | offline
 let deviceFingerprint = null;  // null unless online: the config can't be confirmed
 let deviceSensorOk = null;     // DeviceStatus.sensor_ok; null = not online, or a firmware that doesn't report it
 let deviceError = null;        // why it isn't online, in words
+let deviceLastSeen = null;     // when an offline instrument last reported; null if it never has, or it's online
 let sourceTouched = false;     // the user picked a source: never pre-select over their choice
 
 function deviceSnapshot() {
-  return [deviceState, deviceFingerprint, deviceSensorOk, deviceError].join("|");
+  return [deviceState, deviceFingerprint, deviceSensorOk, deviceError, deviceLastSeen].join("|");
 }
 
 async function refreshDevice() {
@@ -83,10 +84,12 @@ async function refreshDevice() {
     deviceFingerprint = status.config.fingerprint;
     deviceSensorOk = status.sensor_ok;
     deviceError = null;
+    deviceLastSeen = null;
   } catch (err) {
     deviceState = "offline";
     deviceFingerprint = null;
     deviceSensorOk = null;
+    deviceLastSeen = err.deviceOffline ? err.lastSeen : null;
     // The API's own offline message formats last_seen in the browser locale; this page uses the fixed format.
     deviceError = err.deviceOffline && err.lastSeen ? `CAPTURE-Screen is offline (last seen ${formatLocalTime(err.lastSeen)}).` : err.message;
   }
@@ -95,7 +98,7 @@ async function refreshDevice() {
 
 // What the instrument's status feeds: the Source choice, Create run, and an open run's Read step.
 function applyDevice(changed) {
-  renderDeviceStatus(document.getElementById("source-device-status"));
+  renderDeviceStatus(document.getElementById("source-device-status"), true);
   if (!plan) {
     if (!sourceTouched && !setupSource() && deviceState === "online") selectSource("device");
     updateSetupControls();
@@ -105,18 +108,34 @@ function applyDevice(changed) {
   }
 }
 
-// One line: online with config and sensor, or why not.
-function renderDeviceStatus(el) {
-  el.textContent = "";
+// A time from today as the clock alone; any other day in full. Both in the fixed 24-hour format.
+function formatSeenTime(utc) {
+  const d = new Date(utc);
+  return d.toDateString() === new Date().toDateString() ? formatClockTime(d) : formatLocalTime(utc);
+}
+
+// The instrument's status line: a health dot, then online with config and sensor, or why not.
+// withHint (Source, before a run exists) adds that an offline instrument doesn't stop Set up:
+// the page polls, and Create run unblocks by itself when it comes online.
+function renderDeviceStatus(el, withHint = false) {
+  const dot = hwEl("span", "status-dot");
+  dot.setAttribute("aria-hidden", "true");
+  const text = hwEl("span");
+  el.replaceChildren(dot, text);
   if (deviceState === "checking") {
-    el.textContent = "Checking the instrument...";
-  } else if (deviceState === "offline") {
-    el.append(`${deviceError} `, hwLink("hardware.html", "Check on Instrument →"));
-  } else {
-    const sensor = sensorReading(deviceSensorOk);
-    el.append("Online · config ", hwFingerprint(deviceFingerprint), ` · sensor ${sensor.text.toLowerCase()}`);
-    if (sensor.blocks) el.append(" ", hwLink("hardware.html", "Check on Instrument →"));
+    text.textContent = "Checking the instrument...";
+    return;
   }
+  if (deviceState === "offline") {
+    text.append(deviceLastSeen ? `Offline · last seen ${formatSeenTime(deviceLastSeen)}.` : deviceError);
+    if (withHint) text.append(" You can fill in Set up now; Create run waits for it.");
+    text.append(" ", hwLink("hardware.html", "Check on Instrument →"));
+    return;
+  }
+  const sensor = sensorReading(deviceSensorOk);
+  dot.classList.add(sensor.blocks ? "is-error" : "is-ok");
+  text.append("Online · config ", hwFingerprint(deviceFingerprint), ` · sensor ${sensor.text.toLowerCase()}`);
+  if (sensor.blocks) text.append(" ", hwLink("hardware.html", "Check on Instrument →"));
 }
 
 // ---- 1. Source --------------------------------------------------------

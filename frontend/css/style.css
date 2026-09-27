@@ -440,6 +440,13 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 .choice-meta { display: block; margin-top: 2px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
 #source-summary .choice-title, #source-summary .choice-meta { margin: 0; }
 #source-summary .choice-meta { margin-top: 2px; }
+/* Calibrate's Source: the same 16px under the heading as every other step card. The choices are
+   <label>s, which otherwise take the global label margin on top of the list's own. */
+#source-choice, #source-choice .choice-list, #source-choice .choice { margin-top: 0; }
+#plan-resume { margin: 0 0 12px; }
+/* A status line led by a health dot, kept level with the first line when the text wraps. */
+.source-status { display: flex; align-items: flex-start; gap: 8px; }
+.source-status .status-dot { margin-top: 6px; }
 
 /* Calibrate's Set up: the tube list a run will make, in reading order. */
 .tube-order { margin-top: 8px; font-size: .88rem; }

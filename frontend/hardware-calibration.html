@@ -35,7 +35,7 @@
           <span class="step-card-num">1</span>
           <div>
             <p class="section-label">Source</p>
-            <h2>Data source</h2>
+            <h2>Choose a source</h2>
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
@@ -51,7 +51,8 @@
                   <input type="radio" name="setup-source" value="device" />
                   <span>
                     <span class="choice-title">Read on CAPTURE-Screen</span>
-                    <span class="choice-meta" id="source-device-status">Checking the instrument...</span>
+                    <span class="choice-meta">Read each tube now; each reading is saved as it is taken.</span>
+                    <span class="choice-meta source-status" id="source-device-status">Checking the instrument...</span>
                   </span>
                 </label>
               </li>
@@ -61,6 +62,7 @@
                   <span>
                     <span class="choice-title">Enter recorded data</span>
                     <span class="choice-meta">Readings taken earlier on CAPTURE-Screen, typed in.</span>
+                    <span class="choice-meta">No instrument needed if you enter its config.</span>
                   </span>
                 </label>
               </li>
@@ -70,7 +72,7 @@
           <!-- The open run's source; for an instrument run, the instrument now. -->
           <div id="source-summary" hidden>
             <p class="choice-title" id="source-summary-title"></p>
-            <p class="choice-meta" id="source-summary-status"></p>
+            <p class="choice-meta source-status" id="source-summary-status"></p>
           </div>
         </div>
       </section>
