@@ -163,7 +163,8 @@ function liveStatus() {
   if (!liveWanted) {
     return measuring
       ? { dot: "off", label: "Measuring", message: "Measurement in progress" }
-      : { dot: "off", label: "Online", message: "Turn on Live to stream" };
+      // The one place the page says Live lights the LED on the sample: the description no longer does.
+      : { dot: "off", label: "Online", message: "Turn on Live to switch on the LED and stream" };
   }
   if (measuring) {
     return { dot: "reconnecting", label: "Measuring", message: "Live resumes after measurement" };

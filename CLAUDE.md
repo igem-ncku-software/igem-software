@@ -160,7 +160,7 @@ Each feature page loads only the script it needs, so a polling loop only runs on
     - The user removed a separate Reader tile, plain-word Wi-Fi ratings (good/weak/poor), and — later — build ID, firmware version, and the Wi-Fi dBm reading itself from this row: none of the three change how a raw count should be read, unlike the four that stayed. Don't add any of them back to this row (`hardware.js`'s status page is a different page with a different job, and keeps its own device/firmware/Wi-Fi fields).
 
     The user wants every necessary piece of information visible on the page, so don't drop any of these to declutter. The user also wants the text short and professional. The panel uses:
-    - a two-sentence description: what the chart shows, and why the LED is on only during Live;
+    - a one-sentence description of what the chart shows (the user removed the LED sentence on 2026-09-27; the "Online" status message "Turn on Live to switch on the LED and stream" is now the one place the page says Live lights the LED, so keep the LED in it);
     - short labels;
     - a one-item swatch legend (F4 · sfGFP) instead of a chart note;
     - one-line status messages;
