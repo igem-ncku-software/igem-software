@@ -115,18 +115,10 @@ function formatAgo(utc) {
   return `${Math.round(hours / 24)} d ago`;
 }
 
-// An induction time. null is a time that wasn't recorded (it's optional), said in words so it
-// never reads like a value.
-function formatHours(h) {
-  if (h === null) return "Not recorded";
-  return Number.isFinite(h) ? `${+h.toFixed(2)} h` : "--";
-}
-
-// A curve's or run's conditions on one line: the two things a sample has to match.
+// A curve's or run's conditions on one line: the biosensor strain a sample has to match.
 function formatConditions(conditions) {
   if (!conditions) return "--";
-  if (conditions.induction_h === null) return `${conditions.sensor} · induction time not recorded`;
-  return `${conditions.sensor} · ${formatHours(conditions.induction_h)} induction`;
+  return conditions.sensor;
 }
 
 // An InverseEstimate as text. A number only for "ok": outside the range only the bound is shown,

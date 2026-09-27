@@ -1,6 +1,6 @@
-"""Reader-export parsing and tidy-table assembly (spec docs/dose_response_model_spec.md §4).
+"""Reader-export parsing and tidy-table assembly.
 
-Adapter pattern (§4.2): load_reader_export() is the only function that knows
+Adapter pattern: load_reader_export() is the only function that knows
 the SpectraMax ASCII export's line-by-line syntax. Everything downstream
 (to_tidy() and later modules) works on well/time_h/RFU/OD600 rows, so a
 future second instrument only needs its own load_*_export() parser.
@@ -19,7 +19,7 @@ _TIME_RE = re.compile(r"^Time\s+(\d+):(\d+):(\d+)")
 _ROW_LETTERS = {"A", "B", "C", "D", "E", "F", "G", "H"}
 
 # The file's own block labels ("Plate:\t<label>\t...") don't match the tidy
-# schema's column names (§4.1), so map them explicitly. This is specific to
+# schema's column names, so map them explicitly. This is specific to
 # the SpectraMax export's own vocabulary, not an experiment-design setting,
 # so it stays a code constant rather than moving to experiment.yaml.
 _PLATE_LABEL_TO_MEASUREMENT = {
@@ -27,8 +27,8 @@ _PLATE_LABEL_TO_MEASUREMENT = {
     "OD600": "OD600",
 }
 
-# Design v.1 plate map (§1): row -> AHL concentration, column -> strain.
-# Loaded from config/experiment.yaml (§7) - see load_plate_map().
+# Design v.1 plate map: row -> AHL concentration, column -> strain.
+# Loaded from config/experiment.yaml - see load_plate_map().
 _CONFIG = load_config()
 
 
@@ -52,7 +52,7 @@ def _read_export_text(path: str | Path) -> str:
 
 
 def load_reader_export(path: str | Path) -> pd.DataFrame:
-    """Parse one SpectraMax M2/M2e ASCII export (§4.2).
+    """Parse one SpectraMax M2/M2e ASCII export.
 
     Format: 1+ "Plate:" blocks (one per measurement type), each a series of
     "Time HH:MM:SS" 8x12 matrices (row letter x column number), terminated by
@@ -118,7 +118,7 @@ def load_reader_export(path: str | Path) -> pd.DataFrame:
 
 
 def load_plate_map(config: ExperimentConfig | None = None) -> dict[str, dict]:
-    """Design v.1 plate map (spec §1 / §7's experiment.yaml), expanded to a
+    """Design v.1 plate map (from config/experiment.yaml), expanded to a
     per-well lookup table.
 
     config defaults to this module's own load_config() call (the shipped
@@ -161,7 +161,7 @@ def load_plate_map(config: ExperimentConfig | None = None) -> dict[str, dict]:
 
 
 def to_tidy(raw: pd.DataFrame, plate_map: dict[str, dict]) -> pd.DataFrame:
-    """Attach plate-map metadata to parsed reader data to build the §4.1 tidy table.
+    """Attach plate-map metadata to parsed reader data to build the tidy table.
 
     raw: output of load_reader_export() - one row per well x time_h.
     plate_map: well -> {strain, concentration_M, replicate, role}, e.g. from

@@ -1,12 +1,12 @@
 // =========================================================
 // Backs hardware-curves.html: step 3 of the CAPTURE-Screen workflow. Lists every saved curve with
-// what it is valid for (biosensor strain, induction time, config, signal), marks whether it can
+// what it is valid for (biosensor strain, config, signal), marks whether it can
 // convert readings on the instrument as it is now, and starts a measurement batch with one.
 // Target elements: #curves-status / #curves-empty / #curves-table-wrapper / #curves-table-body
 // Backing API: listCurves / getDeviceStatus / getCurrentSignal
 //
 // A saved curve never changes, and there is no "active" curve: Measure asks which curve to use
-// at the start of every batch, so two strains or two induction times can't be mixed up.
+// at the start of every batch, so two strains can't be mixed up.
 // =========================================================
 
 let curvesList = [];
@@ -82,7 +82,6 @@ function renderCurves() {
     row.append(
       hwEl("td", null, curve.curve_id),
       hwEl("td", null, curve.conditions.sensor),
-      hwEl("td", null, formatHours(curve.conditions.induction_h)),
       hwEl("td", null, formatConcentration(curve.params.ec50_nM)),
       hwEl("td", null, formatConcentration(curve.lod_nM)),
       hwEl("td", null, formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])),

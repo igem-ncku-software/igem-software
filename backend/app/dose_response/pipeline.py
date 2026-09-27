@@ -1,7 +1,7 @@
 """End-to-end orchestrator: reader export -> per-strain dose-response results.
 
-Runs io -> normalize -> timeseries -> doseresponse in sequence (spec §3's
-"pipeline.py # chains everything together end-to-end"). Doesn't introduce any new computation -
+Runs io -> normalize -> timeseries -> doseresponse in sequence, end to end.
+Doesn't introduce any new computation -
 every step here is a direct call into an already-tested function from the
 other four modules.
 """
@@ -24,7 +24,7 @@ FIT_CURVE_POINTS = 50
 @dataclass
 class StrainResult:
     strain: str
-    ec50_nM: float | None  # None when not responsive (spec §5.4: don't report a fake EC50)
+    ec50_nM: float | None  # None when not responsive: never report a fake EC50
     ec50_nM_ci95: tuple[float, float] | None
     n: float
     top: float

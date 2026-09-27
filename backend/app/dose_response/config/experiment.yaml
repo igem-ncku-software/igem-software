@@ -1,8 +1,7 @@
-# Dose-response experiment design & thresholds (spec docs/dose_response_model_spec.md §7).
-# Single source of truth for the plate map and tunable thresholds - these
-# values used to be hardcoded across io.py/normalize.py/timeseries.py/
-# doseresponse.py, each with a "TODO(§7): read from config" note pointing
-# here. Changing plate layout or thresholds only requires editing this file.
+# Dose-response experiment design & thresholds.
+# Single source of truth for the plate map and tunable thresholds, read by
+# io.py/normalize.py/timeseries.py/doseresponse.py. Changing plate layout or
+# thresholds only requires editing this file.
 
 fluorescence:
   ex_nm: 485
@@ -21,9 +20,9 @@ concentrations_M:
 
 # Strain -> plate columns (design v.1).
 # Key spelled with the Unicode alpha (DH5α) to match the tidy table's
-# `strain` column values exactly (spec §4.1: "TOP10 / DH5α / BL21"). Spec
-# §7's own example config uses the ASCII "DH5a" - using the same spelling
-# here as in the data avoids a separate ASCII<->display translation layer.
+# `strain` column values exactly (TOP10 / DH5α / BL21). Using the same
+# spelling here as in the data avoids a separate ASCII<->display
+# translation layer.
 strains:
   TOP10: [1, 2, 3]
   DH5α: [4, 5, 6]

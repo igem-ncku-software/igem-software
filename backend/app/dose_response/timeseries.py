@@ -1,4 +1,4 @@
-"""Time-course kinetics per strain x concentration curve (spec §5.2).
+"""Time-course kinetics per strain x concentration curve.
 
 Input is normalize.py's per-well output (needs strain, concentration_M,
 time_h, F columns). aggregate_by_condition() collapses replicates into one
@@ -31,8 +31,8 @@ class TimeSigmoidFit:
 
 def aggregate_by_condition(normalized: pd.DataFrame, strain: str, concentration_M: float) -> pd.DataFrame:
     """Per-time_h mean/SD/n of F across replicates for one strain x concentration
-    (spec §5.1's closing note: "each (strain, conc, t) triple then takes mean
-    ± SD across replicates"). OD-gated NaN F rows are excluded by pandas' default skipna
+    (each (strain, conc, t) triple takes mean ± SD across replicates).
+    OD-gated NaN F rows are excluded by pandas' default skipna
     mean/std/count, not filtered explicitly here.
     """
     subset = normalized[(normalized["strain"] == strain) & (normalized["concentration_M"] == concentration_M)]
@@ -54,7 +54,7 @@ def _clean_sorted(t: np.ndarray, F: np.ndarray) -> tuple[np.ndarray, np.ndarray]
 
 
 def fit_time_sigmoid(t: np.ndarray, F: np.ndarray) -> TimeSigmoidFit:
-    """Fit F(t) = f0 + (fmax-f0)/(1+exp(-r*(t-t0))) (models.logistic_time, spec §5.2).
+    """Fit F(t) = f0 + (fmax-f0)/(1+exp(-r*(t-t0))) (models.logistic_time).
 
     converged=False both when curve_fit raises (too few/degenerate points)
     and when it "succeeds" but t0 lands far outside the observed time
@@ -91,17 +91,16 @@ PLATEAU_REACHED_SLOPE_FRACTION = 0.1
 
 
 def plateau(t: np.ndarray, F: np.ndarray) -> tuple[float, bool]:
-    """plateau = Fmax from the sigmoid fit; fallback = mean of last 2 readings
-    (spec §5.2).
+    """plateau = Fmax from the sigmoid fit; fallback = mean of last 2 readings.
 
     plateau_reached=False if the last two points are still rising
-    "significantly" (spec's word, no formal test given). A raw slope > 0
+    "significantly" (no formal test is defined for that). A raw slope > 0
     isn't usable here: a logistic mathematically never hits exactly zero
     slope in finite time, so that test would flag every converged fit as
     "not reached", always. Instead this compares the last-two-point slope
     to the curve's own peak finite-difference slope (near t0) and calls it
     reached once the ending slope has decayed to <=10% of that peak - a
-    chosen heuristic, not a spec-given number.
+    chosen heuristic, not an established threshold.
     """
     t_c, F_c = _clean_sorted(t, F)
     if t_c.size < 2:
@@ -118,7 +117,7 @@ def plateau(t: np.ndarray, F: np.ndarray) -> tuple[float, bool]:
 
 def response_rate(t: np.ndarray, F: np.ndarray) -> float:
     """rate = r*(Fmax-F0)/4 (logistic max slope) from the sigmoid fit;
-    fallback = max finite-difference slope across the trajectory (spec §5.2).
+    fallback = max finite-difference slope across the trajectory.
     """
     t_c, F_c = _clean_sorted(t, F)
     if t_c.size < 2:
@@ -137,7 +136,7 @@ def onset_time(
     k: float = ONSET_K_SD_DEFAULT,
 ) -> float | None:
     """First of >=2 consecutive time points where F exceeds mean_0nM + k*SD_0nM,
-    both evaluated at the SAME time_h (spec §5.2) - a threshold crossing, not
+    both evaluated at the SAME time_h - a threshold crossing, not
     a fit.
 
     baseline: the 0 nM condition's per-time_h curve for the SAME strain,
@@ -153,7 +152,7 @@ def onset_time(
     per time_h instead keeps SD in the single digits and the comparison
     apples-to-apples ("this dose vs. 0 nM at the same hour").
 
-    k defaults to config/experiment.yaml's thresholds.onset_k_sd (§7).
+    k defaults to config/experiment.yaml's thresholds.onset_k_sd.
     """
     curve = pd.DataFrame({"time_h": np.asarray(t, dtype=float), "F": np.asarray(F, dtype=float)})
     curve = curve.merge(baseline[["time_h", "F_mean", "F_sd"]], on="time_h", how="inner")

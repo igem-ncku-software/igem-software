@@ -1,4 +1,4 @@
-"""Loads config/experiment.yaml: the plate map and tunable thresholds (spec §7).
+"""Loads config/experiment.yaml: the plate map and tunable thresholds.
 
 io.py/normalize.py/timeseries.py/doseresponse.py each load this once at
 import time and use it for the default values that used to be hardcoded

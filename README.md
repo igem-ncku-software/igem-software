@@ -72,7 +72,6 @@ backend/                      FastAPI
 
 firmware/capture_screen/      CAPTURE-Screen firmware (ESP32 + AS7341 + OLED + Live button), one sketch plus secrets.h
 scripts/                      install and run scripts (.sh and .ps1 versions)
-docs/dose_response_model_spec.md   implementation spec for the dose-response model
 ```
 
 ## Quickstart
@@ -152,7 +151,7 @@ Two deliberate design choices:
 
 ## Dose-response analysis pipeline
 
-`app/dose_response/` is implemented per [`docs/dose_response_model_spec.md`](docs/dose_response_model_spec.md), one module per stage:
+`app/dose_response/` is one module per stage:
 
 ```
 io.py            parses a SpectraMax ASCII export -> a tidy well / time_h / RFU / OD600 table
@@ -165,8 +164,6 @@ router.py        thin HTTP adapter only, no computation of its own
 ```
 
 The pure math (`models.py`) is deliberately kept separate from data handling, so it can be unit-tested against synthetic data alone, without needing real experimental data.
-
-Almost every function's docstring in this code is tagged with `(spec §N)`, pointing at the corresponding section of the spec. **Read the referenced spec section before changing analysis behavior** — this code is a deliberate transcription of that spec.
 
 ### Experiment design and thresholds
 

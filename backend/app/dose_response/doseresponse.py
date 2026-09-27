@@ -1,9 +1,9 @@
-"""Dose-response fitting, flatness test, and detection limits (spec §5.3-5.5).
+"""Dose-response fitting, flatness test, and detection limits.
 
 fit_hill()/flatness_test() take plain (concentration, plateau) arrays -
 typically timeseries.plateau() run once per (strain, concentration) on the
 replicate-mean curve. lod_loq() takes the normalized DataFrame directly
-because §5.5 needs a real per-replicate plateau *distribution* (mean, SD,
+because LOD/LOQ needs a real per-replicate plateau *distribution* (mean, SD,
 and enough n for a t-test) at each concentration, not one aggregated value.
 """
 
@@ -57,8 +57,8 @@ class LodLoqResult:
 
 
 def _hill_log10x(log10_A: np.ndarray, bottom: float, top: float, log10_ec50: float, n: float) -> np.ndarray:
-    """Hill equation reparametrized for fitting in log10[A] space (spec §5.3:
-    "more stable to fit in log10[A] coordinates"). Delegates to models.hill() so the Hill
+    """Hill equation reparametrized for fitting in log10[A] space, which is
+    more stable to fit than linear [A]. Delegates to models.hill() so the Hill
     formula itself has one implementation; this only converts the log10
     x-axis and log10(EC50) parameter back to linear before calling it -
     EC50 can span many orders of magnitude (1e-9 to 1e-5 M here), which is
@@ -72,7 +72,7 @@ def _hill_log10x(log10_A: np.ndarray, bottom: float, top: float, log10_ec50: flo
 def fit_mask(conc_M: np.ndarray, plateaus: np.ndarray) -> np.ndarray:
     """The points fit_hill() regresses on: positive concentrations with a finite plateau.
 
-    A plateau is NaN when OD gating (spec §5.1) removed every reading of a
+    A plateau is NaN when OD gating (normalize.py) removed every reading of a
     condition, e.g. growth inhibited at the top dose. That point carries no
     information and would abort the lmfit fit, so it is left out just like
     [A]=0. flatness_test() must be given this same subset.
@@ -87,10 +87,10 @@ def fit_hill(
     plateau: np.ndarray,
     plateau_sd: np.ndarray | None = None,
 ) -> FitHillResult:
-    """Fit the Hill dose-response equation to plateau vs [AHL] (spec §5.3).
+    """Fit the Hill dose-response equation to plateau vs [AHL].
 
     conc_M==0 is excluded from the fit itself (can't take log10(0)) but its
-    plateau is used as bottom's initial guess, per spec §5.3. Conditions
+    plateau is used as bottom's initial guess. Conditions
     without a plateau (NaN) are excluded too - see fit_mask().
     """
     conc_M = np.asarray(conc_M, dtype=float)
@@ -159,7 +159,7 @@ def predict_concentration(
 ) -> ConcentrationPrediction:
     """Invert the Hill equation to back-calculate [A] from a measured F.
 
-    Algebraic inverse of spec §5.3's F = bottom + (top-bottom)*A^n/(EC50^n+A^n):
+    Algebraic inverse of F = bottom + (top-bottom)*A^n/(EC50^n+A^n):
     [A] = EC50 * ((F-bottom)/(top-F))^(1/n).
 
     The model's achievable range for A in (0, inf) is the OPEN interval
@@ -196,7 +196,7 @@ def predict_concentration(
 
 
 def flatness_test(fit_result: FitHillResult, plateau_fitted: np.ndarray) -> FlatnessResult:
-    """Hill model vs. constant model (F-test), spec §5.4.
+    """Hill model vs. constant model (F-test).
 
     plateau_fitted MUST be the same y (positive-concentration plateaus only)
     that produced fit_result, for a fair nested-model comparison - not the
@@ -223,7 +223,7 @@ def flatness_test(fit_result: FitHillResult, plateau_fitted: np.ndarray) -> Flat
 def _plateaus_by_replicate(normalized: pd.DataFrame, strain: str, concentration_M: float) -> np.ndarray:
     """Per-replicate plateau values for one strain x concentration.
 
-    §5.5's LOD/LOQ needs a real distribution across replicates (mean, SD,
+    LOD/LOQ needs a real distribution across replicates (mean, SD,
     and enough n for a t-test) - unlike fit_hill(), which only needs one
     plateau per concentration from the replicate-mean curve.
     """
@@ -256,13 +256,13 @@ def _lowest_significant_concentration(
 
 
 def lod_loq(normalized: pd.DataFrame, strain: str) -> LodLoqResult:
-    """Detection/quantification limits from the 0 nM plateau distribution (spec §5.5).
+    """Detection/quantification limits from the 0 nM plateau distribution.
 
     Searches ascending through the strain's tested positive concentrations
     for the lowest one that both clears mean_0nM + k*SD_0nM and is
     significantly above 0 nM by a one-tailed Welch t-test (alpha=0.05).
-    Returns None (not the "> 10 uM" fallback string) when nothing qualifies
-    - spec's own suggested display text for that case, left to the caller.
+    Returns None when nothing qualifies; how to display that (e.g. "> 10 uM")
+    is left to the caller.
     """
     zero = _plateaus_by_replicate(normalized, strain, 0.0)
     mean_0, sd_0 = float(np.mean(zero)), float(np.std(zero, ddof=1))

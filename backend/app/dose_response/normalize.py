@@ -1,4 +1,4 @@
-"""Blank subtraction and OD-gated fluorescence normalization (spec §5.1).
+"""Blank subtraction and OD-gated fluorescence normalization.
 
 Takes the io.py tidy table (well/time_h/RFU/OD600/role/...) and adds the
 per-well, per-time-point corrected values and normalized fluorescence F.
@@ -13,7 +13,7 @@ OD_MIN_DEFAULT = load_config().thresholds.od_min
 
 
 def blank_subtract(tidy: pd.DataFrame) -> pd.DataFrame:
-    """OD_corr = OD600 - OD_blank(t); RFU_corr = RFU - RFU_blank(t) (spec §5.1).
+    """OD_corr = OD600 - OD_blank(t); RFU_corr = RFU - RFU_blank(t).
 
     OD_blank(t)/RFU_blank(t) are the mean OD600/RFU across role=="blank"
     wells at the same time_h. Which wells count as blank comes from the
@@ -36,7 +36,7 @@ def blank_subtract(tidy: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize_fluorescence(blank_subtracted: pd.DataFrame, od_min: float = OD_MIN_DEFAULT) -> pd.DataFrame:
-    """F = RFU_corr / OD_corr, gated to NaN where OD_corr < od_min (spec §5.1).
+    """F = RFU_corr / OD_corr, gated to NaN where OD_corr < od_min.
 
     Expects blank_subtracted to already have RFU_corr/OD_corr columns, i.e.
     this is normally called on blank_subtract()'s output.
@@ -44,13 +44,13 @@ def normalize_fluorescence(blank_subtracted: pd.DataFrame, od_min: float = OD_MI
     F is left negative when RFU_corr < 0 (background > signal) - this is
     EXPECTED at early/low-signal timepoints, not a bug, and is deliberately
     NOT clamped to 0 here. Clamping would bias the mean upward for exactly
-    the low-signal groups (e.g. the 0 nM control) that §5.4 flatness_test()
-    and §5.5 LOD rely on for an unbiased baseline - the OD_corr<od_min gate
-    below is the only "unreliable measurement" filter spec §5.1 calls for.
+    the low-signal groups (e.g. the 0 nM control) that flatness_test()
+    and the LOD rely on for an unbiased baseline - the OD_corr<od_min gate
+    below is the only "unreliable measurement" filter.
     A non-negative *display* should be done by clamping the plot axis at
-    the plotting layer (§6), never by changing this data.
+    the plotting layer, never by changing this data.
 
-    od_min defaults to config/experiment.yaml's thresholds.od_min (§7).
+    od_min defaults to config/experiment.yaml's thresholds.od_min.
     """
     result = blank_subtracted.copy()
     valid = result["OD_corr"] >= od_min

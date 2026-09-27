@@ -38,7 +38,6 @@
  * What a curve is valid for beyond the instrument config.
  * @typedef {Object} Conditions
  * @property {string} sensor             the biosensor strain / construct
- * @property {number | null} induction_h hours from adding AHL to reading; null when not recorded
  * @property {string} notes              free text, may be empty
  */
 

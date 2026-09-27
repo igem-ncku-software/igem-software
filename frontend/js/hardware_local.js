@@ -153,11 +153,11 @@ function localSampleSd(values) {
 }
 
 // ---- Experimental conditions ----------------------------------------------
-// What a curve is valid for beyond the instrument config: which biosensor strain, and how long
-// after AHL was added it was read. A sample only converts through a curve made under the same
-// conditions. The strain is required; induction time is optional (the user's choice, 2026-09-27)
-// and null when not recorded, never a made-up value. When given it is a number rather than free
-// text so it can be compared.
+// What a curve is valid for beyond the instrument config: which biosensor strain it was made
+// with, plus free-text notes. A sample only converts through a curve made with the same strain.
+// Induction time was removed on 2026-09-27 (the user's choice): new conditions don't carry it, and
+// an induction_h left in data stored or backed up before then is kept as it is but never checked
+// or shown.
 
 const LOCAL_TEXT_LIMIT = 200;
 
@@ -165,9 +165,6 @@ function localConditionsProblem(c) {
   if (!c || typeof c !== "object") return "conditions are missing";
   if (typeof c.sensor !== "string" || !c.sensor.trim()) return "Enter the biosensor strain.";
   if (c.sensor.length > LOCAL_TEXT_LIMIT) return "The biosensor strain is too long.";
-  if (c.induction_h !== null && !(Number.isFinite(c.induction_h) && c.induction_h > 0 && c.induction_h <= 1000)) {
-    return "Induction time must be a number of hours above 0, or left empty.";
-  }
   if (typeof c.notes !== "string" || c.notes.length > LOCAL_TEXT_LIMIT * 5) return "Notes are too long.";
   return null;
 }
@@ -175,7 +172,6 @@ function localConditionsProblem(c) {
 function localConditions(input) {
   const conditions = {
     sensor: String(input?.sensor ?? "").trim(),
-    induction_h: input?.induction_h === null || input?.induction_h === undefined ? null : Number(input.induction_h),
     notes: String(input?.notes ?? "").trim(),
   };
   const problem = localConditionsProblem(conditions);

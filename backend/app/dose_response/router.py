@@ -1,4 +1,4 @@
-"""FastAPI router for the dose-response pipeline (spec docs/dose_response_model_spec.md).
+"""FastAPI router for the dose-response pipeline.
 
 Thin HTTP adapter only - every computation is a direct call into
 pipeline.py/doseresponse.py; no fitting/statistics logic lives here.

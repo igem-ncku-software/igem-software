@@ -87,7 +87,7 @@
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
-        <p class="step-bench"><b>Bench</b> <span>Biosensor cells induced with each AHL standard, and cell blanks without AHL, all for the same time.</span></p>
+        <p class="step-bench" id="setup-bench"><b>Bench</b> <span>Biosensor cells induced with each AHL standard, and cell blanks without AHL.</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
@@ -95,15 +95,11 @@
             <form id="setup-form" novalidate>
               <fieldset class="plain-fieldset">
                 <legend>Conditions</legend>
-                <p class="plan-meta">A sample converts only through a curve made under the same conditions.</p>
+                <p class="plan-meta">A sample converts only through a curve made with the same biosensor strain.</p>
                 <div class="form-grid">
                   <div class="field">
                     <label for="cond-sensor">Biosensor strain</label>
                     <input type="text" id="cond-sensor" autocomplete="off" />
-                  </div>
-                  <div class="field">
-                    <label for="cond-induction">Induction time (h, optional)</label>
-                    <input type="text" id="cond-induction" inputmode="decimal" autocomplete="off" />
                   </div>
                   <div class="field">
                     <label for="cond-notes">Notes (optional)</label>
@@ -113,7 +109,8 @@
               </fieldset>
 
               <!-- Read on the instrument: the tube list. Blanks are the 0 nM point. -->
-              <div id="device-fields">
+              <fieldset class="plain-fieldset" id="device-fields">
+                <legend>Standards</legend>
                 <label for="plan-concentrations">Standard concentrations (nM, comma-separated)</label>
                 <input type="text" id="plan-concentrations" value="1, 3, 10, 30, 100, 300, 1000, 10000" autocomplete="off" />
                 <div class="form-grid">
@@ -132,10 +129,11 @@
                   <summary>Reading order</summary>
                   <ol id="plan-order-list"></ol>
                 </details>
-              </div>
+              </fieldset>
 
               <!-- Enter recorded data: when and under which config. The values go in at step 3. -->
-              <div id="manual-fields" hidden>
+              <fieldset class="plain-fieldset" id="manual-fields" hidden>
+                <legend>Recording</legend>
                 <div class="form-grid">
                   <div class="field">
                     <label for="manual-measured-on">Measured on</label>
@@ -148,13 +146,14 @@
                   <div class="radio-row">
                     <label class="check-field">
                       <input type="radio" name="manual-config-mode" value="current" checked />
-                      Same as the instrument now
+                      Same as the instrument now <span id="manual-current-config"></span>
                     </label>
                     <label class="check-field">
                       <input type="radio" name="manual-config-mode" value="manual" />
                       Enter manually
                     </label>
                   </div>
+                  <p class="plan-meta" id="manual-current-note">Only if the instrument's settings haven't changed since the readings were taken.</p>
                   <div class="form-grid" id="manual-config-fields" hidden>
                     <div class="field">
                       <label for="manual-led">LED current (mA)</label>
@@ -179,10 +178,13 @@
                   </div>
                 </fieldset>
                 <p class="plan-meta" id="manual-fingerprint" aria-live="polite"></p>
-              </div>
+              </fieldset>
 
+              <!-- Where Set up ends: Create run for the instrument; for recorded data, on to step 3,
+                   where the values are typed in and the run is created. -->
               <div id="setup-create-area">
                 <button type="submit" id="setup-create-button">Create run</button>
+                <button type="button" id="setup-next-button" hidden>Next: enter the values &darr;</button>
                 <p class="blocked-reason" id="setup-create-reason" hidden></p>
               </div>
             </form>
@@ -217,6 +219,10 @@
 
         <div class="step-card-body">
           <div id="manual-entry" hidden>
+            <p class="plan-meta">
+              Enter each tube's F4 signal in basic counts, the unit Measure reports:
+              (light &minus; dark) &divide; (gain &times; integration time in ms). Not the raw counts on the device's display.
+            </p>
             <div class="table-wrapper table-spaced">
               <table class="manual-table">
                 <thead>
@@ -246,18 +252,26 @@
             <div class="next-tube" id="next-tube">
               <p class="next-tube-label" id="next-tube-label">Next tube</p>
               <p class="next-tube-value" id="next-tube-value" aria-live="polite">--</p>
+              <p class="next-tube-action" id="next-tube-action"></p>
               <div class="progress" id="plan-progress" role="progressbar" aria-valuemin="0" aria-label="Tubes read">
                 <div class="progress-fill" id="plan-progress-fill"></div>
               </div>
               <p class="progress-text" id="plan-progress-text"></p>
               <div class="button-row" id="plan-read-controls">
                 <button type="button" id="plan-read-button">Read</button>
+                <button type="button" id="plan-next-button" hidden>Next: fit the curve &darr;</button>
                 <button type="button" class="btn-secondary" id="plan-cancel-reread" hidden>Cancel re-read</button>
               </div>
               <p class="blocked-reason" id="plan-read-reason" hidden></p>
               <p class="status-message" id="plan-read-status" aria-live="polite"></p>
             </div>
             <p class="plan-meta" data-basis-note hidden></p>
+
+            <!-- The standards read so far, no fit: an odd value shows while the cuvette is in hand. -->
+            <div class="chart-plate read-chart" id="read-chart-plate" hidden>
+              <p class="chart-note">Standards read so far, no fit. Gold: the last tube read. Dashed line: mean of the blanks.</p>
+              <canvas id="read-chart"></canvas>
+            </div>
 
             <div class="table-wrapper table-spaced">
               <table>
@@ -316,6 +330,7 @@
 
           <div class="button-row table-spaced">
             <button type="button" id="fit-button">Fit</button>
+            <button type="button" id="fit-next-button" hidden>Next: save the curve &darr;</button>
           </div>
           <p class="blocked-reason" id="fit-reason" hidden></p>
           <p class="status-message" id="fit-status" aria-live="polite"></p>

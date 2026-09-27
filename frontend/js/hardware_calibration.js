@@ -3,7 +3,7 @@
 // calibration run through five numbered steps, data before processing:
 //   1 Source  read on CAPTURE-Screen, or enter readings recorded earlier. The instrument's status
 //             is shown live, and it is pre-selected when it comes online before a choice is made
-//   2 Set up  conditions (biosensor strain, induction time), then either the standards to read
+//   2 Set up  conditions (biosensor strain, notes), then either the standards to read
 //             (with the reading order previewed) or when and under which config recorded
 //             readings were taken
 //   3 Read    the next tube pinned at the top; Read measures it, records it, and moves on.
@@ -32,6 +32,8 @@ let plan = null;
 let planCurves = [];              // curves already saved from this run
 let rereadSlot = null;            // the slot the user pressed Re-read on; null means measure the "next tube"
 let planReading = false;
+let lastReadSlot = null;          // the tube read last in this session, drawn gold on step 3's chart
+let readChart = null;
 
 let fitState = "unfitted";        // unfitted | fitted | saved
 let fitCurveResult = null;        // the CalibrationCurve returned by fitCurve / saveCurve
@@ -158,6 +160,13 @@ function renderSourceSummary() {
 
 // ---- 2. Set up --------------------------------------------------------
 
+// What to have ready for Set up: the cells for an instrument run; for recorded data, the records.
+function showSetupBench(manual) {
+  document.querySelector("#setup-bench span").textContent = manual
+    ? "Your records of the readings: the date and the instrument settings used."
+    : "Biosensor cells induced with each AHL standard, and cell blanks without AHL.";
+}
+
 // Step 3 is Read for an instrument run and Enter values for recorded data.
 function showReadStep(manual, entering) {
   document.getElementById("read-label").textContent = manual ? "Enter values" : "Read";
@@ -172,19 +181,12 @@ function showReadStep(manual, entering) {
 function setupConditions() {
   return {
     sensor: document.getElementById("cond-sensor").value.trim(),
-    // Optional: empty means not recorded (null), never 0.
-    induction_h: document.getElementById("cond-induction").value.trim() === ""
-      ? null
-      : manualNumber(document.getElementById("cond-induction").value),
     notes: document.getElementById("cond-notes").value.trim(),
   };
 }
 
 function conditionsProblem(c) {
   if (!c.sensor) return "Enter the biosensor strain.";
-  if (c.induction_h !== null && !(Number.isFinite(c.induction_h) && c.induction_h > 0)) {
-    return "Induction time must be a number of hours above 0, or left empty.";
-  }
   return null;
 }
 
@@ -228,6 +230,7 @@ function updateSetupControls() {
   const sourceCard = document.getElementById("source-card");
   const setupCard = document.getElementById("setup-card");
   const readCard = document.getElementById("read-card");
+  showSetupBench(manual);
   showReadStep(manual, manual);
 
   if (!source) {
@@ -240,7 +243,8 @@ function updateSetupControls() {
   setStepCard(sourceCard, "done");
   document.getElementById("device-fields").hidden = manual;
   document.getElementById("manual-fields").hidden = !manual;
-  document.getElementById("setup-create-area").hidden = manual;
+  document.getElementById("setup-create-button").hidden = manual;
+  document.getElementById("setup-next-button").hidden = !manual;
 
   let problem = conditionsProblem(setupConditions());
   if (!manual) {
@@ -248,7 +252,7 @@ function updateSetupControls() {
     problem = problem ?? planProblem;
     // A run is bound to the instrument's config when it is created, so the instrument has to answer.
     if (deviceState === "checking") problem = problem ?? "Checking the instrument...";
-    if (deviceState === "offline") problem = problem ?? `${deviceError} Or enter recorded data instead.`;
+    if (deviceState === "offline") problem = problem ?? `${deviceError.replace(/\.?$/, ".")} Or enter recorded data instead.`;
     const button = document.getElementById("setup-create-button");
     setBlocked(button, document.getElementById("setup-create-reason"), problem);
     if (manualCreating) button.disabled = true;
@@ -257,6 +261,8 @@ function updateSetupControls() {
   } else {
     const manualState = updateManualControls();
     problem = problem ?? manualState.setup;
+    const next = document.getElementById("setup-next-button");
+    setBlocked(next, document.getElementById("setup-create-reason"), problem);
     setStepCard(setupCard, problem ? "current" : "done");
     setStepCard(readCard, problem ? "waiting" : "current", problem ? `Complete Set up first: ${problem}` : null);
     const button = document.getElementById("manual-create-button");
@@ -297,8 +303,18 @@ async function showSetup(errorText) {
 // An instrument run is created from step 2's form, recorded data from step 3's Create run.
 async function createFromSetup(event) {
   event.preventDefault();
-  if (setupSource() !== "device") return; // Enter in a step-2 field; recorded data is created at step 3
+  if (setupSource() !== "device") {
+    // Enter in a step-2 field: for recorded data that means on to step 3, when Set up allows it.
+    if (!document.getElementById("setup-next-button").disabled) goToManualEntry();
+    return;
+  }
   await createRun(document.getElementById("setup-create-button"), document.getElementById("setup-status"));
+}
+
+// Set up is complete for recorded data: bring step 3 into view with the cursor in the first value.
+function goToManualEntry() {
+  document.querySelector('[data-manual-signal="0"]')?.focus({ preventScroll: true });
+  document.getElementById("read-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function createRun(button, statusEl) {
@@ -349,7 +365,6 @@ function renderSetupSummary() {
   const tbody = document.getElementById("setup-summary-body");
   tbody.innerHTML = "";
   appendKvRow(tbody, "Biosensor strain", plan.conditions.sensor);
-  appendKvRow(tbody, "Induction time", formatHours(plan.conditions.induction_h));
   if (plan.conditions.notes) appendKvRow(tbody, "Notes", plan.conditions.notes);
   if (manual) appendKvRow(tbody, "Measured on", plan.measured_on);
   appendKvRow(tbody, "Config", hwFingerprint(plan.config_fingerprint));
@@ -359,27 +374,99 @@ function renderSetupSummary() {
 
 // ---- 3. Read ----------------------------------------------------------
 
-// Only a run still being read needs the instrument on the same config. Offline is said by the
-// Read button's own reason, so this speaks only to a config the instrument has confirmed.
+// An instrument run is read only under the config it was created with: a reading under another
+// one would be stored flagged STALE_CONFIG and could never be fitted, so the tube would be wasted.
+// Offline is said by the Read button's own reason, so this speaks only to a confirmed config.
+function configMismatch() {
+  return plan.source === "device" && deviceFingerprint !== null && deviceFingerprint !== plan.config_fingerprint;
+}
+
 function renderConfigWarning() {
   const warning = document.getElementById("plan-config-warning");
-  const reading = plan.source === "device" && !planComplete(plan);
-  warning.hidden = !reading || deviceFingerprint === null || deviceFingerprint === plan.config_fingerprint;
+  warning.hidden = !configMismatch();
   if (!warning.hidden) {
     setHardwareStatus(warning,
-      `The instrument now runs config ${deviceFingerprint}, not this run's ${plan.config_fingerprint}. New readings will be flagged STALE_CONFIG and cannot be fitted.`,
+      `The instrument now runs config ${deviceFingerprint}, not this run's ${plan.config_fingerprint}, so reading is blocked: `
+      + "a reading under another config can't be fitted. Set the instrument back, or start a new run.",
       "error");
   }
 }
 
-// Why Read can't run now, or null. The instrument outranks "nothing left to read": neither can be
-// read, but only one is a fault.
-function readBlockReason(target) {
+// Why Read can't run now, or null.
+function readBlockReason() {
   if (deviceState === "checking") return "Checking the instrument...";
   if (deviceState === "offline") return deviceError;
   const sensorBlock = sensorReading(deviceSensorOk).blocks;
   if (sensorBlock) return sensorBlock;
-  return target ? null : "Every tube has been read. Use Re-read on a row to replace a reading.";
+  if (configMismatch()) return `The instrument's config ${deviceFingerprint} isn't this run's ${plan.config_fingerprint}.`;
+  return null;
+}
+
+// Step 3's view of the data so far: every standard read, on the fit chart's axes and without a
+// fit. The x axis spans the whole plan from the first point, so it doesn't jump as tubes are read.
+function renderReadChart() {
+  const plate = document.getElementById("read-chart-plate");
+  const standards = plan.items.filter((it) => it.sample_type === "standard");
+  const read = standards.filter((it) => it.measurement);
+  if (readChart) {
+    readChart.destroy();
+    readChart = null;
+  }
+  plate.hidden = plan.source !== "device" || read.length === 0;
+  if (plate.hidden) return;
+
+  const accent = cssVar("--accent");
+  const gold = cssVar("--gold");
+  const ink = cssVar("--text");
+  const muted = cssVar("--muted");
+  const rule = cssVar("--border");
+  const toPoint = (it) => ({ x: it.concentration_nM, y: it.measurement.fluorescence });
+  const concs = standards.map((it) => it.concentration_nM);
+  const xMin = Math.min(...concs);
+  const xMax = Math.max(...concs);
+
+  const datasets = [
+    { label: "Tube", data: read.filter((it) => it.slot !== lastReadSlot).map(toPoint), pointRadius: 3.5, pointBackgroundColor: accent, pointBorderColor: accent },
+    { label: "Last read", data: read.filter((it) => it.slot === lastReadSlot).map(toPoint), pointRadius: 6, pointBackgroundColor: gold, pointBorderColor: gold },
+  ];
+  const blanks = plan.items.filter((it) => it.sample_type === "blank" && it.measurement).map((it) => it.measurement.fluorescence);
+  if (blanks.length) {
+    const blankMean = fitMean(blanks);
+    datasets.push({
+      label: "Blank mean", data: [{ x: xMin, y: blankMean }, { x: xMax, y: blankMean }],
+      type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: muted,
+    });
+  }
+
+  readChart = new Chart(document.getElementById("read-chart"), {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      aspectRatio: 2.8,
+      animation: false,
+      scales: {
+        x: {
+          type: "logarithmic", min: xMin, max: xMax,
+          title: { display: true, text: "Concentration (nM, log scale)", color: ink },
+          grid: { color: rule },
+          ticks: { color: muted },
+        },
+        y: {
+          title: { display: true, text: `${plan.signal} (${HARDWARE_FLUORESCENCE_UNIT})`, color: ink },
+          grid: { color: rule },
+          ticks: { color: muted },
+        },
+      },
+      plugins: { legend: { labels: { color: ink } } },
+    },
+  });
+}
+
+// Every tube is read: step 3 is done, so its button moves on to Fit.
+function goToFit() {
+  document.getElementById("fit-button").focus({ preventScroll: true });
+  document.getElementById("fit-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderRead() {
@@ -390,22 +477,28 @@ function renderRead() {
 
   document.getElementById("next-tube").hidden = manual;
   renderConfigWarning();
+  renderReadChart();
   if (!manual) {
     const banner = document.getElementById("next-tube");
     const label = document.getElementById("next-tube-label");
     const value = document.getElementById("next-tube-value");
     banner.classList.toggle("is-reread", rereadSlot !== null);
     banner.classList.toggle("is-done", !target);
+    const action = document.getElementById("next-tube-action");
     if (rereadSlot !== null) {
       label.textContent = "Re-read";
       value.textContent = `${target.label} (tube ${target.slot} of ${total})`;
+      action.textContent = "Put this cuvette back in, close the lid, then press Read.";
     } else if (target) {
       label.textContent = "Next tube";
       value.textContent = `${target.label} (tube ${target.slot} of ${total})`;
+      action.textContent = "Insert this cuvette, close the lid, then press Read.";
     } else {
       label.textContent = "All tubes read";
       value.textContent = `${total} / ${total} tubes read.`;
+      action.textContent = "";
     }
+    action.hidden = !target;
     document.getElementById("plan-cancel-reread").hidden = rereadSlot === null;
 
     const progress = document.getElementById("plan-progress");
@@ -415,8 +508,18 @@ function renderRead() {
     document.getElementById("plan-progress-text").textContent = `${read} / ${total} read (${formatPercent(read / total)})`;
 
     const readButton = document.getElementById("plan-read-button");
+    const nextButton = document.getElementById("plan-next-button");
+    const reasonEl = document.getElementById("plan-read-reason");
     readButton.textContent = target ? `Read ${target.label}` : "Read";
-    setBlocked(readButton, document.getElementById("plan-read-reason"), readBlockReason(target));
+    readButton.hidden = !target;
+    nextButton.hidden = Boolean(target);
+    if (target) {
+      setBlocked(readButton, reasonEl, readBlockReason());
+    } else {
+      setBlocked(readButton, reasonEl, null);
+      reasonEl.textContent = "To replace a reading, use Re-read on its row.";
+      reasonEl.hidden = false;
+    }
     if (planReading) readButton.disabled = true;
   }
 
@@ -441,8 +544,7 @@ function renderRead() {
       reread.setAttribute("aria-label", `Re-read slot ${item.slot}, ${item.label}`);
       reread.addEventListener("click", () => {
         rereadSlot = item.slot;
-        setHardwareStatus(document.getElementById("plan-read-status"),
-          `Put ${item.label} back in the reader, then press Read.`, null);
+        setHardwareStatus(document.getElementById("plan-read-status"), "", null);
         renderAll();
         document.getElementById("plan-read-button").focus();
       });
@@ -483,6 +585,7 @@ async function readPlanTarget() {
     deviceSensorOk = status.sensor_ok;
     deviceError = null;
     plan = await HardwareApi.recordPlanMeasurement(plan.plan_id, item.slot, m);
+    lastReadSlot = item.slot;
     rereadSlot = null;
     // The data under any fit just changed, so the fit no longer describes it.
     if (fitState !== "unfitted") discardFit();
@@ -508,11 +611,12 @@ async function readPlanTarget() {
     // Keeps the run list's progress column from contradicting the run card right above it.
     refreshRuns();
     if (planComplete(plan)) refreshHardwareSteps();
-    document.getElementById("plan-read-button").focus();
+    // Enter keeps working: it reads the next tube, or after the last one moves on to Fit.
+    document.getElementById(targetItem() ? "plan-read-button" : "plan-next-button").focus();
   }
 }
 
-// ---- 3. Fit -------------------------------------------------------------
+// ---- 4. Fit -------------------------------------------------------------
 
 // Error bars. Chart.js has no built-in support and a plugin would be a new dependency, so this draws them manually:
 // reads errorBars: true on the dataset, and each point's sd sets the bar's length above and below.
@@ -585,9 +689,24 @@ function discardFit() {
   fitCurveResult = null;
 }
 
+// A counted tube read under a config other than the run's: fitCurve refuses the run until it is
+// excluded (or re-read under the run's config). Marked in the table.
+function isStaleTube(item) {
+  return !isExcluded(item) && item.measurement.config_fingerprint !== plan.config_fingerprint;
+}
+
+// Why Fit can't run, or null. The data checks are fitCurve's own refusals, made here as soon as an
+// exclusion changes, so a Fit press never ends in an error that ticking a box could have shown.
 function blockedFitReason() {
   if (fitState === "fitted") return "Already fitted with these exclusions. Change an exclusion to fit again.";
   if (fitState === "saved") return "This fit is saved. Use “Fit again with different exclusions” below to start a new one.";
+  const counted = plan.items.filter((it) => !isExcluded(it));
+  const stale = counted.filter((it) => it.measurement.config_fingerprint !== plan.config_fingerprint).length;
+  if (stale > 0) return `${plural(stale, "tube")} read under another config (marked). Exclude or re-read them.`;
+  const blanks = counted.filter((it) => it.sample_type === "blank").length;
+  if (blanks < 2) return `The counted tubes include ${plural(blanks, "blank")}; LOD needs at least 2.`;
+  const concentrations = new Set(counted.filter((it) => it.sample_type === "standard").map((it) => it.concentration_nM)).size;
+  if (concentrations < 4) return `The counted tubes cover ${plural(concentrations, "concentration")}; a 4PL fit needs at least 4.`;
   const missing = missingReasonCount();
   if (missing > 0) return `Give a reason for every excluded tube (${missing} missing).`;
   return null;
@@ -714,6 +833,7 @@ function renderFitTable() {
       const excluded = isExcluded(item);
       const row = hwEl("tr");
       row.classList.toggle("is-excluded", excluded);
+      row.classList.toggle("is-problem", isStaleTube(item));
 
       if (index === 0) {
         row.classList.add("group-start");
@@ -798,19 +918,24 @@ async function runFit() {
     fitCurveResult = await HardwareApi.fitCurve(plan.plan_id, [...fitExclusions.keys()]);
     fitState = "fitted";
     fitHasFittedOnce = true;
-    setHardwareStatus(statusEl,
-      `Fitted: EC50 ${formatConcentration(fitCurveResult.params.ec50_nM)}, Hill ${fitCurveResult.params.hill.toFixed(2)}, RMSE ${formatFluorescence(fitCurveResult.rmse)} ${HARDWARE_FLUORESCENCE_UNIT}.`,
-      "success");
+    setHardwareStatus(statusEl, "Fitted.", "success"); // the numbers are in the tiles below
   } catch (err) {
     console.error("Fit failed:", err);
     setHardwareStatus(statusEl, `Fit failed: ${err.message}`, "error");
   } finally {
     fitBusy = false;
     renderAll();
+    // Enter keeps working: after a fit it moves on to Save.
+    if (fitState === "fitted") document.getElementById("fit-next-button").focus();
   }
 }
 
-// ---- 4. Save ---------------------------------------------------------
+function goToSave() {
+  document.getElementById("save-button").focus({ preventScroll: true });
+  document.getElementById("save-card").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---- 5. Save ---------------------------------------------------------
 
 function blockedSaveReason() {
   if (fitState === "unfitted") {
@@ -823,7 +948,10 @@ function blockedSaveReason() {
 
 function renderFitControls() {
   const fitButton = document.getElementById("fit-button");
-  setBlocked(fitButton, document.getElementById("fit-reason"), blockedFitReason());
+  const fitted = fitState === "fitted";
+  fitButton.hidden = fitted;
+  document.getElementById("fit-next-button").hidden = !fitted;
+  setBlocked(fitButton, document.getElementById("fit-reason"), fitted ? null : blockedFitReason());
   if (fitBusy) fitButton.disabled = true;
 
   const saveButton = document.getElementById("save-button");
@@ -911,6 +1039,7 @@ function renderAll() {
   renderSourceSummary();
   setStepCard(document.getElementById("source-card"), "done");
   renderSetupSummary();
+  showSetupBench(plan.source === "manual");
   setStepCard(document.getElementById("setup-card"), "done");
 
   showReadStep(plan.source === "manual", false);
@@ -965,7 +1094,7 @@ async function openPlan(planId, alreadyLoaded) {
   else document.querySelector(".step-card[data-state='current']")?.scrollIntoView({ block: "start" });
 }
 
-// ---- Set up: readings recorded earlier, entered by hand ------------------
+// ---- Recorded data: Set up fields and step 3 entry ------------------
 
 // Two blanks and four standards, the fewest a dataset can hold. Only the types are set, never values.
 const MANUAL_START_ROWS = ["blank", "blank", "standard", "standard", "standard", "standard"];
@@ -1041,10 +1170,32 @@ function manualSetupProblem(config) {
 }
 
 // Step 2's part: the values themselves.
+// Row numbers as "Row 3" or "Rows 2, 5–8".
+function manualRowList(rows) {
+  const parts = [];
+  for (let i = 0; i < rows.length; i++) {
+    let j = i;
+    while (j + 1 < rows.length && rows[j + 1] === rows[j] + 1) j++;
+    parts.push(j > i ? `${rows[i]}–${rows[j]}` : String(rows[i]));
+    i = j;
+  }
+  return `${rows.length === 1 ? "Row" : "Rows"} ${parts.join(", ")}`;
+}
+
+// Every cell problem at once, grouped by what's wrong ("Rows 3–6: enter the signal."), so one
+// fix doesn't just reveal the next. Then the table's minimum for a fit.
 function manualRowsProblem() {
-  for (const [i, row] of manualRows.entries()) {
-    const problem = manualCellProblem(row, "concentration") ?? manualCellProblem(row, "signal");
-    if (problem) return `Row ${i + 1}: ${problem}`;
+  const byProblem = new Map();
+  manualRows.forEach((row, i) => {
+    for (const field of ["concentration", "signal"]) {
+      const problem = manualCellProblem(row, field);
+      if (!problem) continue;
+      if (!byProblem.has(problem)) byProblem.set(problem, []);
+      byProblem.get(problem).push(i + 1);
+    }
+  });
+  if (byProblem.size > 0) {
+    return [...byProblem].map(([problem, rows]) => `${manualRowList(rows)}: ${problem}`).join(" ");
   }
   const { concentrations, blanks } = manualCounts();
   if (concentrations < 4) return "A 4PL fit needs at least 4 distinct concentrations.";
@@ -1055,9 +1206,15 @@ function manualRowsProblem() {
 // Refreshes the manual-entry summary lines and returns what blocks each step, { setup, rows }, null when nothing.
 function updateManualControls() {
   const config = manualConfig();
+  const current = document.getElementById("manual-current-config");
+  current.textContent = "";
+  if (deviceState === "online") current.append("(config ", hwFingerprint(deviceFingerprint), ")");
+  else current.textContent = deviceState === "checking" ? "(checking...)" : "(instrument offline)";
+  document.getElementById("manual-current-note").hidden = manualConfigMode() !== "current";
   const { tubes, concentrations, blanks } = manualCounts();
   document.getElementById("manual-summary").textContent =
-    `${plural(tubes, "tube")}: ${plural(concentrations, "concentration")}, ${plural(blanks, "blank")}`;
+    `${plural(tubes, "tube")}: ${plural(concentrations, "concentration")}, ${plural(blanks, "blank")} · `
+    + "a fit needs at least 4 concentrations and 2 blanks";
 
   const fingerprintEl = document.getElementById("manual-fingerprint");
   fingerprintEl.textContent = "";
@@ -1185,7 +1342,7 @@ function startManualEntry() {
 // protects them all is on the Data page.
 
 const RUNS_CSV_HEADERS = [
-  "plan_id", "plan_source", "sensor", "induction_h", "notes", "plan_config_fingerprint", "plan_signal", "plan_measured_on",
+  "plan_id", "plan_source", "sensor", "notes", "plan_config_fingerprint", "plan_signal", "plan_measured_on",
   "slot", "label", "sample_type", "concentration_nM",
   "sample_id", "timestamp_utc", "signal", "fluorescence", "fluorescence_sd", "scatter",
   "flags", "config_fingerprint", "source",
@@ -1198,7 +1355,7 @@ function runCsvRows(p) {
     const m = item.measurement;
     const raw = m?.raw ?? {};
     return [
-      p.plan_id, p.source, p.conditions.sensor, p.conditions.induction_h, p.conditions.notes,
+      p.plan_id, p.source, p.conditions.sensor, p.conditions.notes,
       p.config_fingerprint, p.signal, p.measured_on,
       item.slot, item.label, item.sample_type, item.concentration_nM,
       m?.sample_id ?? null, m?.timestamp_utc ?? null, m?.signal ?? null, m?.fluorescence ?? null,
@@ -1284,6 +1441,9 @@ document.addEventListener("DOMContentLoaded", () => {
     updateSetupControls();
   });
   document.getElementById("manual-add-row").addEventListener("click", addManualRow);
+  document.getElementById("setup-next-button").addEventListener("click", goToManualEntry);
+  document.getElementById("plan-next-button").addEventListener("click", goToFit);
+  document.getElementById("fit-next-button").addEventListener("click", goToSave);
   document.getElementById("manual-entry").addEventListener("input", updateSetupControls);
   document.getElementById("manual-entry").addEventListener("change", updateSetupControls);
   document.getElementById("manual-create-button").addEventListener("click", (event) =>

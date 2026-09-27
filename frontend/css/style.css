@@ -448,6 +448,12 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 .source-status { display: flex; align-items: flex-start; gap: 8px; }
 .source-status .status-dot { margin-top: 6px; }
 
+/* Calibrate's Set up: two groups per path (Conditions, then Standards or Recording), each headed a
+   step above the field labels so the two read as groups. A group inside one keeps the label size. */
+#setup-form > .plain-fieldset { margin-top: 24px; }
+#setup-form > .plain-fieldset:first-child { margin-top: 0; }
+#setup-form > .plain-fieldset > legend { font-size: 1rem; font-weight: 700; }
+
 /* Calibrate's Set up: the tube list a run will make, in reading order. */
 .tube-order { margin-top: 8px; font-size: .88rem; }
 .tube-order summary { cursor: pointer; color: var(--accent); font-weight: 700; }
@@ -540,6 +546,11 @@ td .chip-row { margin-top: 0; }
   font-family: var(--heading-font); font-weight: 700; font-size: clamp(1.4rem, 3.6vw, 2.1rem); line-height: 1.2;
 }
 .next-tube .status-message { margin-top: 10px; }
+.next-tube-action { margin: 4px 0 0; color: var(--text-dim); font-size: .9rem; }
+.read-chart { margin-top: 16px; }
+/* Fit: a tube that keeps the fit from running (read under another config) until it is excluded. */
+tr.is-problem td { background: rgba(163, 56, 44, .07); }
+.read-chart .chart-note { margin-top: 0; }
 .progress { height: 10px; margin-top: 14px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
 .progress-text { margin: 6px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }

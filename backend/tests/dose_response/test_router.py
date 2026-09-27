@@ -63,7 +63,7 @@ def test_analyze_never_uses_the_client_filename_as_a_path():
 
 def test_analyze_survives_a_dose_whose_every_reading_is_od_gated():
     """Growth fully inhibited at 10 µM: OD_corr stays below od_min, so gating
-    (spec §5.1) removes every F in that row and its plateau has no value."""
+    removes every F in that row and its plateau has no value."""
     in_od_block = False
     patched = []
     for line in FIXTURE.read_text(encoding="utf-8").splitlines():

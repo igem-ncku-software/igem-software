@@ -14,7 +14,7 @@ def _synthetic_plateaus(true_bottom, true_top, true_ec50, true_n, noise_sd, seed
     return plateaus + rng.normal(0, noise_sd, CONCENTRATIONS.shape)
 
 
-# --- fit_hill(): recovers known EC50/n from noisy synthetic data (spec §9 item 1) ---
+# --- fit_hill(): recovers known EC50/n from noisy synthetic data ---
 # The real replacement for test_models.py's temporary scipy.curve_fit stand-in.
 
 
@@ -32,7 +32,7 @@ def test_fit_hill_recovers_known_ec50_and_n():
 def test_fit_hill_excludes_zero_concentration_from_the_fit_but_uses_it_for_bottom_init():
     """conc=0 can't be log10'd - fit_hill() must mask it out of the regression
     itself (only the 5 positive concentrations go into the Hill fit), while
-    still using its plateau as bottom's initial guess (spec §5.3).
+    still using its plateau as bottom's initial guess.
 
     Checked directly via the fitted data count, not by poisoning the conc=0
     plateau and checking recovery still happens: that value doubles as
@@ -69,7 +69,7 @@ def test_fit_hill_accepts_optional_replicate_weights_without_error():
 
 
 def test_fit_hill_leaves_out_concentrations_without_a_plateau():
-    """A NaN plateau (every reading of that condition OD-gated, spec §5.1) must
+    """A NaN plateau (every reading of that condition OD-gated) must
     neither abort the fit nor seed bottom's initial guess."""
     conc = np.array([0.0, 1e-9, 1e-8, 3e-8, 1e-7, 1e-6, 1e-5])
     plateaus = hill(conc, 200.0, 8000.0, 1e-7, 1.5) + np.random.default_rng(1).normal(0, 50, conc.shape)
@@ -91,7 +91,7 @@ def test_fit_hill_does_not_converge_with_too_few_positive_concentrations():
     assert fit.lmfit_result is None
 
 
-# --- flatness_test(): Hill vs constant model (spec §5.4) ---
+# --- flatness_test(): Hill vs constant model ---
 
 
 def test_flatness_test_detects_a_real_dose_response_as_responsive():
@@ -106,7 +106,7 @@ def test_flatness_test_detects_a_real_dose_response_as_responsive():
 
 
 def test_flatness_test_flags_a_flat_curve_as_not_responsive():
-    """spec §9 item 2: top~=bottom synthetic curve -> responsive=False.
+    """top~=bottom synthetic curve -> responsive=False.
     Previously flagged as not-yet-covered in test_models.py; now that
     doseresponse.py exists, this is that test.
     """
@@ -121,7 +121,7 @@ def test_flatness_test_flags_a_flat_curve_as_not_responsive():
     assert result.p_value > 0.05
 
 
-# --- lod_loq(): detection/quantification limits (spec §5.5) ---
+# --- lod_loq(): detection/quantification limits ---
 
 
 def _normalized_for_lod(zero_vals, conc_to_vals):
@@ -194,7 +194,7 @@ BOTTOM, TOP, EC50, N = 200.0, 8000.0, 1e-7, 1.5
 
 @pytest.mark.parametrize("true_conc", [1e-9, 3e-8, 1e-7, 4e-7, 5e-6])
 def test_predict_concentration_recovers_known_concentration(true_conc):
-    """spec §9 style: compute F from a known concentration via hill(), then
+    """Compute F from a known concentration via hill(), then
     invert it back and check the original concentration is recovered.
     """
     F = hill(true_conc, BOTTOM, TOP, EC50, N)
@@ -228,7 +228,7 @@ def test_predict_concentration_at_or_above_top_is_out_of_range():
 
 
 def test_predict_concentration_never_returns_nan_or_raises_out_of_range():
-    """The spec explicitly says out-of-range must not surface as NaN or an
+    """Out-of-range must not surface as NaN or an
     exception - check both boundary directions produce a clean structured
     result, not a NaN slipping through.
     """

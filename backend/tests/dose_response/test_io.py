@@ -66,7 +66,7 @@ def test_non_numeric_cell_error_names_the_well_and_time(tmp_path):
         load_reader_export(export)
 
 
-# --- load_plate_map(): design v.1 layout (spec §1) ---
+# --- load_plate_map(): design v.1 layout ---
 
 
 def test_plate_map_sample_well():
@@ -124,7 +124,7 @@ def test_plate_map_has_exactly_the_66_designed_wells():
 # --- to_tidy(): attaches plate-map metadata to parsed reader rows ---
 
 
-def test_to_tidy_column_order_matches_spec():
+def test_to_tidy_column_order_matches_the_tidy_schema():
     raw = pd.DataFrame({"well": ["A1"], "time_h": [0.0], "RFU": [100.0], "OD600": [0.1]})
     tidy = to_tidy(raw, load_plate_map())
 

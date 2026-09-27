@@ -4,7 +4,7 @@ import pytest
 from app.dose_response.models import hill, logistic_time
 
 
-# --- hill(): boundary conditions (spec §9 item 3) ---
+# --- hill(): boundary conditions ---
 
 BOTTOM, TOP, EC50, N = 200.0, 8000.0, 1e-7, 1.5
 
@@ -29,14 +29,13 @@ def test_hill_accepts_array_input_and_is_monotonic_increasing():
     assert np.all(np.diff(result) > 0)
 
 
-# Spec §9 items 1 and 2 (fit_hill() EC50 recovery; flatness_test() on a flat
-# curve) now live in test_doseresponse.py, calling the real fit_hill()/
+# fit_hill() EC50 recovery and flatness_test() on a flat curve live in
+# test_doseresponse.py, calling the real fit_hill()/
 # flatness_test() from doseresponse.py - this file's earlier scipy.curve_fit
 # stand-in for item 1 has been replaced, not kept alongside.
 
 
-# --- logistic_time(): boundary conditions, same spirit as hill()'s (not spelled
-# out in spec §9, which only lists hill()/fit_hill()/flatness_test cases) ---
+# --- logistic_time(): boundary conditions, same spirit as hill()'s ---
 
 F0, FMAX, R, T0 = 500.0, 5000.0, 1.5, 4.0
 

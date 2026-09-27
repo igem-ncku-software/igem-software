@@ -143,7 +143,6 @@ function renderBatchSummary() {
   tbody.innerHTML = "";
   const { curve } = batch;
   appendKvRow(tbody, "Biosensor strain", curve.conditions.sensor);
-  appendKvRow(tbody, "Induction time", formatHours(curve.conditions.induction_h));
   const curveCell = hwEl("span");
   curveCell.append(`${curve.curve_id} · LOD ${formatConcentration(curve.lod_nM)} · usable range `
     + `${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])}`);
@@ -553,7 +552,7 @@ function renderResults() {
 // One row per tube, with its group's estimate beside it: everything needed to read the result back
 // without this browser. Full precision on purpose: the file is the record, the table is the view.
 const BATCH_CSV_HEADERS = [
-  "batch_id", "curve_id", "sensor", "induction_h", "curve_signal", "curve_config_fingerprint",
+  "batch_id", "curve_id", "sensor", "curve_signal", "curve_config_fingerprint",
   "curve_lod_nM", "curve_range_min_nM", "curve_range_max_nM",
   "role", "sample_name", "tube_id", "timestamp_utc", "signal", "fluorescence", "fluorescence_sd", "scatter",
   "flags", "config_fingerprint", "excluded_reason",
@@ -568,7 +567,7 @@ function batchCsvRows(b) {
     const m = tube.measurement;
     const raw = m.raw ?? {};
     rows.push([
-      b.batch_id, curve.curve_id, curve.conditions.sensor, curve.conditions.induction_h, curve.signal, curve.config_fingerprint,
+      b.batch_id, curve.curve_id, curve.conditions.sensor, curve.signal, curve.config_fingerprint,
       curve.lod_nM, curve.range_nM.min, curve.range_nM.max,
       role, name, m.sample_id, m.timestamp_utc, m.signal, m.fluorescence, m.fluorescence_sd, m.scatter,
       m.flags.join(";"), m.config_fingerprint, tube.excluded_reason,
