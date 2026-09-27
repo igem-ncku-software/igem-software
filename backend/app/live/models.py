@@ -18,3 +18,6 @@ class LiveFrame(BaseModel):
     seq: int = Field(ge=0)
     t_ms: int = Field(ge=0)
     raw: ChannelFrame
+    # Whether the LED was lit for the whole of this frame: false means dark / ambient counts.
+    # None from firmware before 7.1.0, whose frames were always lit.
+    led: bool | None = None

@@ -105,6 +105,18 @@ const HardwareProcessing = (() => {
     if (!(body.sensor_ok === undefined || body.sensor_ok === null || typeof body.sensor_ok === "boolean")) {
       return "sensor_ok must be a boolean when present";
     }
+    // Optional for the same reason: the shared Live switch, and its auto-off countdown.
+    if (!(body.live_on === undefined || body.live_on === null || typeof body.live_on === "boolean")) {
+      return "live_on must be a boolean when present";
+    }
+    if (!(body.live_off_in_s === undefined || body.live_off_in_s === null
+      || (Number.isInteger(body.live_off_in_s) && body.live_off_in_s >= 0))) {
+      return "live_off_in_s must be a non-negative integer when present";
+    }
+    // The LED switch within Live (firmware 7.1.0 and later).
+    if (!(body.led_on === undefined || body.led_on === null || typeof body.led_on === "boolean")) {
+      return "led_on must be a boolean when present";
+    }
     return validateDeviceConfig(body.config);
   }
 

@@ -65,12 +65,12 @@ backend/                      FastAPI
 │   ├── main.py               mounts each feature's router
 │   ├── config.py             environment variables and CORS settings
 │   ├── hardware/             CAPTURE-Screen's relay: device connection, status, measurement
-│   ├── live/                 live sensing: browsers watch the live spectrum, relayed to the device through hardware's connection
+│   ├── live/                 live sensing: the shared Live switch and the live spectrum, relayed through hardware's connection
 │   └── dose_response/        dose-response analysis (this project's main computation)
 ├── tests/                    pytest
 └── requirements.txt
 
-firmware/capture_screen/      CAPTURE-Screen firmware (ESP32 + AS7341 + OLED)
+firmware/capture_screen/      CAPTURE-Screen firmware (ESP32 + AS7341 + OLED + Live button), one sketch plus secrets.h
 scripts/                      install and run scripts (.sh and .ps1 versions)
 docs/dose_response_model_spec.md   implementation spec for the dose-response model
 ```
@@ -139,7 +139,7 @@ Backend URL: `https://igem-ncku-software.onrender.com`
 | `GET` | `/api/hardware/status` | Whether CAPTURE-Screen is online, its last reported status and config |
 | `POST` | `/api/hardware/read` | Asks the device to take one measurement (dark → light → dark), returns the raw reading |
 | `WS` | `/api/hardware/device` | The device's own inbound connection |
-| `WS` | `/api/live/spectrum` | Browsers watching the live spectrum |
+| `WS` | `/api/live/spectrum` | The Live switch and the live spectrum, for browsers |
 
 The full request/response schema can be explored interactively at `/docs` once the backend is running.
 
@@ -193,7 +193,7 @@ CAPTURE-Screen is the team's own fluorescence reader: an ESP32 plus an AS7341 sp
 
 The backend runs on Render and can't reach a device behind a lab or home router, so the direction is reversed: once the device powers on and joins Wi-Fi, it dials out to `wss://igem-ncku-software.onrender.com/api/hardware/device` itself and keeps that connection open, reconnecting automatically if it drops. Web pages only ever talk to the backend, which relays over that connection to the device:
 
-- **Live spectrum** (landing page): turning on the Live switch has the backend tell the device to turn on its LED and stream frame after frame (the DFRobot library takes about 1 s to read all ten channels, so roughly one frame per second); once the last viewer turns Live off or leaves the page, the backend tells the device to turn the LED off. The LED stays lit only while someone is watching, since leaving it on would heat and bleach the sample.
+- **Live spectrum** (landing page, device OLED): Live is one switch, owned by the device and shared by its button (GPIO 13) and the Live switch on every open landing page. Flipping either one turns the LED on and streams frame after frame (about two per second) to every page and to the OLED's bar chart; the device reports the new state straight away, so every switch shows the same thing. Live switches itself off after 10 minutes, since leaving the LED on heats and bleaches the sample; the page shows when. It can't be switched on during a measurement or while the sensor isn't answering.
 - **Measurement** (instrument check, calibration, Measure): the page sends `POST /api/hardware/read`, the device runs one dark → light → dark cycle (about 3 s), and the backend hands the raw reading back to the page; dark subtraction, normalization, and unmixing all happen on the web side (`js/hardware_processing.js`). Live streaming pauses during a measurement and resumes automatically afterward.
 
 This connection currently has no authentication: anyone who knows the URL could impersonate the device or trigger a measurement. A shared secret is planned for later.
@@ -203,9 +203,9 @@ This connection currently has no authentication: anyone who knows the URL could 
 1. Install ESP32 board support in the Arduino IDE, plus the libraries DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson (7.x), and WebSockets (Markus Sattler). Verified to compile against: ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, ArduinoJson 7.4.3, WebSockets 2.7.2.
 2. Copy `firmware/capture_screen/secrets.h.example` to `secrets.h` in the same folder, and fill in your Wi-Fi name and password (ESP32 only supports 2.4 GHz). `secrets.h` is excluded by `.gitignore`, so the password never gets committed; the sketch refuses to compile without it.
 3. Open `firmware/capture_screen/capture_screen.ino`, select the ESP32 Dev Module board, and flash it.
-4. The OLED idle screen showing `Web  online` means it's connected, and the landing page's Live card will show `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200) — lines starting with `[wifi]` and `[backend]` explain where it's stuck.
+4. The OLED status bar showing `Web ok` means it's connected, and the landing page's Live card will show `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200) — lines starting with `[wifi]` and `[backend]` explain where it's stuck.
 
-The device also works with no network at all: type a sample ID in the Serial Monitor, press the button, and it runs a batch of 5 averaged dark/light readings, printing CSV to Serial and a summary on the OLED (Serial commands are listed in the sketch). A batch and a web measurement can't overlap: a web read during a batch is answered "busy".
+Without a network the button still switches Live, and the OLED shows the spectrum; measurements always come from a web page. The Serial Monitor offers diagnostics only (`?` settings, `i` I2C scan, `b` button, `l` LED, `d` dark/light table, `g`/`t`/`s` sensor settings).
 
 The Render free tier sleeps after a period of inactivity and can take tens of seconds to wake up; the device keeps retrying on its own during that time, no need to reflash or restart it.
 

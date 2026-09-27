@@ -59,10 +59,16 @@
               <span id="live-dot-label">Connecting</span>
             </span>
             <label class="live-switch" for="live-toggle">
-              <!-- autocomplete="off": a browser restoring the checked box on reload would switch the LED on unasked. -->
+              <!-- autocomplete="off": the switch shows the device's live_on, never a state the browser restored on reload. -->
               <input id="live-toggle" type="checkbox" autocomplete="off" />
               <span class="live-switch-track" aria-hidden="true"><span></span></span>
               <span>Live</span>
+            </label>
+            <!-- Within Live only: off streams dark / ambient counts. Mirrors the device's led_on. -->
+            <label class="live-switch" for="led-toggle">
+              <input id="led-toggle" type="checkbox" autocomplete="off" />
+              <span class="live-switch-track" aria-hidden="true"><span></span></span>
+              <span>LED</span>
             </label>
           </div>
         </div>
@@ -75,7 +81,7 @@
           <div class="sensor-stat">
             <span class="sensor-stat-label">F4 · 515 nm · sfGFP</span>
             <span class="sensor-stat-value" id="live-f4">--</span>
-            <span class="sensor-stat-sub">raw counts</span>
+            <span class="sensor-stat-sub" id="live-f4-sub">raw counts</span>
           </div>
         </div>
 

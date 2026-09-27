@@ -55,6 +55,15 @@ class DeviceStatus(DeviceIdentity):
     # doesn't validate leaves the hub with no status at all, i.e. permanently offline.
     # None therefore means "this firmware doesn't say", not "the sensor is fine".
     sensor_ok: bool | None = None
+    # The one Live switch the device's button and every page share; the device owns it.
+    # Optional for the same reason as sensor_ok: None means "this firmware doesn't say".
+    live_on: bool | None = None
+    # Seconds until the device switches Live off by itself; None while Live is off.
+    live_off_in_s: int | None = Field(default=None, ge=0)
+    # Whether Live excites the sample: false streams dark / ambient counts. Only meaningful
+    # while live_on; the device resets it to true whenever Live switches on. Optional like
+    # sensor_ok (firmware before 7.1.0 has no LED switch).
+    led_on: bool | None = None
     config: DeviceConfig
 
 

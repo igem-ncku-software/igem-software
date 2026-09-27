@@ -1,17 +1,22 @@
-"""Browsers watching CAPTURE-Screen's live spectrum.
+"""Browsers following CAPTURE-Screen's live spectrum.
 
 The device's own connection belongs to app.hardware's DeviceHub; this hub
 only subscribes to it. It hears when the device's presence changes and when
-a live frame arrives, fans both out to the browsers on WS /api/live/spectrum,
-and tells the device to start or stop streaming as the first browser starts
-watching and the last one stops.
+a live frame arrives, and fans both out to every browser on WS /api/live/spectrum.
+
+Live is one switch, and the device owns it: the device's button toggles it,
+and a page's live_start / live_stop is relayed to the device unchanged. The
+device reports the result as live_on in its status, which reaches every page
+as presence, so every switch shows the same state. Nothing here decides
+whether the LED is on, and nothing is counted per browser. The LED switch
+(led_on / led_off, which picks lit or dark frames while Live is on) works the
+same way and comes back as led_on.
 
 Everything is in memory, so this assumes one backend process, like DeviceHub.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from collections import deque
@@ -19,7 +24,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.hardware.hub import DeviceHub, DeviceOffline
+from app.hardware.hub import DeviceHub
 from app.live.models import LiveFrame
 
 VIEWER_OUTBOX_SIZE = 8
@@ -38,7 +43,6 @@ class Viewer:
 
     def __init__(self) -> None:
         self.outbox: deque[tuple[bool, str]] = deque()  # (is a live frame, text)
-        self.watching = False
 
     def post_presence(self, text: str) -> None:
         self._post(False, text)
@@ -108,14 +112,7 @@ class LiveHub:
         except ValidationError:
             return
         for viewer in self._viewers:
-            if viewer.watching:
-                viewer.post_frame(text)
-
-    async def on_device_attached(self) -> None:
-        # A device that (re)connects while someone is already watching must start streaming.
-        if self._watched():
-            with contextlib.suppress(DeviceOffline):
-                await self.device.command({"cmd": "live_start"})
+            viewer.post_frame(text)
 
     # ---- browsers ------------------------------------------------------
 
@@ -125,26 +122,25 @@ class LiveHub:
         viewer.post_presence(json.dumps(self.presence()))
         return viewer
 
-    async def set_watching(self, viewer: Viewer, watching: bool) -> None:
-        was_watched = self._watched()
-        viewer.watching = watching
-        await self._sync_live(was_watched)
-
-    async def remove_viewer(self, viewer: Viewer) -> None:
-        was_watched = self._watched()
+    def remove_viewer(self, viewer: Viewer) -> None:
+        # Leaving doesn't switch Live off: the switch is shared, and the device's own
+        # auto-off bounds how long the LED can be left on.
         self._viewers.discard(viewer)
-        await self._sync_live(was_watched)
 
-    def _watched(self) -> bool:
-        return any(viewer.watching for viewer in self._viewers)
+    async def set_live(self, on: bool) -> None:
+        """Relay a page's Live switch to the device; DeviceOffline if there is none.
 
-    async def _sync_live(self, was_watched: bool) -> None:
-        # The LED is on only while someone is watching: it heats and bleaches the sample in the cuvette.
-        now_watched = self._watched()
-        if now_watched == was_watched or not self.device.connected:
-            return
-        with contextlib.suppress(DeviceOffline):
-            await self.device.command({"cmd": "live_start" if now_watched else "live_stop"})
+        The device answers with a status carrying live_on, including when it refuses
+        (mid-measurement, sensor fault), so the asking page's switch settles either way.
+        """
+        await self.device.command({"cmd": "live_start" if on else "live_stop"})
+
+    async def set_led(self, on: bool) -> None:
+        """Relay a page's LED switch the same way; the device answers with led_on.
+
+        The device refuses it unless Live is on, and still answers, like set_live().
+        """
+        await self.device.command({"cmd": "led_on" if on else "led_off"})
 
     def _broadcast_presence(self) -> None:
         presence = self.presence()

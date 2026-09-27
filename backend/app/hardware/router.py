@@ -45,8 +45,8 @@ async def hardware_device(websocket: WebSocket) -> None:
     """The ESP32's own outbound connection (firmware/capture_screen/capture_screen.ino).
 
     Device -> server: status, live frames, measurements, errors.
-    Server -> device: {"cmd": "live_start"}, {"cmd": "live_stop"},
-    {"cmd": "read", "request_id": "..."}.
+    Server -> device: {"cmd": "live_start"}, {"cmd": "live_stop"}, {"cmd": "led_on"},
+    {"cmd": "led_off"}, {"cmd": "read", "request_id": "..."}.
 
     No authentication yet: anyone who can reach this URL can pose as the device.
     """

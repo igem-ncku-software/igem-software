@@ -41,9 +41,6 @@ class DeviceListener(Protocol):
     def on_live(self, message: dict[str, Any]) -> None:
         """The device sent a mode "live" frame, not yet validated."""
 
-    async def on_device_attached(self) -> None:
-        """A new device connection was attached."""
-
 
 class DeviceOffline(Exception):
     pass
@@ -120,8 +117,6 @@ class DeviceHub:
         if previous is not None:
             with contextlib.suppress(Exception):
                 await previous.close(code=4000)
-        for listener in self._listeners:
-            await listener.on_device_attached()
 
     async def detach_device(self, conn: Connection) -> None:
         if conn is not self._device:

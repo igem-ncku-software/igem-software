@@ -40,7 +40,7 @@ def wait_until_online():
     raise AssertionError("the device never came online")
 
 
-def test_watching_switches_the_stream_and_relays_frames():
+def test_the_live_switch_is_relayed_and_frames_reach_the_browser():
     with client.websocket_connect("/api/hardware/device") as device:
         device.send_json(STATUS)
         wait_until_online()
@@ -50,14 +50,28 @@ def test_watching_switches_the_stream_and_relays_frames():
 
             browser.send_json({"cmd": "live_start"})
             assert device.receive_json() == {"cmd": "live_start"}
-            assert browser.receive_json() == {"mode": "watching", "watching": True}
+
+            # No ack: the device's status is the answer, and it reaches the browser as presence.
+            device.send_json({**STATUS, "state": "LIVE", "live_on": True, "live_off_in_s": 600})
+            assert browser.receive_json()["device"]["live_on"] is True
 
             device.send_json(LIVE)
             assert browser.receive_json() == LIVE
 
+            browser.send_json({"cmd": "led_off"})
+            assert device.receive_json() == {"cmd": "led_off"}
+            device.send_json({**STATUS, "state": "LIVE", "live_on": True, "led_on": False})
+            assert browser.receive_json()["device"]["led_on"] is False
+
             browser.send_json({"cmd": "live_stop"})
             assert device.receive_json() == {"cmd": "live_stop"}
-            assert browser.receive_json() == {"mode": "watching", "watching": False}
+
+
+def test_the_live_switch_without_a_device_says_so():
+    with client.websocket_connect("/api/live/spectrum", headers=BROWSER) as browser:
+        browser.receive_json()
+        browser.send_json({"cmd": "live_start"})
+        assert browser.receive_json() == {"mode": "error", "error": "device_offline"}
 
 
 def test_presence_carries_the_same_fields_as_hardware_status():
@@ -99,10 +113,13 @@ def test_presence_carries_the_devices_sensor_health():
             assert browser.receive_json()["device"]["sensor_ok"] is False
 
 
-def test_presence_tolerates_a_firmware_that_predates_sensor_health():
+def test_presence_tolerates_a_firmware_that_predates_sensor_health_and_the_live_switch():
+    older = {key: value for key, value in STATUS.items() if key not in ("sensor_ok", "live_on", "live_off_in_s")}
     with client.websocket_connect("/api/hardware/device") as device:
-        device.send_json({key: value for key, value in STATUS.items() if key != "sensor_ok"})
-        wait_until_online()  # an unknown field must not cost the device its whole status
+        device.send_json(older)
+        wait_until_online()  # a missing field must not cost the device its whole status
 
         with client.websocket_connect("/api/live/spectrum", headers=BROWSER) as browser:
-            assert browser.receive_json()["device"]["sensor_ok"] is None
+            reported = browser.receive_json()["device"]
+            assert reported["sensor_ok"] is None
+            assert reported["live_on"] is None

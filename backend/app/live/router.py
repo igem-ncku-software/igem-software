@@ -9,6 +9,7 @@ import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import settings
+from app.hardware.hub import DeviceOffline
 from app.hardware.router import device_hub
 from app.live.hub import LiveHub
 
@@ -18,7 +19,13 @@ live_hub = LiveHub(device_hub)
 
 # One coroutine both waits for browser commands and drains the viewer's outbox, checking the outbox this often.
 VIEWER_POLL_SECONDS = 0.1
-VIEWER_COMMANDS = {"live_start": True, "live_stop": False}
+# Each command a browser may send: which switch it flips, and to what.
+VIEWER_COMMANDS = {
+    "live_start": ("live", True),
+    "live_stop": ("live", False),
+    "led_on": ("led", True),
+    "led_off": ("led", False),
+}
 
 
 def _origin_allowed(origin: str | None) -> bool:
@@ -28,7 +35,7 @@ def _origin_allowed(origin: str | None) -> bool:
     return origin is not None and origin in settings.CORS_ORIGINS
 
 
-def _viewer_command(text: str) -> bool | None:
+def _viewer_command(text: str) -> tuple[str, bool] | None:
     try:
         message = json.loads(text)
     except json.JSONDecodeError:
@@ -42,13 +49,15 @@ async def live_spectrum(websocket: WebSocket) -> None:
     """Browser side of the live spectrum.
 
     Server -> browser: {"mode": "presence", ...} (GET /api/hardware/status's
-    fields) on connect, whenever the device reports or disconnects, at least every
-    LiveHub.PRESENCE_HEARTBEAT_SECONDS as a keepalive, and when the device goes quiet
-    past the online timeout; {"mode": "live", ...} frames while watching;
-    {"mode": "watching", "watching": bool} after each command; {"mode": "error",
-    "error": "unknown_cmd" | "origin_not_allowed"} for a command this doesn't know
-    and for a browser this won't serve.
-    Browser -> server: {"cmd": "live_start"} / {"cmd": "live_stop"}.
+    fields, including the device's live_on) on connect, whenever the device reports
+    or disconnects, at least every LiveHub.PRESENCE_HEARTBEAT_SECONDS as a keepalive,
+    and when the device goes quiet past the online timeout; {"mode": "live", ...}
+    every frame the device streams; {"mode": "error", "error": "unknown_cmd" |
+    "device_offline" | "origin_not_allowed"} for a command this doesn't know, a
+    command with no device to take it, and a browser this won't serve.
+    Browser -> server: {"cmd": "live_start" | "live_stop" | "led_on" | "led_off"},
+    relayed to the device as is. There is no ack: the device's next status (live_on,
+    led_on) is the answer.
     """
     await websocket.accept()
     # CORSMiddleware covers HTTP only; without this check any website could switch the LED on.
@@ -71,12 +80,15 @@ async def live_spectrum(websocket: WebSocket) -> None:
                 text = None
 
             if text is not None:
-                watching = _viewer_command(text)
-                if watching is None:
+                command = _viewer_command(text)
+                if command is None:
                     await websocket.send_json({"mode": "error", "error": "unknown_cmd"})
                 else:
-                    await live_hub.set_watching(viewer, watching)
-                    await websocket.send_json({"mode": "watching", "watching": watching})
+                    switch, on = command
+                    try:
+                        await (live_hub.set_live(on) if switch == "live" else live_hub.set_led(on))
+                    except DeviceOffline:
+                        await websocket.send_json({"mode": "error", "error": "device_offline"})
 
             live_hub.check_presence()
             while viewer.outbox:
@@ -87,4 +99,4 @@ async def live_spectrum(websocket: WebSocket) -> None:
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
-        await live_hub.remove_viewer(viewer)
+        live_hub.remove_viewer(viewer)

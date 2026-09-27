@@ -1,7 +1,9 @@
 import asyncio
 import json
 
-from app.hardware.hub import DeviceHub
+import pytest
+
+from app.hardware.hub import DeviceHub, DeviceOffline
 from app.live import hub as live_hub_module
 from app.live.hub import VIEWER_OUTBOX_SIZE, LiveHub
 from tests.hardware.payloads import LIVE, STATUS
@@ -40,36 +42,92 @@ def drain(viewer):
     return messages
 
 
-def test_led_stream_follows_the_first_and_last_watcher():
+def test_the_live_switch_is_relayed_to_the_device_as_is():
     async def scenario():
         _, live, device = await connected_hubs()
         first, second = live.add_viewer(), live.add_viewer()
 
-        await live.set_watching(first, True)
-        await live.set_watching(second, True)
-        assert device.sent == [{"cmd": "live_start"}]
+        await live.set_live(True)
+        await live.set_live(True)  # one switch: the device, not the hub, decides it's already on
+        await live.set_live(False)
+        assert device.sent == [{"cmd": "live_start"}, {"cmd": "live_start"}, {"cmd": "live_stop"}]
 
-        await live.set_watching(first, False)
-        assert device.sent == [{"cmd": "live_start"}]
-
-        await live.remove_viewer(second)
-        assert device.sent == [{"cmd": "live_start"}, {"cmd": "live_stop"}]
+        live.remove_viewer(first)  # leaving doesn't switch Live off; the device's auto-off does
+        live.remove_viewer(second)
+        assert device.sent[-1] == {"cmd": "live_stop"}
+        assert len(device.sent) == 3
 
     asyncio.run(scenario())
 
 
-def test_live_frames_reach_watchers_only():
+def test_the_led_switch_is_relayed_to_the_device_as_is():
     async def scenario():
         hub, live, device = await connected_hubs()
-        watcher, bystander = live.add_viewer(), live.add_viewer()
-        await live.set_watching(watcher, True)
-        drain(watcher)
-        drain(bystander)
+        viewer = live.add_viewer()
+        drain(viewer)
+
+        await live.set_led(False)
+        await live.set_led(True)
+        assert device.sent == [{"cmd": "led_off"}, {"cmd": "led_on"}]
+
+        # The device's status is the answer, and every page follows it.
+        await hub.handle_device_message(device, json.dumps({**STATUS, "state": "LIVE", "live_on": True, "led_on": False}))
+        assert drain(viewer)[-1]["device"]["led_on"] is False
+
+    asyncio.run(scenario())
+
+
+def test_dark_frames_say_so_and_older_frames_still_pass():
+    async def scenario():
+        hub, live, device = await connected_hubs()
+        viewer = live.add_viewer()
+        drain(viewer)
+
+        await hub.handle_device_message(device, json.dumps({**LIVE, "led": False}))
+        # Firmware before 7.1.0 sends no "led": the frame still reaches the page, marked unknown.
+        await hub.handle_device_message(device, json.dumps({key: value for key, value in LIVE.items() if key != "led"}))
+
+        assert [frame["led"] for frame in drain(viewer)] == [False, None]
+
+    asyncio.run(scenario())
+
+
+def test_the_live_switch_needs_a_device():
+    async def scenario():
+        _, live = make_hubs()
+        with pytest.raises(DeviceOffline):
+            await live.set_live(True)
+
+    asyncio.run(scenario())
+
+
+def test_live_frames_reach_every_viewer():
+    async def scenario():
+        hub, live, device = await connected_hubs()
+        first, second = live.add_viewer(), live.add_viewer()
+        drain(first)
+        drain(second)
 
         await hub.handle_device_message(device, json.dumps(LIVE))
 
-        assert drain(watcher) == [LIVE]
-        assert drain(bystander) == []
+        assert drain(first) == [LIVE]
+        assert drain(second) == [LIVE]
+
+    asyncio.run(scenario())
+
+
+def test_every_viewer_hears_the_device_switch_live():
+    async def scenario():
+        hub, live, device = await connected_hubs()
+        viewer = live.add_viewer()
+        drain(viewer)
+
+        # The button was pressed: the device reports it, and every page follows.
+        await hub.handle_device_message(device, json.dumps({**STATUS, "state": "LIVE", "live_on": True, "live_off_in_s": 600}))
+
+        presence = drain(viewer)[-1]
+        assert presence["device"]["live_on"] is True
+        assert presence["device"]["live_off_in_s"] == 600
 
     asyncio.run(scenario())
 
@@ -78,7 +136,6 @@ def test_malformed_live_frames_are_dropped():
     async def scenario():
         hub, live, device = await connected_hubs()
         viewer = live.add_viewer()
-        await live.set_watching(viewer, True)
         drain(viewer)
 
         await hub.handle_device_message(device, json.dumps({"mode": "live", "seq": 1}))
@@ -128,25 +185,10 @@ def test_viewers_hear_a_device_that_goes_quiet_without_closing_its_socket():
     asyncio.run(scenario())
 
 
-def test_a_device_that_connects_while_someone_watches_starts_streaming():
-    async def scenario():
-        hub, live = make_hubs()
-        viewer = live.add_viewer()
-        await live.set_watching(viewer, True)  # no device yet: nothing to tell, no error
-
-        device = FakeConnection()
-        await hub.attach_device(device)
-
-        assert device.sent == [{"cmd": "live_start"}]
-
-    asyncio.run(scenario())
-
-
 def test_a_browser_that_falls_behind_loses_frames_but_not_presence():
     async def scenario():
         hub, live, device = await connected_hubs()
         viewer = live.add_viewer()
-        await live.set_watching(viewer, True)
         drain(viewer)
 
         for _ in range(VIEWER_OUTBOX_SIZE * 2):
