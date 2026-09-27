@@ -150,6 +150,22 @@ def test_read_reports_a_busy_device():
     asyncio.run(scenario())
 
 
+def test_a_sensor_offline_read_says_so_in_words():
+    # Pages show this message to the user as-is, so it must not be the firmware's raw code.
+    async def scenario():
+        hub, device = await connected_hub()
+        read = asyncio.create_task(hub.read())
+        command = await next_command(device)
+        await hub.handle_device_message(
+            device, json.dumps({"mode": "error", "request_id": command["request_id"], "error": "sensor_offline"})
+        )
+        with pytest.raises(DeviceError, match="AS7341 sensor is not responding") as caught:
+            await read
+        assert "sensor_offline" not in str(caught.value)
+
+    asyncio.run(scenario())
+
+
 def test_read_times_out_when_the_device_never_answers():
     async def scenario():
         hub, _ = await connected_hub(read_timeout_s=0.05)

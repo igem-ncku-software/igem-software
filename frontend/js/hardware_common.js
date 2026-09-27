@@ -220,7 +220,7 @@ function sensorReading(sensorOk) {
     return { text: "Not responding", tone: "error", blocks: "The AS7341 is not responding, so no reading can be taken." };
   }
   if (sensorOk === true) return { text: "Responding", tone: null, blocks: null };
-  return { text: "Not reported by this firmware", tone: null, blocks: null };
+  return { text: "Not reported", tone: null, blocks: null };
 }
 
 function renderFlagChips(flags) {
@@ -233,15 +233,6 @@ function renderFlagChips(flags) {
     row.appendChild(hwEl("span", `flag-chip ${FLAG_SEVERITY[flag] ?? "warn"}`, flag));
   }
   return row;
-}
-
-// A stat tile: a label, a large value, and one line of supporting text.
-function hwStatTile(label, value, sub) {
-  const tile = hwEl("div", "sensor-stat");
-  tile.appendChild(hwEl("span", "sensor-stat-label", label));
-  tile.appendChild(hwEl("span", "sensor-stat-value", value));
-  if (sub) tile.appendChild(hwEl("span", "sensor-stat-sub", sub));
-  return tile;
 }
 
 // One row of a key/value table; value can be a string or a DOM node.
@@ -442,7 +433,7 @@ async function hardwareStepStates() {
   const sensorFault = status && sensorReading(status.sensor_ok).tone === "error";
   const instrument = status
     ? [!sensorFault, sensorFault ? "Sensor fault" : `Online · ${status.config.fingerprint}`, sensorFault ? "attention" : null]
-    : [false, "Offline", "attention"];
+    : [false, statusResult.reason?.backendUnreachable ? "Backend unreachable" : "Offline", "attention"];
 
   const calibration = curves.length > 0
     ? [true, plural(runs.length, "run"), null]

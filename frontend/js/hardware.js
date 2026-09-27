@@ -18,11 +18,15 @@ let instrumentStatus = null;   // the last getDeviceStatus() that succeeded, or 
 let instrumentError = null;    // why the last one failed, or null
 let statusSeq = 0;             // polls overlap a self-check's refresh; only the newest one is applied
 let selfCheckRunning = false;
-let lastSelfCheck = null;      // {at: Date, problems: string[]} from this page session, or null
+// {at: Date, fingerprint, problems: string[]} from this page session, or null. The fingerprint is the
+// config the check ran under: a check says nothing about a config it didn't run on.
+let lastSelfCheck = null;
 
+// Grouped "60,000" whatever the browser's locale, like the fixed time format: a de-DE browser
+// would otherwise write "60.000" into an English interface.
 function formatCounts(value, signed = false) {
   if (!Number.isFinite(value)) return "--";
-  return `${signed && value > 0 ? "+" : ""}${value.toLocaleString()}`;
+  return `${signed && value > 0 ? "+" : ""}${value.toLocaleString("en-US")}`;
 }
 
 function formatUptime(ms) {
@@ -82,7 +86,7 @@ function instrumentVerdict() {
       return { tone: "error", title: "Not ready: backend error", detail: instrumentError.message };
     case "offline":
       return { tone: "error", title: "Not ready: CAPTURE-Screen is offline",
-        detail: `${instrumentError.lastSeen ? `Last seen ${formatAgo(instrumentError.lastSeen)}` : "Never connected"}. Check its power and Wi-Fi.` };
+        detail: `${deviceLastSeen()}. Check its power and Wi-Fi.` };
     case "invalid":
       return { tone: "error", title: "Not ready: unexpected status from CAPTURE-Screen",
         detail: "Status didn't validate. See the browser console for details." };
@@ -96,14 +100,21 @@ function instrumentVerdict() {
   if (status.state === "MEASURING") {
     return { tone: "warn", title: "Busy: reading in progress", detail: "Finishes in a few seconds." };
   }
-  if (lastSelfCheck?.problems.length) {
+  const check = lastSelfCheck?.fingerprint === status.config.fingerprint ? lastSelfCheck : null;
+  if (check?.problems.length) {
     return { tone: "warn", title: "Online, but the last self-check failed",
-      detail: `${capitalize(lastSelfCheck.problems.join("; "))} (${formatClockTime(lastSelfCheck.at)}). Run it again once fixed.` };
+      detail: `${capitalize(check.problems.join("; "))} (${formatClockTime(check.at)}). Run it again once fixed.` };
   }
   const notes = [`Config ${status.config.fingerprint}`];
-  notes.push(lastSelfCheck ? `Self-check passed ${formatClockTime(lastSelfCheck.at)}` : "No self-check this session");
+  if (check) notes.push(`Self-check passed ${formatClockTime(check.at)}`);
+  else notes.push(lastSelfCheck ? "Config changed since the last self-check" : "No self-check this session");
   if (status.sensor_ok === null) notes.push("Sensor health not reported by this firmware");
   return { tone: "ok", title: "Ready to measure", detail: notes.join(" · ") };
+}
+
+// The device's last contact, for the verdict and its node alike.
+function deviceLastSeen() {
+  return instrumentError.lastSeen ? `Last seen ${formatAgo(instrumentError.lastSeen)}` : "Not connected yet";
 }
 
 function capitalize(text) {
@@ -146,12 +157,20 @@ function backendName() {
   return host.endsWith("onrender.com") ? "Render" : host;
 }
 
+// Why nothing is known past a broken link, as the node's second line.
+const UPSTREAM_CAUSE = {
+  unreachable: "Backend unreachable",
+  "backend-error": "Backend error",
+  offline: "Device offline",
+  invalid: "Device status unreadable",
+};
+
 function renderPath() {
   const link = linkState();
   const status = instrumentStatus;
-  const behind = (what) => (link === "checking"
+  const unknown = link === "checking"
     ? { text: "Checking...", unknown: true }
-    : { text: "Unknown", sub: `Behind the ${what}`, unknown: true });
+    : { text: "Unknown", sub: UPSTREAM_CAUSE[link], unknown: true };
 
   if (link === "checking") setNode("backend", { text: "Checking...", sub: backendName(), unknown: true });
   else if (link === "unreachable") setNode("backend", { text: "Unreachable", tone: "error", sub: `Retrying every ${POLL_SECONDS} s` });
@@ -161,32 +180,33 @@ function renderPath() {
   if (link === "online") {
     setNode("device", { text: "Online", tone: "ok", sub: `Heartbeat ${formatClockTime(new Date(status.last_seen))}` });
   } else if (link === "offline") {
-    setNode("device", { text: "Offline", tone: "error",
-      sub: instrumentError.lastSeen ? `Last seen ${formatAgo(instrumentError.lastSeen)}` : "Not connected yet" });
+    setNode("device", { text: "Offline", tone: "error", sub: deviceLastSeen() });
   } else if (link === "invalid") {
     setNode("device", { text: "Unreadable", tone: "error", sub: "Status didn't validate" });
   } else {
-    setNode("device", behind("backend"));
+    setNode("device", unknown);
   }
   setLink("device", link === "online" ? "ok" : ["offline", "invalid"].includes(link) ? "broken" : null);
   setLink("stem", link === "online" ? "ok" : null);
 
   if (link !== "online") {
-    setNode("sensor", behind("device"));
-    setNode("led", behind("device"));
+    setNode("sensor", unknown);
+    setNode("led", unknown);
     setLink("sensor", null);
     setLink("led", null);
     return;
   }
 
+  // The wording is sensorReading()'s, the one rule for sensor_ok on every page.
   const { config } = status;
+  const sensor = sensorReading(status.sensor_ok);
   if (status.sensor_ok === true) {
-    setNode("sensor", { text: "Responding", tone: "ok",
+    setNode("sensor", { text: sensor.text, tone: "ok",
       sub: `Gain ${config.gain}× · ${HardwareProcessing.integrationTimeMs(config).toFixed(1)} ms` });
   } else if (status.sensor_ok === false) {
-    setNode("sensor", { text: "Not responding", tone: "error", sub: "Check the I2C wiring" });
+    setNode("sensor", { text: sensor.text, tone: "error", sub: "Check the I2C wiring" });
   } else {
-    setNode("sensor", { text: "Not reported", sub: "Older firmware" });
+    setNode("sensor", { text: sensor.text, sub: "Older firmware" });
   }
   setLink("sensor", status.sensor_ok === true ? "ok" : status.sensor_ok === false ? "broken" : null);
 
@@ -222,7 +242,7 @@ function renderConfig(tbody, status) {
     ["Integration time", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`, "(ATIME + 1) × (ASTEP + 1) × 2.78 µs"],
     ["Full scale", `${formatCounts(HardwareProcessing.fullScaleCounts(config))} counts`, "min(65,535, (ATIME + 1) × (ASTEP + 1))"],
     ["Build ID", config.build_id, "Hardware and reading-path revision"],
-    ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID. Every curve is bound to one"],
+    ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID; curves are bound to it"],
     ["Device ID", status.device_id, "This unit's assigned name"],
     ["Wi-Fi signal", `${status.wifi_rssi} dBm`, "Signal strength at the device"],
     ["Uptime", formatUptime(status.uptime_ms), "Since the device last started"],
@@ -253,7 +273,7 @@ function selfCheckBlockReason() {
   }
   const sensor = sensorReading(instrumentStatus.sensor_ok).blocks;
   if (sensor) return sensor;
-  if (instrumentStatus.state === "MEASURING") return "Measurement in progress.";
+  if (instrumentStatus.state === "MEASURING") return "Reading in progress.";
   return null;
 }
 
@@ -309,27 +329,35 @@ function peakChannel(values, fn = (value) => value) {
   return { ch, value: values[ch.key] };
 }
 
-// [{text, advice}] for each graded check that failed. Only drift and saturation are graded: the
-// dark level and the LED's signal have no measured baseline on this reader yet, so they are
-// reported as information and never invent a limit.
-function selfCheckProblems(check, drift) {
-  const problems = [];
+// Everything the result shows, graded once so the result line and the list can't disagree.
+// Only drift and saturation are graded: the dark level and the LED's signal have no measured
+// baseline on this reader yet, so they are reported as information and never invent a limit.
+function analyzeSelfCheck(check) {
+  const darks = [check.dark_1, check.dark_2].filter(Boolean);
+  const drift = darks.length === 2 ? perChannel((key) => check.dark_2[key] - check.dark_1[key]) : null;
+  const net = darks.length
+    ? perChannel((key) => check.light[key] - darks.reduce((sum, dark) => sum + dark[key], 0) / darks.length)
+    : null;
+  const darkMax = darks.length ? perChannel((key) => Math.max(...darks.map((dark) => dark[key]))) : null;
   const fullScale = HardwareProcessing.fullScaleCounts(check.config);
+  const driftPeak = drift ? peakChannel(drift, Math.abs) : null;
+  const lightPeak = peakChannel(check.light);
   const saturated = HARDWARE_CHANNELS.filter(({ key }) => check.light[key] >= fullScale);
+  const stable = driftPeak !== null && Math.abs(driftPeak.value) <= DARK_DRIFT_TOLERANCE_COUNTS;
+
+  // [{text, advice}] for each graded check that failed.
+  const problems = [];
   if (saturated.length) {
     problems.push({ text: `saturated on ${saturated.map(channelName).join(", ")}`,
       advice: "Lower the gain (Serial command g), then run again." });
   }
-  if (!drift) {
+  if (!driftPeak) {
     problems.push({ text: "a dark reading is missing", advice: "Run again." });
-  } else {
-    const { ch, value } = peakChannel(drift, Math.abs);
-    if (Math.abs(value) > DARK_DRIFT_TOLERANCE_COUNTS) {
-      problems.push({ text: `dark reading drifted ${countsText(value, true)} on ${channelName(ch)}`,
-        advice: "Keep the lid closed and the room light steady, then run again." });
-    }
+  } else if (!stable) {
+    problems.push({ text: `dark reading drifted ${countsText(driftPeak.value, true)} on ${channelName(driftPeak.ch)}`,
+      advice: "Keep the lid closed and the room light steady, then run again." });
   }
-  return problems;
+  return { drift, net, darkMax, fullScale, driftPeak, lightPeak, saturated: saturated.length > 0, stable, problems };
 }
 
 // verdict: "pass" | "fail" for a graded check, null for information only.
@@ -342,17 +370,12 @@ function checkRow(name, value, verdict) {
 }
 
 function renderSelfCheck(check, container, statusEl) {
-  const darks = [check.dark_1, check.dark_2].filter(Boolean);
-  const drift = darks.length === 2 ? perChannel((key) => check.dark_2[key] - check.dark_1[key]) : null;
-  const net = darks.length
-    ? perChannel((key) => check.light[key] - darks.reduce((sum, dark) => sum + dark[key], 0) / darks.length)
-    : null;
-  const darkMax = darks.length ? perChannel((key) => Math.max(...darks.map((dark) => dark[key]))) : null;
-  const fullScale = HardwareProcessing.fullScaleCounts(check.config);
-  const time = formatClockTime(new Date(check.timestamp_utc));
+  const result = analyzeSelfCheck(check);
+  const { drift, net, darkMax, fullScale, driftPeak, lightPeak, problems } = result;
+  const at = new Date(check.timestamp_utc);
+  const time = formatClockTime(at);
 
-  const problems = selfCheckProblems(check, drift);
-  lastSelfCheck = { at: new Date(check.timestamp_utc), problems: problems.map((p) => p.text) };
+  lastSelfCheck = { at, fingerprint: check.config.fingerprint, problems: problems.map((p) => p.text) };
   if (problems.length) {
     const advice = [...new Set(problems.map((p) => p.advice))].join(" ");
     setHardwareStatus(statusEl, `Failed at ${time}: ${problems.map((p) => p.text).join("; ")}. ${advice}`, "error");
@@ -360,13 +383,11 @@ function renderSelfCheck(check, container, statusEl) {
     setHardwareStatus(statusEl, `Passed at ${time}. The dark reading is steady and no channel is saturated.`, "success");
   }
 
-  const driftPeak = drift ? peakChannel(drift, Math.abs).value : null;
-  const lightPeak = peakChannel(check.light).value;
   const list = hwEl("ul", "check-list");
   list.append(
-    checkRow("Dark stability", drift ? `${countsText(driftPeak, true)} (limit ±${DARK_DRIFT_TOLERANCE_COUNTS})` : "--",
-      drift && Math.abs(driftPeak) <= DARK_DRIFT_TOLERANCE_COUNTS ? "pass" : "fail"),
-    checkRow("Peak signal", `${formatPercent(lightPeak / fullScale)} of full scale`, lightPeak < fullScale ? "pass" : "fail"),
+    checkRow("Dark stability", driftPeak ? `${countsText(driftPeak.value, true)} (limit ±${DARK_DRIFT_TOLERANCE_COUNTS})` : "--",
+      result.stable ? "pass" : "fail"),
+    checkRow("Peak signal", `${formatPercent(lightPeak.value / fullScale)} of full scale`, result.saturated ? "fail" : "pass"),
     checkRow("Stray light", darkMax ? countsText(peakChannel(darkMax).value) : "--", null),
     checkRow("LED signal", net ? countsText(peakChannel(net).value, true) : "--", null),
   );

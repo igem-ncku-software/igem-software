@@ -174,10 +174,15 @@ class DeviceHub:
         future = self._pending.get(str(message.get("request_id")))
         if future is None or future.done():
             return
-        if message.get("error") == "busy":
-            future.set_exception(DeviceBusy("CAPTURE-Screen is busy, try again."))
+        # These messages reach the user verbatim (pages show the HTTP detail), so the firmware's
+        # error codes are turned into words here.
+        error = str(message.get("error"))
+        if error == "busy":
+            future.set_exception(DeviceBusy("CAPTURE-Screen is busy. Try again."))
+        elif error == "sensor_offline":
+            future.set_exception(DeviceError("The AS7341 sensor is not responding. Check its I2C wiring."))
         else:
-            future.set_exception(DeviceError(f"CAPTURE-Screen rejected the read: {str(message.get('error'))[:80]}"))
+            future.set_exception(DeviceError(f"CAPTURE-Screen rejected the read: {error[:80]}"))
 
     def _fail_pending(self, error: Exception) -> None:
         for future in self._pending.values():
