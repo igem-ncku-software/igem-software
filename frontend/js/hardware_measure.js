@@ -24,6 +24,7 @@ let deviceSensorOk = null;
 let deviceConfig = null;
 let deviceError = null;   // why the instrument is unreachable, in words; null while it answers
 let measureReading = false;
+let finishConfirming = false; // the "Finishing is final" panel is open
 let channelChart = null;
 const openSamples = new Set();
 
@@ -53,7 +54,8 @@ async function refreshDevice() {
   if (batch) {
     renderBlank();
     renderSamples();
-  } else if (chooserCurves.length > 0) {
+  } else {
+    renderChooserStatus();
     renderCurveChoices();
     updateBatchStartControls();
   }
@@ -63,6 +65,25 @@ async function refreshDevice() {
 
 let chooserCurves = [];
 let chooserSignal = null;
+let chooserLoadError = null;   // why the curves couldn't be listed, or null
+
+// The line above the curve list. Re-rendered by every device poll along with the list, so it
+// never says "unreachable" over curves the instrument now accepts, or stays hidden once it doesn't.
+function renderChooserStatus() {
+  const statusEl = document.getElementById("batch-curves-status");
+  statusEl.hidden = false;
+  if (chooserLoadError) {
+    setHardwareStatus(statusEl, `Could not load curves: ${chooserLoadError}`, "error");
+  } else if (chooserCurves.length === 0) {
+    setHardwareStatus(statusEl, "No saved curves yet. ", "warn");
+    statusEl.appendChild(hwLink("hardware-calibration.html", "Calibrate →"));
+  } else if (deviceFingerprint === null) {
+    setHardwareStatus(statusEl, `Instrument unreachable: ${deviceError}`, "warn");
+  } else {
+    setHardwareStatus(statusEl, "", null);
+    statusEl.hidden = true;
+  }
+}
 
 function selectedCurveId() {
   return document.querySelector('input[name="batch-curve"]:checked')?.value ?? null;
@@ -88,29 +109,17 @@ async function showChooser() {
     setStepCard(document.getElementById(id), "waiting", "Start a batch first.");
   }
 
-  const statusEl = document.getElementById("batch-curves-status");
   const [curvesResult, statusResult, signalResult] = await Promise.allSettled([
     HardwareApi.listCurves(),
     HardwareApi.getDeviceStatus(),
     HardwareApi.getCurrentSignal(),
   ]);
   chooserCurves = curvesResult.status === "fulfilled" ? curvesResult.value : [];
+  chooserLoadError = curvesResult.status === "rejected" ? curvesResult.reason.message : null;
   deviceFingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  deviceError = statusResult.status === "rejected" ? statusResult.reason.message : null;
   chooserSignal = signalResult.status === "fulfilled" ? signalResult.value : null;
-
-  if (curvesResult.status === "rejected") {
-    setHardwareStatus(statusEl, `Could not load curves: ${curvesResult.reason.message}`, "error");
-  } else if (chooserCurves.length === 0) {
-    statusEl.textContent = "No saved curves yet. ";
-    statusEl.className = "status-message warn";
-    statusEl.appendChild(hwLink("hardware-calibration.html", "Calibrate →"));
-  } else if (deviceFingerprint === null) {
-    setHardwareStatus(statusEl, `Instrument unreachable: ${statusResult.reason.message}`, "warn");
-  } else {
-    statusEl.textContent = "";
-    statusEl.className = "status-message";
-    statusEl.hidden = true;
-  }
+  renderChooserStatus();
 
   // The curve asked for by ?curve= is picked when it can be; otherwise the newest usable one.
   renderCurveChoices(hardwareQueryParam("curve"));
@@ -588,8 +597,11 @@ function renderResults() {
   }
 
   const finish = document.getElementById("batch-finish-button");
-  finish.hidden = Boolean(batch.finished_at);
+  if (batch.finished_at) finishConfirming = false;
+  finish.hidden = Boolean(batch.finished_at) || finishConfirming;
+  document.getElementById("batch-finish-confirm").hidden = !finishConfirming;
   setBlocked(finish, document.getElementById("batch-finish-reason"), measureReading ? "A read is in progress." : null);
+  document.getElementById("batch-finish-confirm-button").disabled = measureReading;
 }
 
 // One row per tube, with its group's estimate beside it: everything needed to read the result back
@@ -644,8 +656,16 @@ async function exportBatchCsv(batchId, button, statusEl) {
   }
 }
 
+// Finishing can't be undone: the first press only opens the panel that says so.
+function setFinishConfirming(open) {
+  finishConfirming = open;
+  renderResults();
+  document.getElementById(open ? "batch-finish-confirm-button" : "batch-finish-button").focus();
+}
+
 async function finishBatch() {
   const statusEl = document.getElementById("results-status");
+  finishConfirming = false;
   try {
     batch = await HardwareApi.finishBatch(batch.batch_id);
     setHardwareStatus(statusEl, `${batch.batch_id} finished.`, "success");
@@ -780,7 +800,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("results-export-button").addEventListener("click", (event) =>
     exportBatchCsv(batch.batch_id, event.currentTarget, document.getElementById("export-status")));
-  document.getElementById("batch-finish-button").addEventListener("click", finishBatch);
+  document.getElementById("batch-finish-button").addEventListener("click", () => setFinishConfirming(true));
+  document.getElementById("batch-finish-confirm-button").addEventListener("click", finishBatch);
+  document.getElementById("batch-finish-cancel-button").addEventListener("click", () => setFinishConfirming(false));
 
   refreshBatches();
   setInterval(refreshDevice, DEVICE_STATUS_POLL_INTERVAL_MS);

@@ -204,9 +204,17 @@
           </div>
 
           <div class="button-row">
-            <button type="button" id="batch-finish-button">Finish batch</button>
+            <button type="button" id="batch-finish-button">Finish batch&hellip;</button>
           </div>
           <p class="blocked-reason" id="batch-finish-reason" hidden></p>
+          <!-- Finishing can't be undone, so it takes a second press here. -->
+          <div id="batch-finish-confirm" hidden>
+            <p class="status-message warn">Finishing is final: no more tubes can be read or left out in this batch.</p>
+            <div class="button-row">
+              <button type="button" id="batch-finish-confirm-button">Finish batch</button>
+              <button type="button" class="btn-secondary" id="batch-finish-cancel-button">Cancel</button>
+            </div>
+          </div>
           <p class="status-message" id="results-status" aria-live="polite"></p>
         </div>
       </section>
