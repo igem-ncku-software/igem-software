@@ -258,34 +258,23 @@ const HardwareProcessing = (() => {
     };
   }
 
-  // Dark-read check: subtracts the two dark frames (sign preserved); normally every channel should sit near 0.
-  // The device has no "dark-only" endpoint, so this reuses the dark_1 / dark_2 from one POST /read call.
-  function toDarkCheckMeasurement(reading, sampleId, timestampUtc) {
+  // Instrument self-check: one read of a buffer-only cuvette, kept as the three frames in integer
+  // counts (contract channel names) and never turned into a Measurement. The absolute dark level
+  // matters here: a steady light leak raises both darks alike, so their difference can't show it.
+  // dark_1 / dark_2 are null when the device didn't return them.
+  function toSelfCheck(reading, timestampUtc) {
     if (!reading || reading.mode !== "measurement") {
-      throw new Error(`Only "measurement" readings can be dark-checked (got mode "${reading?.mode}").`);
+      throw new Error(`Only "measurement" readings can be self-checked (got mode "${reading?.mode}").`);
     }
     const readingError = validateDeviceReading(reading);
     if (readingError) throw new Error(`Invalid device reading: ${readingError}`);
-
-    const { config } = reading;
-    const paired = isChannelFrame(reading.dark_1) && isChannelFrame(reading.dark_2);
-    const diff = {};
-    for (const key of DEVICE_CHANNELS) diff[key] = paired ? reading.dark_2[key] - reading.dark_1[key] : NaN;
-    const normalized = normalize(diff, config);
-
+    const frame = (f) => (isChannelFrame(f) ? toContractChannels(f) : null);
     return {
-      sample_id: sampleId,
       timestamp_utc: timestampUtc,
-      sample_type: "blank",
-      known_concentration_nM: null,
-      signal: "F4",
-      fluorescence: normalized.F4,
-      fluorescence_sd: countsToBasic(QUANTIZATION_SD_COUNTS * Math.SQRT2, config),
-      scatter: normalized.F3,
-      flags: paired ? [] : ["NO_DARK_PAIR"],
-      config_fingerprint: toHardwareConfig(reading).fingerprint,
-      raw: toContractChannels(normalized),
-      source: "device",
+      config: toHardwareConfig(reading),
+      dark_1: frame(reading.dark_1),
+      light: toContractChannels(reading.light),
+      dark_2: frame(reading.dark_2),
     };
   }
 
@@ -305,6 +294,6 @@ const HardwareProcessing = (() => {
     signalId,
     unmix,
     toMeasurement,
-    toDarkCheckMeasurement,
+    toSelfCheck,
   };
 })();

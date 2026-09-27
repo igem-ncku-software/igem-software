@@ -34,8 +34,10 @@ const LOCAL_BACKUP_FORMAT = "lasreader.hardware.backup";
 const LOCAL_BACKUP_VERSION = 2;
 const LOCAL_STORE_KEY = "lasreader.hardware.local.v3";
 // Cleared on load. v1 and older came from the removed simulated device; v2 is the previous
-// workflow, whose data the user chose to clear rather than migrate (2026-09-27).
+// workflow, whose data the user chose to clear rather than migrate (2026-09-27). The v3 dark-read
+// time belonged to the Instrument page's old dark-read reminder, since removed.
 const LOCAL_LEGACY_KEYS = [
+  "lasreader.hardware.v3.lastDarkReadUtc",
   "lasreader.hardware.local.v1",
   "lasreader.hardware.mock.v1",
   "lasreader.hardware.mockDevice.v1",
@@ -673,7 +675,7 @@ const HardwareLocal = {
 
   // Called right after HardwareProcessing.toMeasurement() has assembled a reading. Only sample
   // reads go through here (a calibration run and a measurement batch); the Instrument page's
-  // checks go through HardwareApi.runBlankCheck(), which skips this entirely.
+  // self-check goes through HardwareApi.runSelfCheck(), which skips this entirely.
   finalizeMeasurement(m) {
     const store = localLoad();
     // The HIGH_SCATTER baseline, and so what counts as "too cloudy", is whatever blank was read

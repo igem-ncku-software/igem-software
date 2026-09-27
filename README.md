@@ -219,7 +219,7 @@ The hardware pages are one workflow used in order. A step bar at the top of ever
 
 | Step | Page | Purpose |
 |---|---|---|
-| 1 Instrument | `hardware.html` | Connection, config and fingerprint, Dark read / Blank read self-checks |
+| 1 Instrument | `hardware.html` | Whether the reader can measure now and, if not, which link failed (backend → device → sensor / LED); its full configuration; a self-check read of a buffer-only cuvette (dark level, dark drift, saturation); a log of changes while the page is open |
 | 2 Calibrate | `hardware-calibration.html` | Set up a run with its conditions (biosensor strain, induction time) → read the standards tube by tube, or enter recorded data → 4PL fit, excluding tubes only with a reason → save the curve |
 | 3 Curves | `hardware-curves.html` | Every saved curve, what it is valid for, and whether it matches the instrument now |
 | 4 Measure | `hardware-measure.html` | A batch: choose a curve → read a blank → read each sample in replicate tubes → per-sample inferred AHL with a 95% CI, exported as CSV |

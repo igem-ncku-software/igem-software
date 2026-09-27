@@ -89,9 +89,20 @@ function formatPercent(fraction) {
   return `${(fraction * 100).toFixed(1)}%`;
 }
 
-// Data is always stored in UTC; the display always shows the browser's local time.
+// Data is always stored in UTC; the display always shows the browser's local time, in one fixed
+// 24-hour format (YYYY-MM-DD HH:MM:SS) rather than the browser locale's, which on a zh-TW system
+// would put 下午 into an English interface. It also matches a manual entry's bare YYYY-MM-DD date.
+function formatClockTime(date, withSeconds = true) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return withSeconds ? `${time}:${pad(date.getSeconds())}` : time;
+}
+
 function formatLocalTime(utc) {
-  return utc ? new Date(utc).toLocaleString() : "--";
+  if (!utc) return "--";
+  const d = new Date(utc);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${formatClockTime(d)}`;
 }
 
 function formatAgo(utc) {
@@ -245,22 +256,27 @@ function appendKvRow(tbody, label, value) {
   tbody.appendChild(row);
 }
 
-// A ten-channel value table (used by the instrument status page for dark / blank readings).
-function renderChannelTable(raw) {
+// A ten-channel table, one row per {label, values, format}; corner names the unit every row shares.
+// A row whose values are null shows "--" in every channel.
+function renderChannelTable(corner, rows) {
   const wrapper = hwEl("div", "table-wrapper table-spaced");
   const table = hwEl("table", "channel-table");
   const head = hwEl("tr");
-  const body = hwEl("tr");
-  head.appendChild(Object.assign(hwEl("th", null, "Channel (nm)"), { scope: "row" }));
-  body.appendChild(Object.assign(hwEl("th", null, "Basic counts"), { scope: "row" }));
-  for (const { key, axis } of HARDWARE_CHANNELS) {
+  head.appendChild(Object.assign(hwEl("th", null, corner), { scope: "col" }));
+  for (const { axis } of HARDWARE_CHANNELS) {
     head.appendChild(Object.assign(hwEl("th", null, axis), { scope: "col" }));
-    body.appendChild(hwEl("td", null, formatFluorescence(raw[key])));
+  }
+  const tbody = hwEl("tbody");
+  for (const { label, values, format } of rows) {
+    const row = hwEl("tr");
+    row.appendChild(Object.assign(hwEl("th", null, label), { scope: "row" }));
+    for (const { key } of HARDWARE_CHANNELS) {
+      row.appendChild(hwEl("td", null, values ? format(values[key]) : "--"));
+    }
+    tbody.appendChild(row);
   }
   const thead = hwEl("thead");
   thead.appendChild(head);
-  const tbody = hwEl("tbody");
-  tbody.appendChild(body);
   table.append(thead, tbody);
   wrapper.appendChild(table);
   return wrapper;
@@ -353,8 +369,6 @@ async function fillBasisNotes(root = document) {
 // v3: the step-by-step workflow; hardware_local.js clears the v2 keys.
 const HARDWARE_LAST_PLAN_KEY = "lasreader.hardware.v3.lastPlanId";
 const HARDWARE_LAST_BATCH_KEY = "lasreader.hardware.v3.lastBatchId";
-// The data contract has no "last dark read time" field yet, so the frontend remembers it for now; switch to the API once the backend adds the field.
-const HARDWARE_LAST_DARK_READ_KEY = "lasreader.hardware.v3.lastDarkReadUtc";
 // When "Export everything" last produced a file in this browser. Only the Data page reads it, to
 // say whether what is about to be deleted was ever backed up. Like the keys above it starts with
 // "lasreader.", so a reset removes it along with everything else.

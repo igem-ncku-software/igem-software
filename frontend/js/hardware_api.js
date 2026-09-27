@@ -161,7 +161,10 @@ async function hardwareRequest(path, options = {}) {
     res = await fetch(`${HARDWARE_API_URL}${path}`, { ...options, cache: "no-store", signal: controller.signal });
     body = await res.json().catch(() => null);
   } catch (err) {
-    throw new Error(`Backend not reachable at ${BACKEND_BASE_URL}`);
+    const error = new Error(`Backend not reachable at ${BACKEND_BASE_URL}`);
+    // For a page that must tell a backend that can't be reached from one that answered with an error.
+    error.backendUnreachable = true;
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -213,22 +216,32 @@ async function hardwareCurrentSignal() {
 const HardwareApi = {
   /**
    * Throws when the device is offline (with a message that can be shown as-is); pages should treat it as unreachable either way.
+   * That error carries deviceOffline: true and lastSeen (ISO or null); one for a status that
+   * doesn't validate carries deviceInvalid: true; an unreachable backend's carries
+   * backendUnreachable: true — for a page that must say which link failed.
    * sensor_ok is null when the firmware predates the field: unknown, not healthy. It stays out
    * of HardwareConfig on purpose — sensor health must never reach the config fingerprint.
+   * live_on / live_off_in_s / led_on are null from a firmware older than them, like sensor_ok.
    * @returns {Promise<{online: true, last_seen: string, config: HardwareConfig, sensor_ok: boolean | null,
-   *   device_id: string, state: "IDLE" | "LIVE" | "MEASURING", wifi_rssi: number, uptime_ms: number}>}
+   *   device_id: string, state: "IDLE" | "LIVE" | "MEASURING", wifi_rssi: number, uptime_ms: number,
+   *   live_on: boolean | null, live_off_in_s: number | null, led_on: boolean | null}>}
    */
   async getDeviceStatus() {
     const body = await hardwareRequest("/status");
     if (!body.online) {
-      throw new Error(body.last_seen
+      const error = new Error(body.last_seen
         ? `CAPTURE-Screen is offline (last seen ${new Date(body.last_seen).toLocaleString()}).`
         : "CAPTURE-Screen has not connected to the backend. Power it on where it can reach its Wi-Fi.");
+      error.deviceOffline = true;
+      error.lastSeen = body.last_seen ?? null;
+      throw error;
     }
     const problem = HardwareProcessing.validateDeviceStatus(body.device);
     if (problem) {
       console.error(`Unexpected device status (${problem}):`, body);
-      throw new Error("Unexpected response from device");
+      const error = new Error("Unexpected response from device");
+      error.deviceInvalid = true;
+      throw error;
     }
     const { device } = body;
     return {
@@ -240,32 +253,24 @@ const HardwareApi = {
       state: device.state,
       wifi_rssi: device.wifi_rssi,
       uptime_ms: device.uptime_ms,
+      live_on: device.live_on ?? null,
+      live_off_in_s: device.live_off_in_s ?? null,
+      led_on: device.led_on ?? null,
     };
   },
 
-  /** @returns {Promise<Measurement>} */
-  async runDarkRead() {
-    const reading = hardwareReading(await hardwareRequest("/read", { method: "POST" }));
-    return HardwareProcessing.toDarkCheckMeasurement(reading, `DARK-${Date.now()}`, new Date().toISOString());
-  },
-
   /**
-   * Instrument check: one blank cuvette through the whole measurement path, shown once and then
-   * discarded. Deliberately not readSample({sample_type: "blank"}) — the Instrument page's blank is
-   * a buffer-only cuvette, while HIGH_SCATTER's baseline has to come from a cell blank (cells at
-   * the standards' OD, no AHL). Going through readSample would let a buffer check drop the
-   * baseline to a cell-free cuvette and flag every sample read afterwards.
+   * Instrument self-check: one buffer-only cuvette read, shown once and then discarded.
+   * Deliberately not readSample({sample_type: "blank"}) — HIGH_SCATTER's baseline has to come
+   * from a cell blank (cells at the standards' OD, no AHL), and going through readSample would
+   * let a buffer check drop the baseline to a cell-free cuvette and flag every sample read afterwards.
    * So this never reaches HardwareLocal: the baseline is neither read nor written, and nothing is stored.
-   * @returns {Promise<Measurement>}
+   * @returns {Promise<{timestamp_utc: string, config: HardwareConfig, dark_1: Record<string, number> | null,
+   *   light: Record<string, number>, dark_2: Record<string, number> | null}>}  frames in integer counts
    */
-  async runBlankCheck() {
-    const basis = await loadUnmixBasis();
+  async runSelfCheck() {
     const reading = hardwareReading(await hardwareRequest("/read", { method: "POST" }));
-    return HardwareProcessing.toMeasurement(
-      reading,
-      { sample_id: `BLANK-CHECK-${Date.now()}`, sample_type: "blank" },
-      { basis, blankScatter: null, timestampUtc: new Date().toISOString() },
-    );
+    return HardwareProcessing.toSelfCheck(reading, new Date().toISOString());
   },
 
   /**

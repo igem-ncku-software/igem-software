@@ -481,7 +481,6 @@ button.is-blocked:disabled { cursor: not-allowed; }
 .sensor-stat-value.is-large { font-size: clamp(1.9rem, 4vw, 2.6rem); }
 .sensor-stat-value.is-message { font-size: 1.15rem; line-height: 1.4; }
 .sensor-stat-value.is-error { color: var(--error); }
-.sensor-stat-value.is-mono { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
 
 /* QC flags and curve states. */
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
@@ -529,6 +528,87 @@ td .chip-row { margin-top: 0; }
 /* Tables. */
 .kv-table { min-width: 0; }
 .kv-table th { width: 34%; color: var(--text-dim); font-size: .85rem; }
+
+/* A datasheet: parameter, value, and where the value comes from. The structure is the wiki's
+   hardware tables (Quantity / Measured / Note); the material is this site's, like every other table. */
+.spec-table { min-width: 0; }
+.spec-table tbody th { width: 24%; color: var(--text-dim); font-size: .85rem; }
+.spec-table td.spec-value { color: var(--text); }
+/* The one column allowed to wrap, so the table fits a phone without scrolling sideways. */
+.spec-table td.spec-note { width: 46%; color: var(--muted); font-size: .82rem; line-height: 1.5; white-space: normal; }
+@media (max-width: 640px) {
+  .spec-table th, .spec-table td { padding: 10px 8px; }
+  .spec-table tbody th { white-space: normal; }
+}
+
+/* A health dot, in the palette's meanings: accent OK, gold busy, error broken, muted unknown.
+   Same sizes as the landing page's live dot. */
+.status-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(138,122,106,.12); }
+.status-dot.is-ok { background: var(--accent); box-shadow: 0 0 0 3px rgba(7,90,62,.14); }
+.status-dot.is-warn { background: var(--gold); box-shadow: 0 0 0 3px rgba(201,162,39,.16); }
+.status-dot.is-error { background: var(--error); box-shadow: 0 0 0 3px rgba(163,56,44,.14); }
+
+/* Instrument verdict: one line answering "can I measure now?", its bar in the verdict's tone. */
+.hw-verdict {
+  margin-top: 14px; padding: 16px 20px;
+  border: 1px solid var(--border); border-left: 6px solid var(--muted); border-radius: 12px;
+  background: var(--solid);
+}
+.hw-verdict-title { margin: 0; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: 1.3rem; line-height: 1.3; }
+.hw-verdict-detail { margin: 4px 0 0; color: var(--text-dim); font-size: .92rem; line-height: 1.55; }
+.hw-verdict.is-ok { border-left-color: var(--accent); }
+.hw-verdict.is-ok .hw-verdict-title { color: var(--accent); }
+.hw-verdict.is-warn { border-left-color: var(--gold); }
+.hw-verdict.is-warn .hw-verdict-title { color: var(--gold-ink); }
+.hw-verdict.is-error { border-left-color: var(--error); }
+.hw-verdict.is-error .hw-verdict-title { color: var(--error); }
+
+/* Signal path: backend -> device, then the device forks to the sensor and the LED it drives.
+   A link is accent while it answers, a dashed error line where it breaks, and a plain hairline
+   past the break, where nothing is known. */
+.hw-path {
+  display: grid; align-items: center; margin-top: 16px;
+  grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) 44px minmax(0, 1fr);
+}
+.hw-node { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.hw-node.is-error { border-color: var(--error); }
+.hw-node-label { color: var(--muted); font-size: .74rem; font-weight: 700; }
+.hw-node-value { display: flex; align-items: center; gap: 9px; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: 1.15rem; }
+.hw-node.is-unknown .hw-node-value { color: var(--muted); }
+.hw-node-sub { min-height: 1.3em; color: var(--muted); font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere; }
+.hw-node-pair { display: grid; grid-auto-rows: 1fr; gap: 10px; }
+
+.hw-link, .hw-fork-stem, .hw-fork-branch { border: 0 solid var(--border); }
+.hw-link { display: block; border-top-width: 2px; }
+.hw-fork { position: relative; align-self: stretch; }
+.hw-fork-stem { position: absolute; left: 0; width: 50%; top: 50%; border-top-width: 2px; }
+/* Each branch ends at the middle of its node: the two nodes share the pair's height equally
+   (grid-auto-rows: 1fr), less the 10px gap between them. */
+.hw-fork-branch { position: absolute; left: 50%; right: 0; border-left-width: 2px; }
+.hw-fork-branch.is-top { top: calc((100% - 10px) / 4); bottom: 50%; border-top-width: 2px; border-top-left-radius: 8px; }
+.hw-fork-branch.is-bottom { top: 50%; bottom: calc((100% - 10px) / 4); border-bottom-width: 2px; border-bottom-left-radius: 8px; }
+.hw-link.is-ok, .hw-fork-stem.is-ok, .hw-fork-branch.is-ok { border-color: var(--accent); }
+.hw-link.is-broken, .hw-fork-stem.is-broken, .hw-fork-branch.is-broken { border-color: var(--error); border-style: dashed; }
+
+@media (max-width: 720px) {
+  /* Stacked: each link turns into a short vertical line, and the sensor and LED sit side by side. */
+  .hw-path { grid-template-columns: minmax(0, 1fr); }
+  .hw-link, .hw-fork { justify-self: center; height: 18px; }
+  .hw-link { border-top-width: 0; border-left-width: 2px; }
+  .hw-fork { width: 0; }
+  .hw-fork-stem { left: 0; width: 0; top: 0; bottom: 0; border-top-width: 0; border-left-width: 2px; }
+  .hw-fork-branch { display: none; }
+  .hw-node-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: auto; }
+}
+
+/* Session log: what changed while the page was open, newest first. */
+.hw-log { margin: 14px 0 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.hw-log li { display: flex; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--border); font-size: .88rem; line-height: 1.5; }
+.hw-log li:last-child { border-bottom: 0; }
+.hw-log time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hw-log li.is-error span { color: var(--error); }
+.hw-log li.is-ok span { color: var(--accent); }
+.hw-log li.is-warn span { color: var(--gold-ink); }
 .channel-table { min-width: 640px; }
 tr.is-target td { color: var(--text); font-weight: 700; }
 tr.is-target td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
