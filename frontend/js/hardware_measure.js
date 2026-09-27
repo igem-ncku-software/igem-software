@@ -22,9 +22,42 @@ let batch = null;
 let deviceFingerprint = null;
 let deviceSensorOk = null;
 let deviceConfig = null;
+let deviceError = null;   // why the instrument is unreachable, in words; null while it answers
 let measureReading = false;
 let channelChart = null;
 const openSamples = new Set();
+
+// The instrument is polled every DEVICE_STATUS_POLL_INTERVAL_MS in every state, so the curve
+// chooser and the Blank/Samples Read buttons follow it (online, offline, sensor fault, config
+// change) without a reload - the same rule as Calibrate and Curves. Skipped mid-read: readTube
+// already gets a fresh status alongside that read, and a poll landing then would just race it.
+async function refreshDevice() {
+  if (measureReading) return;
+  const [statusResult, signalResult] = await Promise.allSettled([
+    HardwareApi.getDeviceStatus(),
+    HardwareApi.getCurrentSignal(),
+  ]);
+  const fingerprint = statusResult.status === "fulfilled" ? statusResult.value.config.fingerprint : null;
+  const sensorOk = statusResult.status === "fulfilled" ? statusResult.value.sensor_ok : null;
+  const config = statusResult.status === "fulfilled" ? statusResult.value.config : null;
+  const error = statusResult.status === "rejected" ? statusResult.reason.message : null;
+  const signal = signalResult.status === "fulfilled" ? signalResult.value : null;
+  const changed = fingerprint !== deviceFingerprint || sensorOk !== deviceSensorOk
+    || error !== deviceError || signal !== chooserSignal;
+  deviceFingerprint = fingerprint;
+  deviceSensorOk = sensorOk;
+  deviceConfig = config;
+  deviceError = error;
+  chooserSignal = signal;
+  if (!changed) return;
+  if (batch) {
+    renderBlank();
+    renderSamples();
+  } else if (chooserCurves.length > 0) {
+    renderCurveChoices();
+    updateBatchStartControls();
+  }
+}
 
 // ---- 1. Curve -------------------------------------------------------------
 
@@ -80,9 +113,20 @@ async function showChooser() {
   }
 
   // The curve asked for by ?curve= is picked when it can be; otherwise the newest usable one.
-  const wanted = hardwareQueryParam("curve");
+  renderCurveChoices(hardwareQueryParam("curve"));
+  updateBatchStartControls();
+}
+
+// Rebuilds the curve list against the device's current fingerprint/signal. Keeps whichever curve
+// is already selected as long as it's still usable; a curve that just became blocked is dropped
+// (never left checked-but-disabled, since a disabled radio keeps its checked state, and
+// updateBatchStartControls() only asks *whether* one is selected - it would wrongly count that as
+// a usable choice). preselectId, given, is used only when nothing is selected yet.
+function renderCurveChoices(preselectId) {
+  const current = selectedCurveId();
   const usable = chooserCurves.filter((curve) => !curveBlockReason(curve, deviceFingerprint, chooserSignal));
-  const preselect = usable.find((curve) => curve.curve_id === wanted) ?? usable[0] ?? null;
+  const wanted = current ?? preselectId;
+  const preselect = usable.find((curve) => curve.curve_id === wanted) ?? (current ? null : usable[0] ?? null);
 
   const list = document.getElementById("batch-curve-list");
   list.innerHTML = "";
@@ -108,7 +152,6 @@ async function showChooser() {
     li.appendChild(label);
     list.appendChild(li);
   }
-  updateBatchStartControls();
 }
 
 async function startBatch(event) {
@@ -740,6 +783,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("batch-finish-button").addEventListener("click", finishBatch);
 
   refreshBatches();
+  setInterval(refreshDevice, DEVICE_STATUS_POLL_INTERVAL_MS);
   const batchId = hardwareQueryParam("batch");
   if (batchId) openBatch(batchId);
   else showChooser();
