@@ -299,26 +299,6 @@ function perChannel(fn) {
   return Object.fromEntries(HARDWARE_CHANNELS.map(({ key }) => [key, fn(key)]));
 }
 
-// No limit on the dark level itself: there is no measured baseline for this instrument yet, so
-// the page shows the two darks and leaves judging them to the user.
-function selfCheckProblems(check, drift) {
-  const problems = [];
-  const fullScale = HardwareProcessing.fullScaleCounts(check.config);
-  const saturated = HARDWARE_CHANNELS.filter(({ key }) => check.light[key] >= fullScale);
-  if (saturated.length) {
-    problems.push(`saturated on ${saturated.map(channelName).join(", ")} (full scale ${formatCounts(fullScale)} counts)`);
-  }
-  if (!drift) {
-    problems.push("a dark frame is missing, so drift wasn't checked");
-  } else {
-    const worst = HARDWARE_CHANNELS.reduce((a, b) => (Math.abs(drift[b.key]) > Math.abs(drift[a.key]) ? b : a));
-    if (Math.abs(drift[worst.key]) > DARK_DRIFT_TOLERANCE_COUNTS) {
-      problems.push(`dark drift ${formatCounts(drift[worst.key], true)} counts on ${channelName(worst)}`);
-    }
-  }
-  return problems;
-}
-
 function countsText(value, signed = false) {
   return `${formatCounts(value, signed)} count${Math.abs(value) === 1 ? "" : "s"}`;
 }
@@ -329,71 +309,36 @@ function peakChannel(values, fn = (value) => value) {
   return { ch, value: values[ch.key] };
 }
 
-// One check as a card. verdict "pass" | "fail" is graded against a limit; null is recorded only,
-// because this reader has no measured baseline for it yet. advice shows only on a fail.
-// meter (0-1) draws a bar.
-function checkCard({ name, verdict = null, value, detail, explain, advice, meter }) {
-  const card = hwEl("div", `check-item${verdict ? ` is-${verdict}` : ""}`);
-  const [chipText, chipTone] = verdict === "pass" ? ["Pass", "ok"] : verdict === "fail" ? ["Fail", "error"] : ["No limit yet", ""];
-  const head = hwEl("div", "check-head");
-  head.append(hwEl("span", "check-name", name), hwEl("span", `flag-chip ${chipTone}`.trim(), chipText));
-  card.append(head, hwEl("p", "check-value", value));
-  if (detail) card.append(hwEl("p", "check-detail", detail));
-  if (meter !== undefined) {
-    const bar = hwEl("div", "progress");
-    const fill = hwEl("div", "progress-fill");
-    fill.style.width = `${Math.min(meter, 1) * 100}%`;
-    bar.appendChild(fill);
-    card.appendChild(bar);
+// [{text, advice}] for each graded check that failed. Only drift and saturation are graded: the
+// dark level and the LED's signal have no measured baseline on this reader yet, so they are
+// reported as information and never invent a limit.
+function selfCheckProblems(check, drift) {
+  const problems = [];
+  const fullScale = HardwareProcessing.fullScaleCounts(check.config);
+  const saturated = HARDWARE_CHANNELS.filter(({ key }) => check.light[key] >= fullScale);
+  if (saturated.length) {
+    problems.push({ text: `saturated on ${saturated.map(channelName).join(", ")}`,
+      advice: "Lower the gain (Serial command g), then run again." });
   }
-  card.append(hwEl("p", "check-explain", explain));
-  if (advice && verdict === "fail") card.append(hwEl("p", "check-advice", advice));
-  return card;
-}
-
-function strayLightCard(darkMax) {
-  const explain = "Light reaching the sensor with the LED off. A leak in the lid or housing raises it.";
-  if (!darkMax) return checkCard({ name: "Stray light", value: "--", detail: "No dark reading returned", explain });
-  const { ch, value } = peakChannel(darkMax);
-  return checkCard({ name: "Stray light", value: countsText(value), detail: `Highest dark reading · ${channelName(ch)}`, explain });
-}
-
-function stabilityCard(drift) {
-  const explain = "Change between the two dark readings. A steady reader stays near zero.";
   if (!drift) {
-    return checkCard({ name: "Dark stability", verdict: "fail", value: "--", detail: "A dark reading is missing",
-      explain, advice: "Run the self-check again." });
+    problems.push({ text: "a dark reading is missing", advice: "Run again." });
+  } else {
+    const { ch, value } = peakChannel(drift, Math.abs);
+    if (Math.abs(value) > DARK_DRIFT_TOLERANCE_COUNTS) {
+      problems.push({ text: `dark reading drifted ${countsText(value, true)} on ${channelName(ch)}`,
+        advice: "Keep the lid closed and the room light steady, then run again." });
+    }
   }
-  const { ch, value } = peakChannel(drift, Math.abs);
-  return checkCard({
-    name: "Dark stability",
-    verdict: Math.abs(value) <= DARK_DRIFT_TOLERANCE_COUNTS ? "pass" : "fail",
-    value: countsText(value, true),
-    detail: `Largest change · ${channelName(ch)} · limit ±${DARK_DRIFT_TOLERANCE_COUNTS}`,
-    explain,
-    advice: "Keep the lid closed and the room light steady, then run again.",
-  });
+  return problems;
 }
 
-function ledResponseCard(net) {
-  const explain = "Light the LED adds through the buffer. Near zero on every channel means the LED didn't light.";
-  if (!net) return checkCard({ name: "LED response", value: "--", detail: "Needs a dark reading", explain });
-  const { ch, value } = peakChannel(net);
-  return checkCard({ name: "LED response", value: countsText(value, true), detail: `Largest increase · ${channelName(ch)}`, explain });
-}
-
-// Graded by the same rule as selfCheckProblems(): a channel at full scale is saturated.
-function peakSignalCard(light, fullScale) {
-  const { ch, value } = peakChannel(light);
-  return checkCard({
-    name: "Peak signal",
-    verdict: value < fullScale ? "pass" : "fail",
-    value: formatPercent(value / fullScale),
-    detail: `${formatCounts(value)} of ${formatCounts(fullScale)} counts · ${channelName(ch)}`,
-    meter: value / fullScale,
-    explain: "The brightest channel as a share of the sensor's limit. At 100% it is saturated and can't be measured.",
-    advice: "Lower the gain (Serial command g), or check the cuvette holds buffer only.",
-  });
+// verdict: "pass" | "fail" for a graded check, null for information only.
+function checkRow(name, value, verdict) {
+  const row = hwEl("li", verdict ? `is-${verdict}` : null);
+  const [chipText, chipTone] = verdict === "pass" ? ["Pass", "ok"] : verdict === "fail" ? ["Fail", "error"] : ["Info", ""];
+  row.append(hwEl("span", "check-name", name), hwEl("span", "check-value", value),
+    hwEl("span", `flag-chip ${chipTone}`.trim(), chipText));
+  return row;
 }
 
 function renderSelfCheck(check, container, statusEl) {
@@ -404,19 +349,29 @@ function renderSelfCheck(check, container, statusEl) {
     : null;
   const darkMax = darks.length ? perChannel((key) => Math.max(...darks.map((dark) => dark[key]))) : null;
   const fullScale = HardwareProcessing.fullScaleCounts(check.config);
+  const time = formatClockTime(new Date(check.timestamp_utc));
 
   const problems = selfCheckProblems(check, drift);
-  lastSelfCheck = { at: new Date(check.timestamp_utc), problems };
+  lastSelfCheck = { at: new Date(check.timestamp_utc), problems: problems.map((p) => p.text) };
   if (problems.length) {
-    setHardwareStatus(statusEl, `Failed: ${capitalize(problems.join("; "))}.`, "error");
+    const advice = [...new Set(problems.map((p) => p.advice))].join(" ");
+    setHardwareStatus(statusEl, `Failed at ${time}: ${problems.map((p) => p.text).join("; ")}. ${advice}`, "error");
   } else {
-    setHardwareStatus(statusEl, "Passed: dark stability and peak signal are within limits.", "success");
+    setHardwareStatus(statusEl, `Passed at ${time}. The dark reading is steady and no channel is saturated.`, "success");
   }
 
-  const grid = hwEl("div", "check-grid");
-  grid.append(strayLightCard(darkMax), stabilityCard(drift), ledResponseCard(net), peakSignalCard(check.light, fullScale));
+  const driftPeak = drift ? peakChannel(drift, Math.abs).value : null;
+  const lightPeak = peakChannel(check.light).value;
+  const list = hwEl("ul", "check-list");
+  list.append(
+    checkRow("Dark stability", drift ? `${countsText(driftPeak, true)} (limit ±${DARK_DRIFT_TOLERANCE_COUNTS})` : "--",
+      drift && Math.abs(driftPeak) <= DARK_DRIFT_TOLERANCE_COUNTS ? "pass" : "fail"),
+    checkRow("Peak signal", `${formatPercent(lightPeak / fullScale)} of full scale`, lightPeak < fullScale ? "pass" : "fail"),
+    checkRow("Stray light", darkMax ? countsText(peakChannel(darkMax).value) : "--", null),
+    checkRow("LED signal", net ? countsText(peakChannel(net).value, true) : "--", null),
+  );
 
-  // The full per-channel numbers stay one click away: the cards summarise, the table is the record.
+  // The full per-channel numbers stay one click away: the list summarises, the table is the record.
   const counts = (value) => formatCounts(value);
   const raw = hwEl("details", "raw-details");
   raw.append(
@@ -430,12 +385,7 @@ function renderSelfCheck(check, container, statusEl) {
     ]),
   );
 
-  container.replaceChildren(
-    hwEl("h3", "subsection-heading", `Result · ${formatLocalTime(check.timestamp_utc)}`),
-    grid,
-    hwEl("p", "check-note", "Stray light and LED response are recorded without a limit until this reader's normal values have been measured."),
-    raw,
-  );
+  container.replaceChildren(list, raw);
   container.hidden = false;
 }
 

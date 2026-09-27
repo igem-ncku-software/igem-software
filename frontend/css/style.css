@@ -611,30 +611,18 @@ td .chip-row { margin-top: 0; }
   border: 2px solid var(--accent); color: var(--accent); background: var(--solid);
   font-weight: 700; font-size: .88rem;
 }
-.procedure strong { color: var(--text); }
-
-/* Self-check result: one card per check, its bar in the verdict's tone; ungraded ones stay muted. */
-.check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
-.check-item {
-  display: flex; flex-direction: column; gap: 2px; padding: 14px 16px;
-  border: 1px solid var(--border); border-left: 4px solid var(--muted); border-radius: 12px; background: var(--solid);
-}
-.check-item.is-pass { border-left-color: var(--accent); }
-.check-item.is-fail { border-left-color: var(--error); }
-.check-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.check-name { color: var(--text); font-weight: 700; font-size: .95rem; }
-.check-value { margin: 4px 0 0; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
-.check-detail { margin: 0; color: var(--muted); font-size: .82rem; }
-.check-item .progress { height: 8px; margin-top: 8px; }
-.check-item.is-fail .progress-fill { background: var(--error); }
-.check-explain { margin: 8px 0 0; color: var(--text-dim); font-size: .88rem; line-height: 1.55; }
-.check-advice { margin: 4px 0 0; color: var(--error); font-size: .88rem; font-weight: 600; line-height: 1.55; }
-.check-note { margin: 12px 0 0; color: var(--muted); font-size: .82rem; }
+/* Self-check result: one row per check, its verdict chip at the end. */
+.check-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.check-list li { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+.check-list li:last-child { border-bottom: 0; }
+.check-name { flex: 0 0 9rem; color: var(--text); font-size: .92rem; font-weight: 700; }
+.check-value { flex: 1; min-width: 0; color: var(--text-dim); font-size: .92rem; font-variant-numeric: tabular-nums; }
+.check-list li.is-fail .check-value { color: var(--error); font-weight: 600; }
 .raw-details { margin-top: 14px; }
 .raw-details summary { width: fit-content; color: var(--accent); font-size: .9rem; font-weight: 700; cursor: pointer; }
 .raw-details summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 @media (max-width: 640px) {
-  .check-grid { grid-template-columns: minmax(0, 1fr); }
+  .check-name { flex-basis: 7rem; }
 }
 .channel-table { min-width: 640px; }
 tr.is-target td { color: var(--text); font-weight: 700; }
