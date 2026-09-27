@@ -138,12 +138,10 @@ function liveStatus() {
     const retrying = liveRetryAt && retryS > 0;
     return {
       dot: "reconnecting",
-      label: "Connecting",
+      label: retrying ? "Reconnecting" : "Connecting",
       // A sleeping Render backend can take nearly a minute to wake — without saying so, it looks broken.
-      message: retrying
-        ? `Connection lost. Retrying in ${retryS} s`
-        : "Connecting to backend (up to 1 min after idle)...",
-      spoken: retrying ? "Connection lost. Retrying" : undefined,
+      message: retrying ? `Retrying in ${retryS} s` : "Backend may take up to 1 min to wake",
+      spoken: retrying ? "Retrying" : undefined,
     };
   }
   if (!liveOnline) {
@@ -151,7 +149,7 @@ function liveStatus() {
     return {
       dot: "off",
       label: "Offline",
-      message: seen ? `Last seen ${liveAgo(liveLastSeen)}` : "Waiting for CAPTURE-Screen to connect",
+      message: seen ? `Last seen ${liveAgo(liveLastSeen)}` : "Waiting for CAPTURE-Screen",
       spoken: seen
         ? `Last seen at ${new Date(liveLastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
         : undefined,
@@ -159,20 +157,22 @@ function liveStatus() {
   }
   // The firmware refuses to stream without the AS7341, and says nothing further about it.
   if (liveDevice?.sensor_ok === false) {
-    return { dot: "off", label: "Sensor offline", message: "Connected, but the AS7341 is not responding" };
+    return { dot: "off", label: "Sensor fault", message: "Device online; AS7341 not responding" };
   }
   const measuring = liveDevice?.state === "MEASURING";
   if (!liveWanted) {
-    return { dot: "off", label: measuring ? "Measuring" : "Online", message: "Turn on Live to switch on the LED and stream" };
+    return measuring
+      ? { dot: "off", label: "Measuring", message: "Measurement in progress" }
+      : { dot: "off", label: "Online", message: "Turn on Live to stream" };
   }
   if (measuring) {
-    return { dot: "reconnecting", label: "Measuring", message: "Stream starts after the measurement" };
+    return { dot: "reconnecting", label: "Measuring", message: "Live resumes after measurement" };
   }
   if (!liveStreaming) {
     if (Date.now() - liveWatchStartedMs > LIVE_FIRST_FRAME_MS) {
-      return { dot: "off", label: "No frames", message: "Live is on; the device has not sent a frame" };
+      return { dot: "off", label: "No data", message: "No frames received from device" };
     }
-    return { dot: "reconnecting", label: "Starting", message: "Waiting for first frame..." };
+    return { dot: "reconnecting", label: "Starting", message: "Waiting for first frame" };
   }
   return { dot: "streaming", label: "Streaming", message: "" };
 }
@@ -187,7 +187,7 @@ function renderSettings() {
   const { config } = liveDevice;
   const items = [
     ["Gain", `${config.gain}×`],
-    ["Integration", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`],
+    ["Integration", `${HardwareProcessing.integrationTimeMs(config).toFixed(1)} ms`],
     ["LED", `${config.led_current_mA} mA`],
     ["Full scale", `${liveCounts(HardwareProcessing.fullScaleCounts(config))} counts`],
   ];
@@ -301,7 +301,7 @@ function ensureLiveChart() {
         tooltip: {
           callbacks: {
             title: (items) => liveChannelName(LIVE_CHANNELS[items[0].dataIndex]),
-            label: (item) => `${liveCounts(item.parsed.y)} raw counts`,
+            label: (item) => `${liveCounts(item.parsed.y)} counts`,
           },
         },
       },

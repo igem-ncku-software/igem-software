@@ -68,19 +68,19 @@
         </div>
 
         <p class="section-description live-description">
-          Real-time raw counts from CAPTURE-Screen's ten spectral channels; F4 (515 nm) is the sfGFP band.
-          The excitation LED is on only while Live is on, to avoid heating and bleaching the sample.
+          Raw counts from the ten AS7341 channels, latest frame. F4 (515 nm) is the sfGFP band.
+          The excitation LED is on only while Live is on, to limit sample heating and photobleaching.
         </p>
 
         <div class="sensor-stats">
           <div class="sensor-stat">
-            <span class="sensor-stat-label">sfGFP · F4 515 nm</span>
+            <span class="sensor-stat-label">F4 · 515 nm · sfGFP</span>
             <span class="sensor-stat-value" id="live-f4">--</span>
             <span class="sensor-stat-sub">raw counts</span>
           </div>
         </div>
 
-        <div id="live-empty" class="live-empty">Connecting to backend (up to 1 min after idle)...</div>
+        <div id="live-empty" class="live-empty">Backend may take up to 1 min to wake</div>
         <!-- The only aria-live region: the status above without its ticking seconds (device_live.js). -->
         <p id="live-announce" class="visually-hidden" aria-live="polite"></p>
         <div id="live-spectrum" hidden>
@@ -89,13 +89,13 @@
           </div>
           <!-- No height attribute on the canvas: Chart.js ignores aspectRatio when the canvas carries one. -->
           <div class="chart-plate">
-            <canvas id="live-chart" role="img" aria-label="Raw counts in the latest frame for each of the ten spectral channels"></canvas>
+            <canvas id="live-chart" role="img" aria-label="Raw counts per spectral channel, latest frame"></canvas>
           </div>
         </div>
 
         <div id="live-settings" class="provenance live-settings" hidden></div>
         <p class="plan-meta">
-          Display only: raw counts are not dark-subtracted and never stored. To record a reading, use
+          Display only: not dark-subtracted, not stored. Record readings in
           <a class="text-link" href="hardware-measure.html">Measure</a>.
         </p>
       </section>
