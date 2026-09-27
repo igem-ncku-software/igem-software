@@ -412,7 +412,7 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 /* A numbered step within a page. A waiting step shows only its heading and what it waits for. */
 .step-card-head { display: flex; align-items: flex-start; gap: 14px; }
 .step-card-head > div { flex: 1; min-width: 0; }
-.step-card-head h2 { margin: 0; font-family: var(--heading-font); font-size: 1.3rem; color: var(--text); }
+.step-card-head h2, .card-title { margin: 0; font-family: var(--heading-font); font-size: 1.3rem; color: var(--text); }
 .step-card-num {
   display: grid; flex: none; width: 34px; height: 34px; place-items: center; border-radius: 50%;
   border: 2px solid var(--gold); color: var(--gold-ink); background: var(--solid); font-weight: 700;
@@ -550,6 +550,9 @@ td .chip-row { margin-top: 0; }
 .read-chart { margin-top: 16px; }
 /* Fit: a tube that keeps the fit from running (read under another config) until it is excluded. */
 tr.is-problem td { background: rgba(163, 56, 44, .07); }
+/* Save: the curve's key numbers and what it is bound to, one line each. */
+.save-facts { margin: 0; color: var(--text); font-weight: 600; }
+.save-facts + .save-facts { margin-top: 4px; }
 .read-chart .chart-note { margin-top: 0; }
 .progress { height: 10px; margin-top: 14px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }

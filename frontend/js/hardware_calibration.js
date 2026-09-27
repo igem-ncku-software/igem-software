@@ -955,15 +955,28 @@ function renderFitControls() {
   if (fitBusy) fitButton.disabled = true;
 
   const saveButton = document.getElementById("save-button");
-  saveButton.hidden = fitState !== "fitted";
-  setBlocked(saveButton, document.getElementById("save-reason"), fitState === "fitted" ? blockedSaveReason() : null);
+  saveButton.hidden = !fitted;
+  setBlocked(saveButton, document.getElementById("save-reason"), fitted ? blockedSaveReason() : null);
   if (fitBusy) saveButton.disabled = true;
 
-  const binding = document.getElementById("save-binding");
-  binding.hidden = fitState !== "fitted";
-  binding.textContent = "";
-  binding.append("Bound to config ", hwFingerprint(plan.config_fingerprint),
-    `, signal ${plan.signal}, and ${formatConditions(plan.conditions)}.`);
+  // Before saving: the numbers that define the curve, and what it is bound to.
+  document.getElementById("save-summary").hidden = !fitted;
+  if (fitted) {
+    const curve = fitCurveResult;
+    document.getElementById("save-facts").textContent =
+      `EC50 ${formatConcentration(curve.params.ec50_nM)} · LOD ${formatConcentration(curve.lod_nM)} · `
+      + `usable ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · `
+      + `${plural(fitExclusions.size, "tube")} excluded`;
+    const binding = document.getElementById("save-binding");
+    binding.textContent = "";
+    binding.append(`Strain ${plan.conditions.sensor} · Config `, hwFingerprint(plan.config_fingerprint), ` · Signal ${plan.signal}`);
+  }
+
+  // Once a curve from this run exists, the step's one way on is the next workflow step, Curves,
+  // with the reminder that the curve lives only in this browser.
+  const saved = !fitted && planCurves.length > 0;
+  document.getElementById("save-next-button").hidden = !saved;
+  document.getElementById("save-backup").hidden = !saved;
 
   const refit = document.getElementById("refit-button");
   refit.hidden = fitState !== "saved";
@@ -1008,8 +1021,7 @@ async function saveFit() {
     fitCurveResult = await HardwareApi.saveCurve(payload);
     fitState = "saved";
     planCurves = [fitCurveResult, ...planCurves];
-    setHardwareStatus(statusEl, `Saved as ${fitCurveResult.curve_id}. `, "success");
-    statusEl.appendChild(hwLink(`hardware-measure.html?curve=${encodeURIComponent(fitCurveResult.curve_id)}`, "Measure with this curve →"));
+    setHardwareStatus(statusEl, `Saved as ${fitCurveResult.curve_id}.`, "success");
     refreshRuns();
     refreshHardwareSteps();
   } catch (err) {
@@ -1018,6 +1030,8 @@ async function saveFit() {
   } finally {
     fitBusy = false;
     renderAll();
+    // Enter keeps working: after saving it moves on to Curves.
+    if (fitState === "saved") document.getElementById("save-next-button").focus();
   }
 }
 
@@ -1444,6 +1458,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("setup-next-button").addEventListener("click", goToManualEntry);
   document.getElementById("plan-next-button").addEventListener("click", goToFit);
   document.getElementById("fit-next-button").addEventListener("click", goToSave);
+  document.getElementById("save-next-button").addEventListener("click", () => { location.href = "hardware-curves.html"; });
   document.getElementById("manual-entry").addEventListener("input", updateSetupControls);
   document.getElementById("manual-entry").addEventListener("change", updateSetupControls);
   document.getElementById("manual-create-button").addEventListener("click", (event) =>
