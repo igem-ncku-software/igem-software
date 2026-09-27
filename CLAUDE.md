@@ -141,7 +141,7 @@ index.html                     entry page: linked cards + live spectrum via /api
 dose-response.html             the analysis UI
 hardware.html                  CAPTURE-Screen step 1, Instrument: readiness verdict, signal path, current configuration, one self-check read
 hardware-calibration.html      CAPTURE-Screen step 2, Calibrate: source (instrument, live status, or recorded data) → set up (conditions + standards with reading order, or date + config) → read, or enter recorded values → 4PL fit → save; saved-run list last, CSV per run
-hardware-curves.html           CAPTURE-Screen step 3, Curves: every saved curve, what it is valid for, usable or not now
+hardware-curves.html           CAPTURE-Screen step 3, Curves: every saved curve, what it is valid for, usable or not now (polled like Calibrate), and in Details the curve drawn over its run's tubes
 hardware-measure.html          CAPTURE-Screen step 4, Measure: batch = curve → blank → samples in replicate → results → export; batch list, CSV per batch
 hardware-data.html             CAPTURE-Screen, not a step: the one backup export/import; delete-all reset
 ```
