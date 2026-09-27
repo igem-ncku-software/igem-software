@@ -5,7 +5,6 @@
 //   #node-{backend,device,sensor,led} / #link-{device,stem,sensor,led}   the signal path
 //   #status-details / #status-config-body       the Current configuration table
 //   #self-check-button / #self-check-reason / #self-check-status / #self-check-result
-//   #status-log                                  the session log
 // Backing API (js/hardware_api.js): getDeviceStatus / runSelfCheck
 // The status is polled on the step bar's interval, so the page follows the device without a reload.
 // =========================================================
@@ -13,7 +12,6 @@
 // The two dark frames of one read should agree to within read noise; a larger change means the
 // light reaching the sensor changed during the read.
 const DARK_DRIFT_TOLERANCE_COUNTS = 2;
-const STATUS_LOG_LIMIT = 100;
 const POLL_SECONDS = DEVICE_STATUS_POLL_INTERVAL_MS / 1000;
 
 let instrumentStatus = null;   // the last getDeviceStatus() that succeeded, or null
@@ -21,7 +19,6 @@ let instrumentError = null;    // why the last one failed, or null
 let statusSeq = 0;             // polls overlap a self-check's refresh; only the newest one is applied
 let selfCheckRunning = false;
 let lastSelfCheck = null;      // {at: Date, problems: string[]} from this page session, or null
-let observed = null;           // what the session log last saw, to log only changes
 
 function formatCounts(value, signed = false) {
   if (!Number.isFinite(value)) return "--";
@@ -51,7 +48,6 @@ async function refreshInstrument() {
   instrumentError = error;
   renderInstrument();
   applySelfCheckBlock();
-  logChanges();
 }
 
 // Which link of the path answered last: the first one that didn't is where the problem is.
@@ -81,33 +77,37 @@ function instrumentVerdict() {
       return { tone: null, title: "Checking the instrument...", detail: "" };
     case "unreachable":
       return { tone: "error", title: "Not ready: backend not reachable",
-        detail: `It may be waking up, which can take up to a minute. Retrying every ${POLL_SECONDS} s.` };
+        detail: `May be waking up (up to a minute). Retrying every ${POLL_SECONDS} s.` };
     case "backend-error":
       return { tone: "error", title: "Not ready: backend error", detail: instrumentError.message };
     case "offline":
       return { tone: "error", title: "Not ready: CAPTURE-Screen is offline",
-        detail: `${instrumentError.lastSeen ? `Last seen ${formatAgo(instrumentError.lastSeen)}` : "Not connected since the backend started"}. Check its power and Wi-Fi.` };
+        detail: `${instrumentError.lastSeen ? `Last seen ${formatAgo(instrumentError.lastSeen)}` : "Never connected"}. Check its power and Wi-Fi.` };
     case "invalid":
       return { tone: "error", title: "Not ready: unexpected status from CAPTURE-Screen",
-        detail: "Its status message didn't validate. Check that its firmware matches this site." };
+        detail: "Status didn't validate. See the browser console for details." };
     default:
       break;
   }
   if (status.sensor_ok === false) {
     return { tone: "error", title: "Not ready: AS7341 sensor not responding",
-      detail: "Check its I2C wiring. The device reconnects it within seconds once it answers." };
+      detail: "Check the I2C wiring. It reconnects automatically within seconds." };
   }
   if (status.state === "MEASURING") {
-    return { tone: "warn", title: "Busy: a reading is in progress", detail: "Wait a few seconds for it to finish." };
+    return { tone: "warn", title: "Busy: reading in progress", detail: "Finishes in a few seconds." };
   }
   if (lastSelfCheck?.problems.length) {
     return { tone: "warn", title: "Online, but the last self-check failed",
-      detail: `${formatClockTime(lastSelfCheck.at)}: ${lastSelfCheck.problems.join("; ")}. Fix it and run the self-check again.` };
+      detail: `${capitalize(lastSelfCheck.problems.join("; "))} (${formatClockTime(lastSelfCheck.at)}). Run it again once fixed.` };
   }
   const notes = [`Config ${status.config.fingerprint}`];
-  notes.push(lastSelfCheck ? `Self-check passed ${formatClockTime(lastSelfCheck.at)}` : "No self-check in this session");
+  notes.push(lastSelfCheck ? `Self-check passed ${formatClockTime(lastSelfCheck.at)}` : "No self-check this session");
   if (status.sensor_ok === null) notes.push("Sensor health not reported by this firmware");
   return { tone: "ok", title: "Ready to measure", detail: notes.join(" · ") };
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function renderVerdict() {
@@ -186,7 +186,7 @@ function renderPath() {
   } else if (status.sensor_ok === false) {
     setNode("sensor", { text: "Not responding", tone: "error", sub: "Check the I2C wiring" });
   } else {
-    setNode("sensor", { text: "Not reported", sub: "By this firmware" });
+    setNode("sensor", { text: "Not reported", sub: "Older firmware" });
   }
   setLink("sensor", status.sensor_ok === true ? "ok" : status.sensor_ok === false ? "broken" : null);
 
@@ -222,8 +222,8 @@ function renderConfig(tbody, status) {
     ["Integration time", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`, "(ATIME + 1) × (ASTEP + 1) × 2.78 µs"],
     ["Full scale", `${formatCounts(HardwareProcessing.fullScaleCounts(config))} counts`, "min(65,535, (ATIME + 1) × (ASTEP + 1))"],
     ["Build ID", config.build_id, "Hardware and reading-path revision"],
-    ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID; every curve is bound to one"],
-    ["Device ID", status.device_id, "Name this unit reports"],
+    ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID. Every curve is bound to one"],
+    ["Device ID", status.device_id, "This unit's assigned name"],
     ["Wi-Fi signal", `${status.wifi_rssi} dBm`, "Signal strength at the device"],
     ["Uptime", formatUptime(status.uptime_ms), "Since the device last started"],
   ];
@@ -238,61 +238,6 @@ function renderConfig(tbody, status) {
     row.append(Object.assign(hwEl("th", null, label), { scope: "row" }), valueCell, hwEl("td", "spec-note", note));
     tbody.appendChild(row);
   }
-}
-
-// ---- Session log -------------------------------------------------------------------
-// Only what this page saw while open, at the moment a poll noticed it (up to one poll interval
-// late); a disconnect shorter than that is missed, but a restart still shows, because uptime drops.
-
-function addLog(text, tone = null) {
-  const list = document.getElementById("status-log");
-  const item = hwEl("li", tone ? `is-${tone}` : null);
-  item.append(hwEl("time", null, formatClockTime(new Date())), hwEl("span", null, text));
-  list.prepend(item);
-  while (list.children.length > STATUS_LOG_LIMIT) list.lastElementChild.remove();
-}
-
-const LINK_LOG = {
-  online: () => ["CAPTURE-Screen online", "ok"],
-  offline: () => ["CAPTURE-Screen offline", "error"],
-  unreachable: () => ["Backend not reachable", "error"],
-  "backend-error": () => [`Backend error: ${instrumentError.message}`, "error"],
-  invalid: () => ["Unexpected status from CAPTURE-Screen", "error"],
-};
-
-function logChanges() {
-  const link = linkState();
-  const status = instrumentStatus;
-  if (!observed) {
-    const { tone, title } = instrumentVerdict();
-    addLog(`Page opened · ${title}`, tone);
-    observed = { link, sensor: status?.sensor_ok, uptime: status?.uptime_ms, fingerprint: status?.config.fingerprint, live: liveOn(status) };
-    return;
-  }
-
-  if (link !== observed.link && LINK_LOG[link]) addLog(...LINK_LOG[link]());
-  observed.link = link;
-  if (!status) return;
-
-  // Uptime and config are compared with the last values seen online, across any offline gap.
-  if (observed.uptime !== undefined && status.uptime_ms < observed.uptime) {
-    addLog(`CAPTURE-Screen restarted (uptime ${formatUptime(status.uptime_ms)})`, "warn");
-  }
-  if (observed.fingerprint && status.config.fingerprint !== observed.fingerprint) {
-    addLog(`Config changed ${observed.fingerprint} → ${status.config.fingerprint}; curves fitted under ${observed.fingerprint} no longer apply`, "warn");
-  }
-  if (observed.sensor !== undefined && status.sensor_ok !== observed.sensor) {
-    if (status.sensor_ok === false) addLog("AS7341 stopped responding", "error");
-    else if (status.sensor_ok === true) addLog("AS7341 responding", "ok");
-  }
-  const live = liveOn(status);
-  if (observed.live !== undefined && live !== observed.live) addLog(live ? "Live on" : "Live off");
-
-  Object.assign(observed, { sensor: status.sensor_ok, uptime: status.uptime_ms, fingerprint: status.config.fingerprint, live });
-}
-
-function liveOn(status) {
-  return status ? (status.live_on ?? status.state === "LIVE") : undefined;
 }
 
 // ---- Self-check --------------------------------------------------------------
@@ -337,7 +282,6 @@ async function runSelfCheck() {
   } catch (err) {
     console.error("Self-check failed:", err);
     setHardwareStatus(statusEl, `Read failed: ${err.message}`, "error");
-    addLog(`Self-check read failed: ${err.message}`, "error");
   } finally {
     selfCheckRunning = false;
     // The block comes from a fresh status, not from how the read went: a failed read says
@@ -375,26 +319,108 @@ function selfCheckProblems(check, drift) {
   return problems;
 }
 
+function countsText(value, signed = false) {
+  return `${formatCounts(value, signed)} count${Math.abs(value) === 1 ? "" : "s"}`;
+}
+
+// The channel where fn(value) is largest, and its value.
+function peakChannel(values, fn = (value) => value) {
+  const ch = HARDWARE_CHANNELS.reduce((a, b) => (fn(values[b.key]) > fn(values[a.key]) ? b : a));
+  return { ch, value: values[ch.key] };
+}
+
+// One check as a card. verdict "pass" | "fail" is graded against a limit; null is recorded only,
+// because this reader has no measured baseline for it yet. advice shows only on a fail.
+// meter (0-1) draws a bar.
+function checkCard({ name, verdict = null, value, detail, explain, advice, meter }) {
+  const card = hwEl("div", `check-item${verdict ? ` is-${verdict}` : ""}`);
+  const [chipText, chipTone] = verdict === "pass" ? ["Pass", "ok"] : verdict === "fail" ? ["Fail", "error"] : ["No limit yet", ""];
+  const head = hwEl("div", "check-head");
+  head.append(hwEl("span", "check-name", name), hwEl("span", `flag-chip ${chipTone}`.trim(), chipText));
+  card.append(head, hwEl("p", "check-value", value));
+  if (detail) card.append(hwEl("p", "check-detail", detail));
+  if (meter !== undefined) {
+    const bar = hwEl("div", "progress");
+    const fill = hwEl("div", "progress-fill");
+    fill.style.width = `${Math.min(meter, 1) * 100}%`;
+    bar.appendChild(fill);
+    card.appendChild(bar);
+  }
+  card.append(hwEl("p", "check-explain", explain));
+  if (advice && verdict === "fail") card.append(hwEl("p", "check-advice", advice));
+  return card;
+}
+
+function strayLightCard(darkMax) {
+  const explain = "Light reaching the sensor with the LED off. A leak in the lid or housing raises it.";
+  if (!darkMax) return checkCard({ name: "Stray light", value: "--", detail: "No dark reading returned", explain });
+  const { ch, value } = peakChannel(darkMax);
+  return checkCard({ name: "Stray light", value: countsText(value), detail: `Highest dark reading · ${channelName(ch)}`, explain });
+}
+
+function stabilityCard(drift) {
+  const explain = "Change between the two dark readings. A steady reader stays near zero.";
+  if (!drift) {
+    return checkCard({ name: "Dark stability", verdict: "fail", value: "--", detail: "A dark reading is missing",
+      explain, advice: "Run the self-check again." });
+  }
+  const { ch, value } = peakChannel(drift, Math.abs);
+  return checkCard({
+    name: "Dark stability",
+    verdict: Math.abs(value) <= DARK_DRIFT_TOLERANCE_COUNTS ? "pass" : "fail",
+    value: countsText(value, true),
+    detail: `Largest change · ${channelName(ch)} · limit ±${DARK_DRIFT_TOLERANCE_COUNTS}`,
+    explain,
+    advice: "Keep the lid closed and the room light steady, then run again.",
+  });
+}
+
+function ledResponseCard(net) {
+  const explain = "Light the LED adds through the buffer. Near zero on every channel means the LED didn't light.";
+  if (!net) return checkCard({ name: "LED response", value: "--", detail: "Needs a dark reading", explain });
+  const { ch, value } = peakChannel(net);
+  return checkCard({ name: "LED response", value: countsText(value, true), detail: `Largest increase · ${channelName(ch)}`, explain });
+}
+
+// Graded by the same rule as selfCheckProblems(): a channel at full scale is saturated.
+function peakSignalCard(light, fullScale) {
+  const { ch, value } = peakChannel(light);
+  return checkCard({
+    name: "Peak signal",
+    verdict: value < fullScale ? "pass" : "fail",
+    value: formatPercent(value / fullScale),
+    detail: `${formatCounts(value)} of ${formatCounts(fullScale)} counts · ${channelName(ch)}`,
+    meter: value / fullScale,
+    explain: "The brightest channel as a share of the sensor's limit. At 100% it is saturated and can't be measured.",
+    advice: "Lower the gain (Serial command g), or check the cuvette holds buffer only.",
+  });
+}
+
 function renderSelfCheck(check, container, statusEl) {
   const darks = [check.dark_1, check.dark_2].filter(Boolean);
   const drift = darks.length === 2 ? perChannel((key) => check.dark_2[key] - check.dark_1[key]) : null;
   const net = darks.length
     ? perChannel((key) => check.light[key] - darks.reduce((sum, dark) => sum + dark[key], 0) / darks.length)
     : null;
+  const darkMax = darks.length ? perChannel((key) => Math.max(...darks.map((dark) => dark[key]))) : null;
+  const fullScale = HardwareProcessing.fullScaleCounts(check.config);
 
   const problems = selfCheckProblems(check, drift);
   lastSelfCheck = { at: new Date(check.timestamp_utc), problems };
   if (problems.length) {
-    setHardwareStatus(statusEl, `Fail: ${problems.join("; ")}.`, "error");
-    addLog(`Self-check failed: ${problems.join("; ")}`, "error");
+    setHardwareStatus(statusEl, `Failed: ${capitalize(problems.join("; "))}.`, "error");
   } else {
-    setHardwareStatus(statusEl, `Pass: dark drift within ±${DARK_DRIFT_TOLERANCE_COUNTS} counts, no saturation.`, "success");
-    addLog("Self-check passed", "ok");
+    setHardwareStatus(statusEl, "Passed: dark stability and peak signal are within limits.", "success");
   }
 
+  const grid = hwEl("div", "check-grid");
+  grid.append(strayLightCard(darkMax), stabilityCard(drift), ledResponseCard(net), peakSignalCard(check.light, fullScale));
+
+  // The full per-channel numbers stay one click away: the cards summarise, the table is the record.
   const counts = (value) => formatCounts(value);
-  container.replaceChildren(
-    hwEl("h3", "subsection-heading", `Result · ${formatLocalTime(check.timestamp_utc)}`),
+  const raw = hwEl("details", "raw-details");
+  raw.append(
+    hwEl("summary", null, "Raw counts per channel"),
     renderChannelTable("Raw counts", [
       { label: "Dark 1", values: check.dark_1, format: counts },
       { label: "Light", values: check.light, format: counts },
@@ -402,6 +428,13 @@ function renderSelfCheck(check, container, statusEl) {
       { label: "Dark drift", values: drift, format: (value) => formatCounts(value, true) },
       { label: "Light − dark", values: net, format: counts },
     ]),
+  );
+
+  container.replaceChildren(
+    hwEl("h3", "subsection-heading", `Result · ${formatLocalTime(check.timestamp_utc)}`),
+    grid,
+    hwEl("p", "check-note", "Stray light and LED response are recorded without a limit until this reader's normal values have been measured."),
+    raw,
   );
   container.hidden = false;
 }

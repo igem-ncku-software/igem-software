@@ -85,7 +85,16 @@
 
       <section class="card">
         <p class="section-label">Self-check</p>
-        <p class="section-description">Buffer-only cuvette, lid closed. Nothing is saved.</p>
+        <p class="section-description">
+          Checks the reader before you calibrate or measure: stray light, dark stability, LED response, and peak signal.
+          Takes a few seconds. Nothing is saved.
+        </p>
+
+        <ol class="procedure">
+          <li><strong>Insert a cuvette of buffer only.</strong> No cells or AHL, so the reading reflects the reader, not a sample.</li>
+          <li><strong>Close the lid.</strong> Room light reaching the sensor would show up as stray light.</li>
+          <li><strong>Run the self-check.</strong> The reader takes a dark reading, one with the LED on, and a second dark reading.</li>
+        </ol>
 
         <div class="button-row">
           <button type="button" id="self-check-button" disabled>Run self-check</button>
@@ -94,12 +103,6 @@
 
         <p class="status-message" id="self-check-status" aria-live="polite"></p>
         <div class="result-block" id="self-check-result" hidden></div>
-      </section>
-
-      <section class="card">
-        <p class="section-label">Session log</p>
-        <p class="section-description">Changes seen while this page is open, newest first. Not saved.</p>
-        <ol class="hw-log" id="status-log"></ol>
       </section>
 
       <div id="hardware-next" data-next="calibration"></div>
