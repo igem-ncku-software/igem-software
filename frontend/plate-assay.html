@@ -87,6 +87,64 @@
               F and OD of each replicate come from the same well. Medium blank: medium only, no cells;
               its mean F and OD are subtracted from every well before dividing.
             </p>
+
+            <!-- Import from a plate: the 8 x 12 block any reader exports, marked well by well, then
+                 turned into the table below (js/plate_layout.js). -->
+            <details class="plate-import" id="plate-import">
+              <summary>Import from a plate (8 &times; 12)</summary>
+              <p class="plan-meta">Paste the plate as the reader exports it, with or without row letters and column numbers.</p>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="plate-f">Fluorescence plate</label>
+                  <textarea id="plate-f" rows="4" spellcheck="false" autocomplete="off"></textarea>
+                </div>
+                <div class="field" id="plate-od-field" hidden>
+                  <label for="plate-od">OD600 plate</label>
+                  <textarea id="plate-od" rows="4" spellcheck="false" autocomplete="off"></textarea>
+                </div>
+              </div>
+              <p class="status-message" id="plate-parse-status" aria-live="polite"></p>
+
+              <h3 class="subsection-heading table-heading">Mark the wells</h3>
+              <p class="chart-note">Select wells (click, Shift-click for a range, or a row or column header), then mark them. Wells marked alike are replicates.</p>
+              <div class="table-wrapper">
+                <table class="plate-grid" id="plate-grid"></table>
+              </div>
+
+              <div class="form-grid plate-mark">
+                <div class="field">
+                  <label for="plate-role">Mark as</label>
+                  <select id="plate-role">
+                    <option value="standard">Standard</option>
+                    <option value="sample">Sample</option>
+                    <option value="medium">Medium blank</option>
+                    <option value="clear">Not used</option>
+                  </select>
+                </div>
+                <div class="field" id="plate-conc-field">
+                  <label for="plate-conc">Concentration (nM)</label>
+                  <input type="text" id="plate-conc" inputmode="decimal" autocomplete="off" placeholder="0 for blanks" />
+                </div>
+                <div class="field" id="plate-name-field" hidden>
+                  <label for="plate-name">Sample name</label>
+                  <input type="text" id="plate-name" autocomplete="off" />
+                </div>
+                <div class="field" id="plate-dilution-field" hidden>
+                  <label for="plate-dilution">Dilution</label>
+                  <input type="text" id="plate-dilution" inputmode="decimal" autocomplete="off" value="1" />
+                </div>
+              </div>
+              <div class="button-row">
+                <button type="button" id="plate-mark-button">Mark</button>
+                <button type="button" class="btn-secondary" id="plate-clear-selection">Clear selection</button>
+              </div>
+              <p class="blocked-reason" id="plate-mark-reason" hidden></p>
+
+              <p class="plan-meta" id="plate-marked"></p>
+              <button type="button" id="plate-fill-button">Fill the table (replaces it)</button>
+              <p class="blocked-reason" id="plate-fill-reason" hidden></p>
+              <p class="status-message" id="plate-fill-status" aria-live="polite"></p>
+            </details>
             <div class="table-wrapper table-spaced">
               <table class="manual-table assay-table">
                 <thead id="entry-head"></thead>
@@ -104,9 +162,7 @@
             <p class="status-message" id="entry-status" aria-live="polite"></p>
           </fieldset>
 
-          <div class="button-row">
-            <button type="button" id="data-next">Next: fit the curve &darr;</button>
-          </div>
+          <!-- What is still missing before step 2 opens, all at once. -->
           <p class="blocked-reason" id="data-reason" hidden></p>
         </div>
       </section>
@@ -149,7 +205,6 @@
 
           <div class="button-row table-spaced">
             <button type="button" id="fit-button">Fit</button>
-            <button type="button" id="fit-next-button" hidden>Next: see the results &darr;</button>
           </div>
           <p class="blocked-reason" id="fit-reason" hidden></p>
           <p class="status-message" id="fit-status" aria-live="polite"></p>
@@ -259,6 +314,7 @@
   <script src="js/config.js"></script>
   <script src="js/curve_fit.js"></script>
   <script src="js/plate_assay.js"></script>
+  <script src="js/plate_layout.js"></script>
   <script src="js/backend_status.js"></script>
 </body>
 </html>

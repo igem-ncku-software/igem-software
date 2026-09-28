@@ -27,8 +27,11 @@ const ASSAY_FIXED_COLUMNS = ["role", "key", "dilution"];
 
 let repCount = ASSAY_START_REPS;
 let odMode = false;              // signal = F/OD600, each less the medium blank; false = F as entered
-// { id, role: "standard" | "sample" | "medium", key, dilution, reps: [F text], ods: [OD text] }, cells
-// as typed. ods is kept while OD normalization is off, so switching back and forth loses nothing.
+// { id, role: "standard" | "sample" | "medium", key, dilution, reps: [F text], ods: [OD text],
+// wells: [well id] }, cells as typed. ods is kept while OD normalization is off, so switching back
+// and forth loses nothing. wells holds "B3" for a replicate filled from the plate import
+// (js/plate_layout.js) and "" otherwise; editing that replicate's value clears it, since the
+// value is then no longer the plate's.
 const rows = [];
 let nextRowId = 1;
 const exclusions = new Map();    // reading id "rowId:rep" -> reason; present once ticked, reason may be empty
@@ -121,7 +124,10 @@ function parseNumber(text) {
 }
 
 function newRow(role) {
-  return { id: nextRowId++, role, key: "", dilution: "1", reps: Array(repCount).fill(""), ods: Array(repCount).fill("") };
+  return {
+    id: nextRowId++, role, key: "", dilution: "1",
+    reps: Array(repCount).fill(""), ods: Array(repCount).fill(""), wells: Array(repCount).fill(""),
+  };
 }
 
 function isBlankText(text) {
@@ -336,7 +342,7 @@ function addRow(role) {
 function setRepCount(count) {
   repCount = Math.min(ASSAY_MAX_REPS, Math.max(ASSAY_MIN_REPS, count));
   for (const row of rows) {
-    for (const field of ["reps", "ods"]) {
+    for (const field of ["reps", "ods", "wells"]) {
       row[field] = row[field].slice(0, repCount);
       while (row[field].length < repCount) row[field].push("");
     }
@@ -383,8 +389,10 @@ function pasteBlock(startRow, startCol, text) {
         row.dilution = text;
       } else if (value < repCount) {
         row.reps[value] = text;
+        row.wells[value] = "";
       } else if (odMode && value < 2 * repCount) {
         row.ods[value - repCount] = text;
+        row.wells[value - repCount] = "";
       }
     });
   });
@@ -416,8 +424,12 @@ function cellInput(row, rowIndex, col, field, label) {
   const store = valueCell ? row[valueCell[1] === "rep" ? "reps" : "ods"] : null;
   const read = () => (valueCell ? store[Number(valueCell[2])] : row[field]);
   const write = (value) => {
-    if (valueCell) store[Number(valueCell[2])] = value;
-    else row[field] = value;
+    if (valueCell) {
+      store[Number(valueCell[2])] = value;
+      row.wells[Number(valueCell[2])] = "";
+    } else {
+      row[field] = value;
+    }
   };
   input.value = read();
 
@@ -573,12 +585,12 @@ function setOdMode(on) {
   dataChanged(true);
 }
 
-function goToFit() {
-  document.getElementById("fit-card").scrollIntoView({ behavior: "smooth", block: "start" });
-  document.getElementById("fit-button").focus({ preventScroll: true });
-}
-
 // ---- 2. Fit --------------------------------------------------------------------
+
+// A reading by its well when it came from the plate import, else by its place in the table.
+function readingLabel(row, rep) {
+  return row.wells[rep] || `Row ${rows.indexOf(row) + 1} · Rep ${rep + 1}`;
+}
 
 function isExcluded(reading) {
   return exclusions.has(reading.id);
@@ -617,7 +629,6 @@ function runFit() {
     setStatus(statusEl, `Fit failed: ${err.message}`, "error");
   }
   renderDerived();
-  if (fit) document.getElementById("fit-next-button").focus();
 }
 
 function toggleExclusion(id, checked) {
@@ -643,7 +654,7 @@ function renderFitTable() {
 
     group.readings.forEach((reading, index) => {
       const excluded = isExcluded(reading);
-      const label = `Row ${rows.indexOf(reading.row) + 1} · Rep ${reading.rep + 1}`;
+      const label = readingLabel(reading.row, reading.rep);
       const tr = el("tr");
       tr.classList.toggle("is-excluded", excluded);
       if (index === 0) {
@@ -918,7 +929,7 @@ function fileStem() {
 const CSV_HEADERS = [
   "date", "strain", "signal", "instrument", "notes",
   "normalization", "medium_f_mean", "medium_od_mean",
-  "row", "role", "concentration_nM", "sample", "dilution", "replicate", "fluorescence", "od600", "signal", "excluded_reason",
+  "row", "role", "concentration_nM", "sample", "dilution", "replicate", "well", "fluorescence", "od600", "signal", "excluded_reason",
   "model", "fitted_at", "top", "bottom", "ec50_nM", "hill", "lod_nM", "loq_nM", "range_min_nM", "range_max_nM", "rmse",
   "sample_n", "sample_mean", "sample_sd", "status", "ahl_well_nM", "ci95_well_low_nM", "ci95_well_high_nM",
   "ahl_sample_nM", "ci95_sample_low_nM", "ci95_sample_high_nM",
@@ -950,7 +961,7 @@ function csvRows() {
         info.date, info.strain, info.signal, info.instrument, info.notes,
         ...normalization,
         i + 1, row.role, standard ? parseNumber(row.key) : null, sample ? row.key.trim() : null,
-        sample ? result.dilution : null, rep + 1, f, odMode ? parseNumber(row.ods[rep]) : null,
+        sample ? result.dilution : null, rep + 1, row.wells[rep] || null, f, odMode ? parseNumber(row.ods[rep]) : null,
         row.role === "medium" ? null : signals.get(rep) ?? null,
         standard ? exclusions.get(readingId(row, rep)) ?? null : null,
         ...curve,
@@ -993,13 +1004,12 @@ function exportPng() {
 
 function renderControls() {
   const problems = dataProblems();
-  const dataReason = problems.join(" ");
-  setBlocked(document.getElementById("data-next"), document.getElementById("data-reason"), dataReason);
+  const dataReason = document.getElementById("data-reason");
+  dataReason.textContent = problems.join(" ");
+  dataReason.hidden = problems.length === 0;
 
-  const fitButton = document.getElementById("fit-button");
-  fitButton.hidden = Boolean(fit);
-  document.getElementById("fit-next-button").hidden = !fit;
-  setBlocked(fitButton, document.getElementById("fit-reason"), fit ? null : blockedFitReason());
+  // Stays in place once fitted, disabled with the reason ("Already fitted…").
+  setBlocked(document.getElementById("fit-button"), document.getElementById("fit-reason"), blockedFitReason());
 
   // Step 1 incomplete (even with a fit, e.g. the strain cleared afterwards) holds every later step,
   // so nothing is shown or exported without the experiment it belongs to.
@@ -1045,11 +1055,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   document.getElementById("add-rep").addEventListener("click", () => setRepCount(repCount + 1));
   document.getElementById("remove-rep").addEventListener("click", () => setRepCount(repCount - 1));
-  document.getElementById("data-next").addEventListener("click", goToFit);
   document.getElementById("fit-button").addEventListener("click", runFit);
-  document.getElementById("fit-next-button").addEventListener("click", () => {
-    document.getElementById("results-card").scrollIntoView({ behavior: "smooth", block: "start" });
-  });
   document.getElementById("export-csv").addEventListener("click", exportCsv);
   document.getElementById("export-png").addEventListener("click", exportPng);
 

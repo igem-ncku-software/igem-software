@@ -103,7 +103,7 @@ flowchart LR
 ```
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
-├── plate-assay.html          plate reader assay: enter standards and samples, fit, infer, export
+├── plate-assay.html          plate reader assay: enter or import from a plate, fit, infer, export
 ├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-check
 ├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
 ├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
@@ -111,7 +111,7 @@ frontend/                     plain static site, no framework, no build step
 ├── hardware-data.html        CAPTURE-Screen: backup, restore, reset
 ├── config/unmix_basis.json   which sensor channel is the fluorescence signal (placeholder until measured)
 ├── css/style.css
-└── js/                       config / curve_fit / plate_assay / backend_status / device_live
+└── js/                       config / curve_fit / plate_assay / plate_layout / backend_status / device_live
                               hardware_processing → hardware_local → hardware_api → hardware_common → each page's script
 
 backend/                      FastAPI
@@ -191,7 +191,7 @@ That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js).
 
 Put the AHL standards (including blanks: cells, no AHL) and the samples on the same plate, and read them together. One curve serves only the readings entered with it, since a plate reader's signal scale changes with the instrument, gain and day.
 
-1. **Enter data.** Fill in the date, biosensor strain and signal, then one row per standard concentration (0 nM for blanks) or sample, with up to six replicates each. Type the values, or paste a block from Excel into any cell. A sample carries its dilution before reading. To normalize to cell density, choose *Fluorescence ÷ OD600*: each replicate then takes the F and OD600 of one well, and a *Medium blank* row (medium only, no cells) supplies the background subtracted from both before dividing.
+1. **Enter data.** Fill in the date, biosensor strain and signal, then one row per standard concentration (0 nM for blanks) or sample, with up to six replicates each. Type the values, paste a block from Excel into any cell, or use *Import from a plate*: paste the 8 × 12 plate as the reader exports it, mark the wells on the plate map, and fill the table. A sample carries its dilution before reading. To normalize to cell density, choose *Fluorescence ÷ OD600*: each replicate then takes the F and OD600 of one well, and a *Medium blank* row (medium only, no cells) supplies the background subtracted from both before dividing.
 2. **Fit.** Review the standards, exclude a reading with a reason if needed, and fit the 4PL. At least 4 non-zero concentrations and 2 blank readings are required.
 3. **Results.** Each sample's replicates are averaged and converted once: AHL in the well with a 95% CI, and in the original sample (× dilution). Outside the usable range only the bound is shown.
 4. **Export.** A CSV with every reading, the curve and each sample's result, and the curve as a PNG. Nothing is stored, so export before leaving the page.

@@ -247,7 +247,6 @@ function updateSetupControls() {
   document.getElementById("device-fields").hidden = manual;
   document.getElementById("manual-fields").hidden = !manual;
   document.getElementById("setup-create-button").hidden = manual;
-  document.getElementById("setup-next-button").hidden = !manual;
 
   let problem = conditionsProblem(setupConditions());
   if (!manual) {
@@ -264,8 +263,11 @@ function updateSetupControls() {
   } else {
     const manualState = updateManualControls();
     problem = problem ?? manualState.setup;
-    const next = document.getElementById("setup-next-button");
-    setBlocked(next, document.getElementById("setup-create-reason"), problem);
+    // No button ends Set up for recorded data: step 3 opens once nothing is missing, and until then
+    // the missing piece is said here, where Create run's reason would be.
+    const reasonEl = document.getElementById("setup-create-reason");
+    reasonEl.textContent = problem ?? "";
+    reasonEl.hidden = !problem;
     setStepCard(setupCard, problem ? "current" : "done");
     setStepCard(readCard, problem ? "waiting" : "current", problem ? `Complete Set up first: ${problem}` : null);
     const button = document.getElementById("manual-create-button");
@@ -306,18 +308,8 @@ async function showSetup(errorText) {
 // An instrument run is created from step 2's form, recorded data from step 3's Create run.
 async function createFromSetup(event) {
   event.preventDefault();
-  if (setupSource() !== "device") {
-    // Enter in a step-2 field: for recorded data that means on to step 3, when Set up allows it.
-    if (!document.getElementById("setup-next-button").disabled) goToManualEntry();
-    return;
-  }
+  if (setupSource() !== "device") return; // recorded data is created from step 3's Create run
   await createRun(document.getElementById("setup-create-button"), document.getElementById("setup-status"));
-}
-
-// Set up is complete for recorded data: bring step 3 into view with the cursor in the first value.
-function goToManualEntry() {
-  document.querySelector('[data-manual-signal="0"]')?.focus({ preventScroll: true });
-  document.getElementById("read-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function createRun(button, statusEl) {
@@ -466,12 +458,6 @@ function renderReadChart() {
   });
 }
 
-// Every tube is read: step 3 is done, so its button moves on to Fit.
-function goToFit() {
-  document.getElementById("fit-button").focus({ preventScroll: true });
-  document.getElementById("fit-card").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 function renderRead() {
   const manual = plan.source === "manual";
   const total = plan.items.length;
@@ -511,11 +497,9 @@ function renderRead() {
     document.getElementById("plan-progress-text").textContent = `${read} / ${total} read (${formatPercent(read / total)})`;
 
     const readButton = document.getElementById("plan-read-button");
-    const nextButton = document.getElementById("plan-next-button");
     const reasonEl = document.getElementById("plan-read-reason");
     readButton.textContent = target ? `Read ${target.label}` : "Read";
     readButton.hidden = !target;
-    nextButton.hidden = Boolean(target);
     if (target) {
       setBlocked(readButton, reasonEl, readBlockReason());
     } else {
@@ -620,8 +604,8 @@ async function readPlanTarget() {
     // Keeps the run list's progress column from contradicting the run card right above it.
     refreshRuns();
     if (planComplete(plan)) refreshHardwareSteps();
-    // Enter keeps working: it reads the next tube, or after the last one moves on to Fit.
-    document.getElementById(targetItem() ? "plan-read-button" : "plan-next-button").focus();
+    // Enter keeps working: it reads the next tube.
+    if (targetItem()) document.getElementById("plan-read-button").focus();
   }
 }
 
@@ -940,14 +924,7 @@ async function runFit() {
   } finally {
     fitBusy = false;
     renderAll();
-    // Enter keeps working: after a fit it moves on to Save.
-    if (fitState === "fitted") document.getElementById("fit-next-button").focus();
   }
-}
-
-function goToSave() {
-  document.getElementById("save-button").focus({ preventScroll: true });
-  document.getElementById("save-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---- 5. Save ---------------------------------------------------------
@@ -964,9 +941,8 @@ function blockedSaveReason() {
 function renderFitControls() {
   const fitButton = document.getElementById("fit-button");
   const fitted = fitState === "fitted";
-  fitButton.hidden = fitted;
-  document.getElementById("fit-next-button").hidden = !fitted;
-  setBlocked(fitButton, document.getElementById("fit-reason"), fitted ? null : blockedFitReason());
+  // Stays in place once fitted, disabled with the reason ("Already fitted…"), rather than giving way to anything.
+  setBlocked(fitButton, document.getElementById("fit-reason"), blockedFitReason());
   if (fitBusy) fitButton.disabled = true;
 
   const saveButton = document.getElementById("save-button");
@@ -1466,9 +1442,6 @@ document.addEventListener("DOMContentLoaded", () => {
     updateSetupControls();
   });
   document.getElementById("manual-add-row").addEventListener("click", addManualRow);
-  document.getElementById("setup-next-button").addEventListener("click", goToManualEntry);
-  document.getElementById("plan-next-button").addEventListener("click", goToFit);
-  document.getElementById("fit-next-button").addEventListener("click", goToSave);
   document.getElementById("manual-entry").addEventListener("input", updateSetupControls);
   document.getElementById("manual-entry").addEventListener("change", updateSetupControls);
   document.getElementById("manual-create-button").addEventListener("click", (event) =>
