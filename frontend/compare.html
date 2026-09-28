@@ -119,7 +119,7 @@
             <div class="sensor-stat">
               <span class="sensor-stat-label">95% limits of agreement</span>
               <span class="sensor-stat-value" id="stat-loa">--</span>
-              <span class="sensor-stat-sub">Ratio, Bland–Altman on log scale</span>
+              <span class="sensor-stat-sub" id="stat-loa-sub">Ratio, Bland–Altman on log scale</span>
             </div>
             <div class="sensor-stat">
               <span class="sensor-stat-label">95% CIs overlap</span>
@@ -150,7 +150,7 @@
           <h3 class="subsection-heading table-heading">Plot</h3>
           <p class="chart-note">Log axes, AHL in sample. Bars: 95% CIs. Dashed line: perfect agreement (y = x). Only pairs with a number on both sides.</p>
           <div class="chart-plate">
-            <canvas id="compare-chart"></canvas>
+            <canvas id="compare-chart" role="img" aria-label="AHL inferred on CAPTURE-Screen against the plate reader, log axes, with 95% CIs and the line y = x"></canvas>
           </div>
         </div>
       </section>

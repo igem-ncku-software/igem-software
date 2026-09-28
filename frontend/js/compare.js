@@ -112,16 +112,37 @@ function requireColumns(header, columns, what) {
 
 const num = (text) => (text === "" || text === undefined ? NaN : Number(text));
 
-// One side's samples keyed by name, case-insensitive: the first row per name, since a CSV repeats
-// a sample's result on every replicate row.
+// A result marked "ok" must carry a usable number and CI, or one bad row (a hand-edited CSV) would
+// turn every statistic into NaN. Returns why it can't be compared, or null.
+function resultProblem(s) {
+  if (s.status !== "ok") return null;
+  const [lo, hi] = s.ci ?? [NaN, NaN];
+  if (!(s.nM > 0) || !(lo > 0) || !(hi >= lo)) return "marked ok, but its concentration or 95% CI is missing or invalid";
+  return null;
+}
+
+// One side's samples keyed by name, case-insensitive, and everything that side can't compare.
+// A CSV repeats a sample's result on every replicate row, so the first row per exact name is the
+// sample. Two names differing only in case are two samples to Measure but one to this page, so
+// the second is reported, never dropped silently; so is a result with no usable number.
 function sampleMap(entries) {
   const samples = new Map();
-  for (const s of entries) {
-    const key = s.name.trim().toLowerCase();
-    if (!key || samples.has(key)) continue;
-    samples.set(key, s);
+  const seen = new Set();
+  const problems = [];
+  for (const entry of entries) {
+    const name = entry.name.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const key = name.toLowerCase();
+    if (samples.has(key)) {
+      problems.push(`“${name}” and “${samples.get(key).name}” differ only in case; only “${samples.get(key).name}” is compared.`);
+      continue;
+    }
+    const problem = resultProblem(entry);
+    if (problem) problems.push(`“${name}” is ${problem}; not compared.`);
+    samples.set(key, problem ? { ...entry, status: "invalid", nM: null, ci: null } : { ...entry, name });
   }
-  return samples;
+  return { samples, problems };
 }
 
 function readPlateCsv(text, filename) {
@@ -131,7 +152,7 @@ function readPlateCsv(text, filename) {
   const sampleRows = records.filter((r) => r.role === "sample");
   if (!records.length) throw new Error("The file has no readings.");
   const first = records[0];
-  const samples = sampleMap(sampleRows.map((r) => {
+  const { samples, problems } = sampleMap(sampleRows.map((r) => {
     const dilution = num(r.dilution);
     return {
       name: r.sample,
@@ -156,6 +177,7 @@ function readPlateCsv(text, filename) {
       ],
     },
     samples,
+    problems,
   };
 }
 
@@ -165,7 +187,7 @@ function readBatchCsv(text, filename) {
     "ci95_low_nM", "ci95_high_nM", "curve_range_min_nM", "curve_range_max_nM"], "a CAPTURE-Screen batch CSV");
   if (!records.length) throw new Error("The file has no tubes.");
   const first = records[0];
-  const samples = sampleMap(records.filter((r) => r.role === "sample").map((r) => ({
+  const { samples, problems } = sampleMap(records.filter((r) => r.role === "sample").map((r) => ({
     name: r.sample_name,
     n: num(r.group_n),
     status: r.estimate_status,
@@ -180,11 +202,12 @@ function readBatchCsv(text, filename) {
       rows: [["File", filename], ["Batch", first.batch_id], ["Strain", first.sensor || "--"], ["Samples", String(samples.size)]],
     },
     samples,
+    problems,
   };
 }
 
 function readBatch(batch) {
-  const samples = sampleMap(batch.samples.map((s) => ({
+  const { samples, problems } = sampleMap(batch.samples.map((s) => ({
     name: s.name,
     n: s.estimate.n,
     status: s.estimate.status,
@@ -206,7 +229,15 @@ function readBatch(batch) {
       ],
     },
     samples,
+    // 3: an unfinished batch can still gain tubes, so what is compared now may change.
+    problems: batch.finished_at ? problems : ["The batch isn't finished; its results can still change.", ...problems],
   };
+}
+
+function sideStatus(statusEl, side, source) {
+  const read = `Read ${plural(side.samples.size, "sample")} from ${source}.`;
+  if (side.problems.length) setStatus(statusEl, `${read} ${side.problems.join(" ")}`, "warn");
+  else setStatus(statusEl, read, "success");
 }
 
 function renderSummary(tbodyId, side) {
@@ -227,7 +258,7 @@ async function loadFile(input, reader, assign, statusEl, summaryId) {
   try {
     const side = reader(await file.text(), file.name);
     assign(side);
-    setStatus(statusEl, `Read ${plural(side.samples.size, "sample")} from ${file.name}.`, "success");
+    sideStatus(statusEl, side, file.name);
   } catch (err) {
     assign(null);
     setStatus(statusEl, `Could not read ${file.name}: ${err.message}`, "error");
@@ -247,7 +278,7 @@ async function loadBatchChoice() {
     document.getElementById("batch-file").value = "";
     try {
       deviceSide = readBatch(await HardwareApi.getBatch(id));
-      setStatus(statusEl, `Read ${plural(deviceSide.samples.size, "sample")} from ${id}.`, "success");
+      sideStatus(statusEl, deviceSide, id);
     } catch (err) {
       deviceSide = null;
       setStatus(statusEl, `Could not read ${id}: ${err.message}`, "error");
@@ -330,6 +361,7 @@ function formatSide(s) {
   if (s.status === "ok") return formatConcentration(s.nM);
   if (s.status === "below_lod") return `< ${formatConcentration(s.range.min)}`;
   if (s.status === "above_range") return `> ${formatConcentration(s.range.max)}`;
+  if (s.status === "invalid") return "Invalid";
   return "No result";
 }
 
@@ -345,6 +377,9 @@ function renderComparison() {
     warnings.push(`Different strains: ${plateSide.info.strain} (plate reader), ${deviceSide.info.strain} (CAPTURE-Screen). The comparison assumes one biosensor.`);
   }
   if (!all.some((p) => p.plate && p.device)) warnings.push("No sample name appears on both sides. Samples are paired by name.");
+  for (const [side, label] of [[plateSide, "Plate reader"], [deviceSide, "CAPTURE-Screen"]]) {
+    for (const problem of side.problems) warnings.push(`${label}: ${problem}`);
+  }
   const warningEl = document.getElementById("compare-warning");
   setStatus(warningEl, warnings.join(" "), "warn");
   warningEl.hidden = warnings.length === 0;
@@ -353,6 +388,7 @@ function renderComparison() {
   set("stat-pairs-sub", `of ${plural(all.length, "sample")}; a number on both sides`);
   set("stat-ratio", stats ? formatRatio(stats.gmr) : "--");
   set("stat-loa", stats?.loa ? `${formatRatio(stats.loa[0])} – ${formatRatio(stats.loa[1])}` : "--");
+  set("stat-loa-sub", stats?.n === 2 ? "Rough: only 2 pairs" : "Ratio, Bland–Altman on log scale");
   set("stat-overlap", stats ? `${stats.overlap} / ${stats.n}` : "--");
   set("stat-overlap-sub", stats && !stats.loa ? "Limits need at least 2 pairs" : "pairs");
 
@@ -428,7 +464,8 @@ function renderChart(compared) {
   }));
   const values = points.flatMap((p) => [p.xLo, p.xHi, p.yLo, p.yHi]).filter((v) => v > 0);
   const lo = values.length ? 10 ** Math.floor(Math.log10(Math.min(...values))) : 1;
-  const hi = values.length ? 10 ** Math.ceil(Math.log10(Math.max(...values))) : 1000;
+  let hi = values.length ? 10 ** Math.ceil(Math.log10(Math.max(...values))) : 1000;
+  if (!(hi > lo)) hi = lo * 10; // every value exactly one power of ten: keep a decade of axis
 
   compareChart = new Chart(document.getElementById("compare-chart"), {
     type: "scatter",
@@ -474,6 +511,13 @@ function renderChart(compared) {
 
 // ---- Export ---------------------------------------------------------------------------
 
+// Today as YYYY-MM-DD in local time, not UTC, which in Taiwan is still yesterday until 08:00.
+function localDate() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const link = el("a");
@@ -507,8 +551,7 @@ function exportCsv() {
     p.ratio, p.overlap, stats?.n ?? 0, stats?.gmr, stats?.loa?.[0], stats?.loa?.[1],
   ]);
   const text = [CSV_HEADERS, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const stamp = new Date().toISOString().slice(0, 10);
-  const name = `cross-validation-${stamp}.csv`;
+  const name = `cross-validation-${localDate()}.csv`;
   downloadBlob(name, new Blob([`﻿${text}\r\n`], { type: "text/csv;charset=utf-8" }));
   exported = true;
   setStatus(document.getElementById("export-status"), `Exported ${name}.`, "success");
@@ -524,7 +567,7 @@ function exportPng() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(source, 0, 0);
-  const name = `cross-validation-${new Date().toISOString().slice(0, 10)}.png`;
+  const name = `cross-validation-${localDate()}.png`;
   canvas.toBlob((blob) => {
     downloadBlob(name, blob);
     setStatus(document.getElementById("export-status"), `Exported ${name}.`, "success");
