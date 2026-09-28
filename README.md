@@ -38,6 +38,7 @@
 Many synthetic-biology biosensors report a signal molecule, here the quorum-sensing molecule AHL, by expressing a fluorescent protein. Turning that fluorescence into a number you can trust takes more than reading a value: backgrounds must be subtracted, replicates combined, a standard curve fitted, and its limits respected. LasReader packages those steps into two web tools that any team can open in a browser, with nothing to install:
 
 - **Plate reader assay.** AHL standards and samples read together on any plate reader, typed or pasted into one table: a weighted 4PL standard curve fitted from the standards, and each sample's inferred AHL with a 95% CI, scaled by its dilution. Computed in the browser, nothing stored; the CSV is the record.
+- **Cross-Validation.** The same samples inferred on a plate reader and on CAPTURE-Screen, paired by name: a table, a log-log plot against y = x, the geometric mean ratio and Bland–Altman 95% limits of agreement. The evidence that the team's reader agrees with a commercial one.
 - **CAPTURE-Screen interface.** CAPTURE-Screen is the team's low-cost fluorescence reader (ESP32 + AS7341 spectral sensor). Once the device powers on and joins Wi-Fi it connects to the backend by itself. The landing page then shows all ten spectral channels live, and four pages, used in order, guide you through:
   1. checking the instrument;
   2. calibrating it tube by tube with a weighted 4PL fit;
@@ -76,10 +77,13 @@ flowchart LR
     subgraph FE["frontend/ — static site (GitHub Pages)"]
         IDX["index.html<br/>entry page + live spectrum"]
         PA["plate-assay.html<br/>plate reader assay"]
+        CMP["compare.html<br/>cross-validation"]
         CF["js/curve_fit.js<br/>shared 4PL fit & inversion"]
         HW["hardware*.html<br/>CAPTURE-Screen, four steps + Data"]
         LOCAL["js/hardware_local.js<br/>runs, curves & batches (localStorage)"]
         IDX --> PA
+        IDX --> CMP
+        CMP --> LOCAL
         IDX --> HW
         HW --> LOCAL
         PA --> CF
@@ -104,6 +108,7 @@ flowchart LR
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
 ├── plate-assay.html          plate reader assay: enter or import from a plate, fit, infer, export
+├── compare.html              cross-validation: plate reader vs CAPTURE-Screen, same samples
 ├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-check
 ├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
 ├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
@@ -111,7 +116,7 @@ frontend/                     plain static site, no framework, no build step
 ├── hardware-data.html        CAPTURE-Screen: backup, restore, reset
 ├── config/unmix_basis.json   which sensor channel is the fluorescence signal (placeholder until measured)
 ├── css/style.css
-└── js/                       config / curve_fit / plate_assay / plate_layout / backend_status / device_live
+└── js/                       config / curve_fit / plate_assay / plate_layout / compare / backend_status / device_live
                               hardware_processing → hardware_local → hardware_api → hardware_common → each page's script
 
 backend/                      FastAPI
@@ -195,6 +200,15 @@ Put the AHL standards (including blanks: cells, no AHL) and the samples on the s
 2. **Fit.** Review the standards, exclude a reading with a reason if needed, and fit the 4PL. At least 4 non-zero concentrations and 2 blank readings are required.
 3. **Results.** Each sample's replicates are averaged and converted once: AHL in the well with a 95% CI, and in the original sample (× dilution). Outside the usable range only the bound is shown.
 4. **Export.** A CSV with every reading, the curve and each sample's result, and the curve as a PNG. Nothing is stored, so export before leaving the page.
+
+### Cross-Validation
+
+Measure the same samples on a plate reader (Plate Reader Assay) and on CAPTURE-Screen (Measure), with the same sample names on both.
+
+1. **Plate reader.** Load the CSV exported by the Plate Reader Assay.
+2. **CAPTURE-Screen.** Choose a batch kept in this browser, or load a batch CSV; enter its dilution if the samples were diluted before reading.
+3. **Comparison.** Samples are paired by name. Pairs with a number on both sides give the geometric mean ratio (CAPTURE-Screen ÷ plate reader), the 95% limits of agreement, and how many 95% CIs overlap; values outside a curve's range are listed but not compared.
+4. **Export.** The comparison as CSV and the plot as PNG.
 
 ### CAPTURE-Screen
 

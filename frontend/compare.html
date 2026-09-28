@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross-Validation · LasReader</title>
+  <meta name="description" content="Compare the AHL inferred for the same samples on a plate reader and on CAPTURE-Screen." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="assets/images/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="back-link" href="index.html">&larr; Back to overview</a>
+      <div class="site-header-row">
+        <div class="site-header-text">
+          <p class="eyebrow">iGEM NCKU-Tainan 2026 · Capture</p>
+          <h1>Cross-Validation</h1>
+          <p class="subtitle">The same samples, inferred on a plate reader and on CAPTURE-Screen</p>
+        </div>
+        <img class="site-logo" src="assets/images/logo-wordmark.png"
+             alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
+      </div>
+    </header>
+
+    <!-- Reads a Plate Reader Assay CSV and a CAPTURE-Screen batch (from this browser or its CSV),
+         pairs the samples by name and compares the two inferred concentrations. Nothing is stored. -->
+    <main>
+      <!-- 1. Plate reader: the CSV the Plate Reader Assay exported. -->
+      <section class="card step-card" id="plate-card">
+        <div class="step-card-head">
+          <span class="step-card-num">1</span>
+          <div>
+            <p class="section-label">Plate reader</p>
+            <h2>Plate Reader Assay results</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta">The CSV exported at the Plate Reader Assay's Export step. Each sample's AHL in sample (× dilution) is compared.</p>
+          <label for="plate-file">Plate Reader Assay CSV</label>
+          <input type="file" id="plate-file" accept=".csv,text/csv" />
+          <p class="status-message" id="plate-status" aria-live="polite"></p>
+          <div class="table-wrapper" id="plate-summary-wrapper" hidden>
+            <table class="kv-table">
+              <tbody id="plate-summary"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. CAPTURE-Screen: a Measure batch kept in this browser, or its CSV from another computer. -->
+      <section class="card step-card" id="device-card">
+        <div class="step-card-head">
+          <span class="step-card-num">2</span>
+          <div>
+            <p class="section-label">CAPTURE-Screen</p>
+            <h2>Measurement batch</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <div class="form-grid">
+            <div class="field">
+              <label for="batch-select">Batch in this browser</label>
+              <select id="batch-select"></select>
+            </div>
+            <div class="field">
+              <label for="batch-file">Or a batch CSV</label>
+              <input type="file" id="batch-file" accept=".csv,text/csv" />
+            </div>
+            <div class="field">
+              <label for="device-dilution">Dilution before reading (×)</label>
+              <input type="text" id="device-dilution" inputmode="decimal" autocomplete="off" value="1" />
+            </div>
+          </div>
+          <p class="plan-meta">CAPTURE-Screen batches carry no dilution: its values are multiplied by this one, for every sample.</p>
+          <p class="status-message" id="device-status" aria-live="polite"></p>
+          <div class="table-wrapper" id="device-summary-wrapper" hidden>
+            <table class="kv-table">
+              <tbody id="device-summary"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Comparison: pairs by sample name, then agreement over the pairs both sides could convert. -->
+      <section class="card step-card" id="compare-card">
+        <div class="step-card-head">
+          <span class="step-card-num">3</span>
+          <div>
+            <p class="section-label">Comparison</p>
+            <h2>Agreement</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="status-message" id="compare-warning" hidden></p>
+
+          <div class="sensor-stats">
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">Pairs compared</span>
+              <span class="sensor-stat-value" id="stat-pairs">--</span>
+              <span class="sensor-stat-sub" id="stat-pairs-sub"></span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">Geometric mean ratio</span>
+              <span class="sensor-stat-value" id="stat-ratio">--</span>
+              <span class="sensor-stat-sub">CAPTURE-Screen ÷ plate reader</span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">95% limits of agreement</span>
+              <span class="sensor-stat-value" id="stat-loa">--</span>
+              <span class="sensor-stat-sub">Ratio, Bland–Altman on log scale</span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">95% CIs overlap</span>
+              <span class="sensor-stat-value" id="stat-overlap">--</span>
+              <span class="sensor-stat-sub" id="stat-overlap-sub"></span>
+            </div>
+          </div>
+
+          <h3 class="subsection-heading table-heading">Samples</h3>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Sample</th>
+                  <th scope="col">Plate reader</th>
+                  <th scope="col">95% CI</th>
+                  <th scope="col">CAPTURE-Screen</th>
+                  <th scope="col">95% CI</th>
+                  <th scope="col">Ratio</th>
+                  <th scope="col">CIs overlap</th>
+                </tr>
+              </thead>
+              <tbody id="compare-body"></tbody>
+            </table>
+          </div>
+          <p class="plan-meta" id="compare-unmatched" hidden></p>
+
+          <h3 class="subsection-heading table-heading">Plot</h3>
+          <p class="chart-note">Log axes, AHL in sample. Bars: 95% CIs. Dashed line: perfect agreement (y = x). Only pairs with a number on both sides.</p>
+          <div class="chart-plate">
+            <canvas id="compare-chart"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Export: nothing is stored. -->
+      <section class="card step-card" id="export-card">
+        <div class="step-card-head">
+          <span class="step-card-num">4</span>
+          <div>
+            <p class="section-label">Export</p>
+            <h2>Files</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta">Nothing is stored. Export before leaving the page.</p>
+          <div class="button-row">
+            <button type="button" id="export-csv">Export CSV</button>
+            <button type="button" class="btn-secondary" id="export-png">Export plot (PNG)</button>
+          </div>
+          <p class="status-message" id="export-status" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p class="ruo-notice">Research use only. Not intended for diagnostic use.</p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+    </footer>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/hardware_processing.js"></script>
+  <script src="js/curve_fit.js"></script>
+  <script src="js/hardware_local.js"></script>
+  <script src="js/hardware_api.js"></script>
+  <script src="js/compare.js"></script>
+  <script src="js/backend_status.js"></script>
+</body>
+</html>

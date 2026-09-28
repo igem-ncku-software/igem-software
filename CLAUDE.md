@@ -78,6 +78,16 @@ What was built the same day, as designed with the user (they chose a list table 
 
 The team's real data is **SoftMax Pro `.sda` documents from a SpectraMax M3** (binary). The user set `.sda` aside for now; reading it directly would be one more input converter feeding the same table. What was found in two real files (`20260810 time-course fluorescence.sda`, `20260831 pyocyanin.sda`): each read is its own Plate section (endpoint reads repeated by hand, not kinetic mode), with its own `Start Read` time written in a zh-TW locale (`下午 05:23 2026/8/10`); each plate's 96 values are a contiguous little-endian float64 array, NaN for unread wells; absorbance and fluorescence (Ex 460 / Em 530) sit in separate experiments, read at different times and different counts.
 
+### Cross-Validation
+
+`compare.html` + `js/compare.js` (added 2026-09-28 at the user's request, as its own page): the same samples inferred on a plate reader and on CAPTURE-Screen, compared — the evidence that the team's own reader agrees with a commercial one. Four step cards: 1 Plate reader (a Plate Reader Assay CSV, file input; its `ahl_sample_nM`, i.e. × dilution, is compared), 2 CAPTURE-Screen (a Measure batch from this browser via `HardwareApi.listBatches()` / `getBatch()` — read only — or a batch CSV from another computer, plus one "dilution before reading" for all its samples, since batches carry none), 3 Comparison, 4 Export (CSV + PNG). Nothing stored; `beforeunload` asks until exported.
+- Samples pair **by name, case-insensitive**; names on one side only are listed, and a strain mismatch is warned about (not blocked).
+- **Only pairs with a number on both sides enter the agreement**: a bound ("< LOD", "> range") shows in the table but is never a value. Agreement is on the log scale (errors are proportional, values span decades): geometric mean ratio CAPTURE-Screen ÷ plate reader, Bland–Altman 95% limits of agreement on log10 ratios (needs ≥ 2 pairs), and how many pairs' 95% CIs overlap. **No pass/fail threshold** until real data says what agreement to expect.
+- The plot is log-log with both CIs as bars and a dashed y = x.
+- The page loads `hardware_processing.js`, `curve_fit.js`, `hardware_local.js`, `hardware_api.js` to read batches, but not `hardware_common.js` (no step bar or polling); it keeps its own small helpers, like `plate_assay.js`.
+- Entry points (the user's "direction 3"): a third landing-page card between Plate Reader Assay and CAPTURE-Screen (`.nav-grid` is three columns, one below 720 px), and a one-line link from the Export step of both the Plate Reader Assay and Measure.
+- It reads both CSVs by column name, so **renaming a column in either export breaks it** — `requireColumns()` then says which. The Plate Reader Assay CSV's experiment text is `signal_description`, not `signal` (renamed 2026-09-28: the file had two `signal` columns, and `signal` is the fitted number).
+
 ### CAPTURE-Screen model document
 
 `docs/capture_screen_model.md` (added 2026-09-28 at the user's request, in English for iGEM judges and the wiki) explains the hardware data model step by step: acquisition, dark subtraction, normalization, unmixing, read noise, flags, fingerprint, run order, 4PL, noise model, LM fit, LOD/LOQ/range, delta-method inversion, batches, self-check, limitations. It describes the code, not the other way round: when `hardware_processing.js`, `curve_fit.js` or `hardware_local.js` changes a formula, threshold or rule, update the matching section in the same change.
@@ -129,6 +139,7 @@ No endpoints: the assay computes in the browser (see "Plate Reader Assay" above)
 
 ```
 index.html                     entry page: linked cards + live spectrum via /api/live
+compare.html                   Cross-Validation: plate reader vs CAPTURE-Screen, same samples paired by name
 plate-assay.html               Plate Reader Assay: enter standards + samples → 4PL fit → inferred AHL → CSV
 hardware.html                  CAPTURE-Screen step 1, Instrument: readiness verdict, signal path, current configuration, one self-check read
 hardware-calibration.html      CAPTURE-Screen step 2, Calibrate: source (instrument, live status, or recorded data) → set up (conditions + standards with reading order, or date + config) → read, or enter recorded values → 4PL fit → save; saved-run list last, CSV per run
@@ -139,7 +150,7 @@ hardware-data.html             CAPTURE-Screen, not a step: the one backup export
 
 Pages are flat files rather than folders (`hardware-measure.html`, not `hardware/measure/`) to match the existing layout and keep relative asset paths one level deep.
 
-Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The plate assay page shares only `curve_fit.js` (the 4PL math) and the global `BACKEND_BASE_URL`. The landing page's live spectrum is standalone:
+Each feature page loads only the script it needs, so a polling loop only runs on the page that shows it. The plate assay page shares only `curve_fit.js` (the 4PL math) and the global `BACKEND_BASE_URL`; the Cross-Validation page reads batches through `hardware_api.js` without the hardware step bar. The landing page's live spectrum is standalone:
 
 - `js/device_live.js` — the landing-page spectrum.
   - **Connection.** It opens `WS /api/live/spectrum` on page load so device presence shows at once. It reconnects with backoff indefinitely, because a sleeping Render backend takes up to a minute to wake. `tickLive()` gives up on a socket that goes `LIVE_PRESENCE_STALE_MS` without presence, since the backend heartbeats every 10 s in every state — it calls `onLiveSocketLost()` itself before `close()`, because a dead socket's `onclose` can wait out a closing handshake of up to a minute with nothing reconnecting; `pagehide` clears the chart too, or a back/forward-cache restore would show the old frame; `onLivePresence()` assigns `device` and `last_seen` outright rather than only when set, because the backend clears `device` when a new socket attaches and the page must mirror it.

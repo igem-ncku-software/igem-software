@@ -927,7 +927,7 @@ function fileStem() {
 }
 
 const CSV_HEADERS = [
-  "date", "strain", "signal", "instrument", "notes",
+  "date", "strain", "signal_description", "instrument", "notes",
   "normalization", "medium_f_mean", "medium_od_mean",
   "row", "role", "concentration_nM", "sample", "dilution", "replicate", "well", "fluorescence", "od600", "signal", "excluded_reason",
   "model", "fitted_at", "top", "bottom", "ec50_nM", "hill", "lod_nM", "loq_nM", "range_min_nM", "range_max_nM", "rmse",
