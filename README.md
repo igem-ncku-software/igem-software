@@ -1,13 +1,71 @@
 # LasReader
 
-Wet-lab data tools for NCKU-Tainan iGEM 2026 (Capture): a frontend/backend-split web application.
+**Wet-lab data tools of iGEM NCKU-Tainan 2026 (Capture):** AHL dose-response analysis of plate-reader exports, and the software for CAPTURE-Screen, the team's own fluorescence reader.
 
-- **AHL dose-response analysis** — upload a raw plate reader export, run the whole analysis pipeline automatically, and get each strain's EC50, Hill coefficient, 95% confidence interval, R², LOD/LOQ, and whether that strain responds to AHL at all.
-- **CAPTURE-Screen hardware interface** — the team's own AS7341 fluorescence reader: once the device powers on and joins Wi-Fi it connects itself to the backend, the landing page shows all ten spectral channels live, and four pages, used in order, go through the backend for instrument checks, per-tube calibration with a 4PL fit, and measuring samples in replicate through a chosen curve. Everything shown is a real reading from the device — no simulated data; calibration runs, curves and measurement batches currently live in the browser's localStorage.
+| | |
+|---|---|
+| **Team** | [NCKU-Tainan, iGEM 2026](https://2026.igem.wiki/ncku-tainan/) — see the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software) and [Hardware](https://2026.igem.wiki/ncku-tainan/hardware) pages |
+| **Source code** | <https://gitlab.igem.org/2026/software-tools/ncku-tainan>, the team's official repository on iGEM's GitLab |
+| **Live app** | <https://igem-ncku-software.github.io/igem-software/> (backend: <https://igem-ncku-software.onrender.com>). A convenience copy only: everything needed to install, run and evaluate LasReader is in this repository. |
+| **License** | [MIT](LICENSE), an OSI-approved open-source license |
+| **Status** | Active development for the iGEM 2026 Jamboree |
 
-The frontend is a plain static site (deployed on GitHub Pages), the backend is FastAPI (deployed on Render), and the two talk over HTTP/CORS and WebSocket — there's no shared build step.
+> **Research use only.** LasReader reports relative fluorescence and AHL concentrations *inferred* from a calibration curve. It is not intended for diagnostic use.
 
-License: [MIT License](LICENSE).
+## Contents
+
+- [Description](#description)
+- [iGEM software requirements](#igem-software-requirements)
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Reproducing the main results](#reproducing-the-main-results)
+- [Testing](#testing)
+- [API](#api)
+- [Data formats and integration](#data-formats-and-integration)
+- [Dose-response analysis pipeline](#dose-response-analysis-pipeline)
+- [Hardware: CAPTURE-Screen](#hardware-capture-screen)
+- [Contributing and extending](#contributing-and-extending)
+- [Dependencies](#dependencies)
+- [Deployment](#deployment)
+- [Roadmap and known limitations](#roadmap-and-known-limitations)
+- [Authors and acknowledgment](#authors-and-acknowledgment)
+- [License](#license)
+
+## Description
+
+Many synthetic-biology biosensors report a signal molecule, here the quorum-sensing molecule AHL, by expressing a fluorescent protein. Turning that fluorescence into a number you can trust takes more than reading a value: backgrounds must be subtracted, replicates combined, a dose-response curve fitted, and its limits respected. LasReader packages those steps into two web tools that any team can open in a browser, with nothing to install:
+
+- **AHL dose-response analysis.** Upload a raw plate-reader export and the whole analysis runs automatically. For each strain you get its EC50, Hill coefficient, 95% confidence interval, R², LOD/LOQ, and whether the strain responds to AHL at all.
+- **CAPTURE-Screen interface.** CAPTURE-Screen is the team's low-cost fluorescence reader (ESP32 + AS7341 spectral sensor). Once the device powers on and joins Wi-Fi it connects to the backend by itself. The landing page then shows all ten spectral channels live, and four pages, used in order, guide you through:
+  1. checking the instrument;
+  2. calibrating it tube by tube with a weighted 4PL fit;
+  3. reviewing the saved curves;
+  4. measuring samples in replicate, with an inferred AHL concentration and a 95% CI for each.
+
+Everything shown is a real reading. There is no simulated device or demo data anywhere.
+
+### Who it is for
+
+- **Wet-lab members of iGEM teams and other labs** who characterize a fluorescent biosensor, especially one that responds to AHL. The web pages need no programming: upload a file, or follow the numbered steps at the instrument.
+- **Teams building a low-cost fluorescence reader.** CAPTURE-Screen's firmware, its data model ([docs/capture_screen_model.md](docs/capture_screen_model.md)) and its calibration workflow can be reused with any AS7341-based device.
+- **Developers extending the tools.** Each analysis step is a separate, tested module, and the backend exposes a documented REST API.
+
+The frontend is a plain static site (GitHub Pages) and the backend is FastAPI (Render). The two talk over HTTP/CORS and WebSocket, with no shared build step, so either half can be reused on its own.
+
+## iGEM software requirements
+
+How this repository meets the requirements the *iGEM 2026 Judge Handbook* sets for software (Chapter 4, Software):
+
+| Requirement | Where it is met |
+|---|---|
+| Hosted on iGEM's GitLab | This repository, <https://gitlab.igem.org/2026/software-tools/ncku-tainan> |
+| README explaining what the software does, who it is for, how to install and run it, and how to reproduce the main results | [Description](#description), [Who it is for](#who-it-is-for), [Installation](#installation), [Usage](#usage), [Reproducing the main results](#reproducing-the-main-results) |
+| LICENSE file with an OSI-approved license | [LICENSE](LICENSE), MIT |
+| Reproducible build and run instructions | [`scripts/`](scripts/) (`setup` + `dev`, in `.sh` and `.ps1`), plus the manual command sequence under [Installation](#installation). There are no compiled binaries: the frontend is served as source, and the firmware is built from source. |
+| Pinned dependencies | [`backend/requirements.txt`](backend/requirements.txt) pins every package, direct and transitive, to the version the tests passed with. Chart.js is pinned to 4.4.1, and the firmware's library versions are listed under [Flashing the firmware](#flashing-the-firmware). |
+| Repository under 50 MB | About 1 MB of source, tests and small images |
 
 ## Architecture
 
@@ -51,11 +109,12 @@ flowchart LR
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
 ├── dose-response.html        dose-response analysis page
-├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-checks
+├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-check
 ├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
 ├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
 ├── hardware-measure.html     CAPTURE-Screen step 4: read samples in replicate through one curve
 ├── hardware-data.html        CAPTURE-Screen: backup, restore, reset
+├── config/unmix_basis.json   which sensor channel is the fluorescence signal (placeholder until measured)
 ├── css/style.css
 └── js/                       config / dose_response / backend_status / device_live
                               hardware_processing → hardware_local → hardware_api → hardware_common → each page's script
@@ -65,22 +124,30 @@ backend/                      FastAPI
 │   ├── main.py               mounts each feature's router
 │   ├── config.py             environment variables and CORS settings
 │   ├── hardware/             CAPTURE-Screen's relay: device connection, status, measurement
-│   ├── live/                 live sensing: the shared Live switch and the live spectrum, relayed through hardware's connection
-│   └── dose_response/        dose-response analysis (this project's main computation)
+│   ├── live/                 live sensing: the shared Live switch and the live spectrum
+│   └── dose_response/        dose-response analysis pipeline
 ├── tests/                    pytest
 └── requirements.txt
 
+docs/capture_screen_model.md  CAPTURE-Screen data model: from a raw reading to an inferred AHL concentration
 firmware/capture_screen/      CAPTURE-Screen firmware (ESP32 + AS7341 + OLED + Live button), one sketch plus secrets.h
 scripts/                      install and run scripts (.sh and .ps1 versions)
 ```
 
-## Quickstart
+## Installation
 
-Requirements: Python 3.10+. The frontend has no dependencies and doesn't need Node.js.
+To *use* LasReader you need nothing but a browser: open the [live app](https://igem-ncku-software.github.io/igem-software/). The steps below are for running it locally or developing it.
+
+**Requirements:** Python 3.14 (the pinned dependencies were tested with 3.14.3) and Git. The frontend has no dependencies and doesn't need Node.js. Flashing the device additionally needs the Arduino IDE (see [Flashing the firmware](#flashing-the-firmware)).
+
+```bash
+git clone https://gitlab.igem.org/2026/software-tools/ncku-tainan.git
+cd ncku-tainan
+```
 
 ### Using the scripts (recommended)
 
-Run from the repo root. Run setup once to set up the backend environment, then dev every time after that.
+Run these from the repository root: `setup` once, then `dev` every time after that.
 
 ```bash
 # macOS / Linux / Windows Git Bash
@@ -94,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
-`dev` starts the backend at http://127.0.0.1:8000 (API docs at `/docs`) and the frontend at http://127.0.0.1:5500 together; Ctrl+C shuts both down.
+`dev` starts the backend at http://127.0.0.1:8000 (interactive API docs at `/docs`) and the frontend at http://127.0.0.1:5500 together. Ctrl+C shuts both down.
 
 ### Manual steps
 
@@ -104,7 +171,7 @@ If you'd rather not use the scripts, or only want to run one side:
 # Backend
 cd backend
 python -m venv .venv
-.venv\Scripts\activate          # Windows; macOS/Linux use source .venv/bin/activate
+.venv\Scripts\activate          # Windows; on macOS/Linux use: source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 
@@ -113,18 +180,76 @@ cd frontend
 python -m http.server 5500
 ```
 
-> `main.py` lives inside the `app` package, so it can **only** be started with `uvicorn app.main:app`. Running `python main.py` or `uvicorn main:app` directly will fail.
+> `main.py` lives inside the `app` package, so it can **only** be started with `uvicorn app.main:app`. Running `python main.py` or `uvicorn main:app` will fail.
 
-Keep the frontend on port 5500 if possible: the backend's CORS allowlist already includes it by default (see `backend/app/config.py`, or override via `backend/.env`). The frontend picks its backend automatically based on the URL — `localhost` / `127.0.0.1` hits the local `http://127.0.0.1:8000`, everything else hits the live Render URL. That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js); changing the URL only means editing that one line.
+Keep the frontend on port 5500 if you can, since the backend's CORS allowlist already includes it (see `backend/app/config.py`, or override it in `backend/.env`).
 
-### Tests
+The frontend picks its backend from its own URL:
+- `localhost` / `127.0.0.1` uses the local `http://127.0.0.1:8000`;
+- everything else uses the Render backend.
+
+That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js).
+
+## Usage
+
+### Dose-response analysis
+
+1. Open **Dose-Response** from the landing page.
+2. Choose a SpectraMax ASCII export (`.txt`, UTF-8 or UTF-16) whose plate follows the layout in [`experiment.yaml`](backend/app/dose_response/config/experiment.yaml) (see [Experiment design and thresholds](#experiment-design-and-thresholds)), and run the analysis.
+3. The summary table lists every strain. Each responsive strain also gets a chart (plateau points, fitted Hill curve, EC50) and a **predict** box that back-calculates AHL from a normalized fluorescence value. A strain that doesn't respond is reported as such, with no curve.
+
+### CAPTURE-Screen
+
+The hardware pages are one workflow, used in order. A step bar at the top of every page shows each step's state and which one comes next.
+
+1. **Instrument.** Check that the backend, device, sensor and LED are all connected. Then run the self-check with a buffer-only cuvette, which checks dark stability and saturation.
+2. **Calibrate.** Enter the biosensor strain and the standard concentrations. Then read each standard and blank in the order shown, or enter values recorded earlier. Fit the 4PL (you may exclude a tube, with a reason) and save the curve.
+3. **Curves.** Review each saved curve: its fit, LOD/LOQ, usable range, and whether it matches the instrument's current configuration.
+4. **Measure.** Choose a curve, read the blanks, then read each sample in replicate tubes. Each sample gets an inferred AHL concentration with a 95% CI, or "below LOD" / "above range". Finish the batch and export it as CSV.
+5. **Data** (not a step). Export or restore one backup file holding all runs, curves and batches, or delete everything.
+
+Runs, curves and batches are stored in your browser. **Export a backup from the Data page regularly**: clearing the browser's site data deletes them.
+
+## Reproducing the main results
+
+LasReader produces two kinds of results. Both come from the code in this repository, run locally as described under [Installation](#installation).
+
+**1. A strain's dose-response parameters** (EC50 with its 95% CI, Hill coefficient, R², LOD/LOQ, and whether it responds).
+
+1. Start LasReader with `bash scripts/dev.sh` and open <http://127.0.0.1:5500/dose-response.html>.
+2. Upload a SpectraMax ASCII export from a plate laid out as in [`experiment.yaml`](backend/app/dose_response/config/experiment.yaml).
+3. The table lists each strain's parameters, and the charts show the plateau points and the fitted Hill curve.
+
+The same numbers are available without the web page:
+
+```bash
+cd backend
+.venv/bin/python -c "from app.dose_response.pipeline import run_pipeline; print(run_pipeline('path/to/export.txt'))"   # Windows: .venv\Scripts\python
+```
+
+The analysis is deterministic, so the same file always gives the same parameters. Each step's method is documented in the module docstrings under `backend/app/dose_response/`.
+
+**2. A CAPTURE-Screen calibration curve and the AHL inferred through it.**
+
+- **With the instrument:** follow [Usage → CAPTURE-Screen](#capture-screen) steps 1–4.
+- **Without the instrument:** open Calibrate, choose *Enter recorded data*, and type in previously recorded readings (standards and blanks, in basic counts) together with the instrument configuration they were read under. Fitting, LOD/LOQ and saving work exactly as they do for a device run, so a published curve can be refitted from its recorded values.
+
+A saved run or batch exports as CSV at full precision, and the Data page's backup holds everything needed to restore it on another computer. Every formula is in [docs/capture_screen_model.md](docs/capture_screen_model.md).
+
+## Testing
 
 ```bash
 cd backend
 pytest
 ```
 
-`tests/conftest.py` adds `backend/` to `sys.path`, so `pytest` must be run from inside `backend/`.
+The suite covers the dose-response math (`test_models`, `test_normalize`, `test_timeseries`, `test_doseresponse`), plate-map handling (`test_io`), the `/predict` endpoint and `/analyze`'s rejection of an unreadable file, and the hardware relay and live spectrum (`tests/hardware/`, `tests/live/`, driven through a fake device connection). `tests/conftest.py` adds `backend/` to `sys.path`, so run `pytest` from inside `backend/`.
+
+The firmware compiles from the command line (warnings come only from inside the libraries):
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen
+```
 
 ## API
 
@@ -132,22 +257,40 @@ Backend URL: `https://igem-ncku-software.onrender.com`
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check; the frontend footer's connection indicator polls this |
-| `POST` | `/api/dose_response/analyze` | Upload a reader export (multipart), returns each strain's fitted results |
-| `POST` | `/api/dose_response/predict` | Back-calculates AHL concentration from a fluorescence value |
-| `GET` | `/api/hardware/status` | Whether CAPTURE-Screen is online, its last reported status and config |
-| `POST` | `/api/hardware/read` | Asks the device to take one measurement (dark → light → dark), returns the raw reading |
+| `GET` | `/health` | Health check. The frontend footer's connection indicator polls it. |
+| `POST` | `/api/dose_response/analyze` | Upload a reader export (multipart) and get each strain's fitted results |
+| `POST` | `/api/dose_response/predict` | Back-calculate AHL concentration from a fluorescence value |
+| `GET` | `/api/hardware/status` | Whether CAPTURE-Screen is online, with its last reported status and config |
+| `POST` | `/api/hardware/read` | Ask the device for one measurement (dark → light → dark) and return the raw reading |
 | `WS` | `/api/hardware/device` | The device's own inbound connection |
 | `WS` | `/api/live/spectrum` | The Live switch and the live spectrum, for browsers |
 
 The full request/response schema can be explored interactively at `/docs` once the backend is running.
 
-`/analyze` returns `ec50_nM`, `ec50_nM_ci95`, `n`, `top`, `bottom`, `r_squared`, `responsive`, `p_value`, `lod_nM`, `loq_nM` per strain, plus `plateau_points` and `fit_curve` for plotting.
+`/analyze` returns these fields per strain:
+- the fit: `ec50_nM`, `ec50_nM_ci95`, `n`, `top`, `bottom`, `r_squared`;
+- the response test: `responsive`, `p_value`;
+- the limits: `lod_nM`, `loq_nM`;
+- for plotting: `plateau_points` and `fit_curve`.
 
 Two deliberate design choices:
 
-- **When the flatness test decides a strain doesn't respond, `ec50_nM` and `fit_curve` come back `null`** rather than a fake number. The frontend uses this to decide not to draw a curve or offer the inversion tool.
-- **`/predict` is stateless**: the frontend sends back the Hill parameters it got from `/analyze` as-is; the backend keeps no session.
+- **When the flatness test decides a strain doesn't respond, `ec50_nM` and `fit_curve` come back `null`**, never a fake number. The frontend uses this to decide not to draw a curve or offer the predict box.
+- **`/predict` is stateless.** The frontend sends back the Hill parameters it got from `/analyze`, and the backend keeps no session.
+
+## Data formats and integration
+
+LasReader reads and writes open, documented formats, so its results can move into other tools:
+
+| Direction | Format | Where |
+|---|---|---|
+| In | SpectraMax ASCII plate-reader export (UTF-8 or UTF-16) | Dose-Response page, `POST /api/dose_response/analyze` |
+| In | Recorded CAPTURE-Screen readings, typed in | Calibrate → *Enter recorded data* |
+| Out | JSON for every API response, described by an OpenAPI schema | `/docs` (interactive) and `/openapi.json` on the backend |
+| Out | CSV (UTF-8 with BOM, opens directly in Excel), one row per tube at full precision | One calibration run, or one measurement batch |
+| In / Out | JSON backup of all runs, curves and batches (format `lasreader.hardware.backup`, version 2) | Data page |
+
+Other software can call the REST API directly, for example a notebook posting an export to `/api/dose_response/analyze`. To support another plate reader, add one parser ([Supporting a different plate reader](#supporting-a-different-plate-reader)).
 
 ## Dose-response analysis pipeline
 
@@ -163,79 +306,95 @@ pipeline.py      chains the four steps above together
 router.py        thin HTTP adapter only, no computation of its own
 ```
 
-The pure math (`models.py`) is deliberately kept separate from data handling, so it can be unit-tested against synthetic data alone, without needing real experimental data.
+The pure math (`models.py`) is kept separate from data handling, so it can be unit-tested on its own.
 
 ### Experiment design and thresholds
 
-The plate layout (which row is which concentration, which columns are which strain), blank/positive well positions, and every threshold are centralized in [`backend/app/dose_response/config/experiment.yaml`](backend/app/dose_response/config/experiment.yaml).
+The plate layout (which row is which concentration, which columns are which strain), the blank and positive-control wells, and every threshold are all in one file, [`backend/app/dose_response/config/experiment.yaml`](backend/app/dose_response/config/experiment.yaml).
 
 Design v.1's layout:
 
-- **AHL concentration** (3-oxo-C12-HSL), rows A-F: 0, 1 nM, 10 nM, 100 nM, 1 µM, 10 µM
-- **Strains**: TOP10 (columns 1-3), DH5α (columns 4-6), BL21 (columns 7-9)
-- **Row G** blank, **H1-H3** positive control
+- **AHL concentration** (3-oxo-C12-HSL), rows A–F: 0, 1 nM, 10 nM, 100 nM, 1 µM, 10 µM
+- **Strains**: TOP10 (columns 1–3), DH5α (columns 4–6), BL21 (columns 7–9)
+- **Row G** blank, **H1–H3** positive control
 - **Readings**: OD600 + GFP (Ex/Em 485/510 nm), once per hour
 
-To change the plate layout or a threshold, edit this YAML — don't change the numbers inside individual modules.
+To change the plate layout or a threshold, edit this YAML, not the numbers inside individual modules.
 
 ### Supporting a different plate reader
 
-`io.py`'s `load_reader_export()` is the only place that knows what a SpectraMax ASCII export looks like (an adapter pattern). Everything downstream only consumes the tidy well / time_h / RFU / OD600 table, so supporting a different instrument just means adding a matching `load_*_export()` — no other module needs to change.
+`io.py`'s `load_reader_export()` is the only place that knows what a SpectraMax ASCII export looks like. Everything downstream consumes only the tidy well / time_h / RFU / OD600 table, so supporting another instrument means adding a matching `load_*_export()`, and no other module needs to change.
 
-## Hardware
+## Hardware: CAPTURE-Screen
 
-CAPTURE-Screen is the team's own fluorescence reader: an ESP32 plus an AS7341 spectral sensor, reading sfGFP fluorescence. Everything shown on the web pages is a real reading from the device — there is no simulated data anywhere; when the device is off, the page shows it as offline directly.
+CAPTURE-Screen is the team's own fluorescence reader: an ESP32 plus an AS7341 spectral sensor, reading sfGFP fluorescence. When the device is off, the pages say it is offline; they never fall back to simulated data.
+
+**The data model** is documented step by step in [docs/capture_screen_model.md](docs/capture_screen_model.md): dark subtraction, normalization, the weighted 4PL fit, LOD/LOQ, and inversion with a 95% CI.
 
 ### How the device connects to the software
 
-The backend runs on Render and can't reach a device behind a lab or home router, so the direction is reversed: once the device powers on and joins Wi-Fi, it dials out to `wss://igem-ncku-software.onrender.com/api/hardware/device` itself and keeps that connection open, reconnecting automatically if it drops. Web pages only ever talk to the backend, which relays over that connection to the device:
+The backend runs on Render and can't reach a device behind a lab or home router, so the direction is reversed. Once the device powers on and joins Wi-Fi, it dials out to `wss://igem-ncku-software.onrender.com/api/hardware/device` and keeps that connection open, reconnecting by itself if it drops. Web pages only ever talk to the backend, which relays over that connection:
 
-- **Live spectrum** (landing page, device OLED): Live is one switch, owned by the device and shared by its button (GPIO 13) and the Live switch on every open landing page. Flipping either one turns the LED on and streams frame after frame (about two per second) to every page and to the OLED's bar chart; the device reports the new state straight away, so every switch shows the same thing. Live switches itself off after 10 minutes, since leaving the LED on heats and bleaches the sample; the page shows when. It can't be switched on during a measurement or while the sensor isn't answering.
-- **Measurement** (instrument check, calibration, Measure): the page sends `POST /api/hardware/read`, the device runs one dark → light → dark cycle (about 3 s), and the backend hands the raw reading back to the page; dark subtraction, normalization, and unmixing all happen on the web side (`js/hardware_processing.js`). Live streaming pauses during a measurement and resumes automatically afterward.
-
-This connection currently has no authentication: anyone who knows the URL could impersonate the device or trigger a measurement. A shared secret is planned for later.
+- **Live spectrum** (landing page, device OLED).
+  - Live is one switch, owned by the device and shared by its button (GPIO 13) and the Live switch on every open landing page.
+  - Flipping either one turns the LED on and streams about two frames per second to every page and to the OLED's bar chart. The device reports the new state straight away, so every switch shows the same thing.
+  - Live switches itself off after 10 minutes, since leaving the LED on heats and bleaches the sample; the page shows when.
+  - It can't be switched on during a measurement or while the sensor isn't answering.
+- **Measurement** (instrument check, calibration, Measure).
+  - The page sends `POST /api/hardware/read`, and the device runs one dark → light → dark cycle (about 3 s). The backend hands the raw reading back to the page.
+  - Dark subtraction, normalization and unmixing all happen in the browser (`js/hardware_processing.js`).
+  - Live streaming pauses during a measurement and resumes by itself afterwards.
 
 ### Flashing the firmware
 
-1. Install ESP32 board support in the Arduino IDE, plus the libraries DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson (7.x), and WebSockets (Markus Sattler). Verified to compile against: ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, ArduinoJson 7.4.3, WebSockets 2.7.2.
-2. Copy `firmware/capture_screen/secrets.h.example` to `secrets.h` in the same folder, and fill in your Wi-Fi name and password (ESP32 only supports 2.4 GHz). `secrets.h` is excluded by `.gitignore`, so the password never gets committed; the sketch refuses to compile without it.
+1. Install ESP32 board support in the Arduino IDE, plus the libraries DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson (7.x) and WebSockets (Markus Sattler). The sketch is verified to compile against ESP32 core 3.3.8, DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, ArduinoJson 7.4.3 and WebSockets 2.7.2.
+2. Copy `firmware/capture_screen/secrets.h.example` to `secrets.h` in the same folder, and fill in your Wi-Fi name and password (the ESP32 supports 2.4 GHz only). `secrets.h` is excluded by `.gitignore`, so the password is never committed. The sketch refuses to compile without it.
 3. Open `firmware/capture_screen/capture_screen.ino`, select the ESP32 Dev Module board, and flash it.
-4. The OLED status bar showing `Web ok` means it's connected, and the landing page's Live card will show `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200) — lines starting with `[wifi]` and `[backend]` explain where it's stuck.
+4. When the OLED status bar shows `Web ok`, the device is connected, and the landing page's Live card shows `CAPTURE-Screen online`. If it won't connect, open the Serial Monitor (115200). Lines starting with `[wifi]` and `[backend]` show where it is stuck.
 
 Without a network the button still switches Live, and the OLED shows the spectrum; measurements always come from a web page. The Serial Monitor offers diagnostics only (`?` settings, `i` I2C scan, `b` button, `l` LED, `d` dark/light table, `g`/`t`/`s` sensor settings).
 
-The Render free tier sleeps after a period of inactivity and can take tens of seconds to wake up; the device keeps retrying on its own during that time, no need to reflash or restart it.
+The Render free tier sleeps after a period of inactivity and can take tens of seconds to wake up. The device keeps retrying during that time, so there is no need to reflash or restart it.
 
 ### Connecting the device during local development
 
-The backend needs to be reachable from a device on the local network: run `uvicorn app.main:app --host 0.0.0.0 --port 8000` from `backend/`, then in `secrets.h` uncomment `BACKEND_HOST` (filled in with this computer's LAN IP), `BACKEND_PORT 8000`, and `BACKEND_USE_TLS 0`, and reflash.
+The backend must be reachable from the device on the local network:
+
+1. From `backend/`, run `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+2. In `secrets.h`, uncomment:
+   - `BACKEND_HOST`, filled in with this computer's LAN IP;
+   - `BACKEND_PORT 8000`;
+   - `BACKEND_USE_TLS 0`.
+3. Reflash the device.
 
 ### Pages
 
-The hardware pages are one workflow used in order. A step bar at the top of every page shows the four steps, the state of each, and which comes next; within a page, numbered step cards do the same, and a step that can't start yet says what it is waiting for.
+Each page has numbered step cards in addition to the step bar. A step that can't start yet says what it is waiting for.
 
 | Step | Page | Purpose |
 |---|---|---|
-| 1 Instrument | `hardware.html` | Connection and self-check status, with the failed link identified (backend → device → sensor / LED); full configuration; a buffer-only self-check of dark stability and saturation, with informational dark level and light − dark readings |
-| 2 Calibrate | `hardware-calibration.html` | Set up a run with its conditions (biosensor strain, induction time) → read the standards tube by tube, or enter recorded data → 4PL fit, excluding tubes only with a reason → save the curve |
+| 1 Instrument | `hardware.html` | Connection and self-check status, naming the link that failed (backend → device → sensor / LED). The full configuration. A buffer-only self-check of dark stability and saturation, with informational dark-level and light − dark readings. |
+| 2 Calibrate | `hardware-calibration.html` | Set up a run with its biosensor strain. Read the standards tube by tube, or enter recorded data. Fit the 4PL, excluding tubes only with a reason, and save the curve. |
 | 3 Curves | `hardware-curves.html` | Every saved curve, what it is valid for, and whether it matches the instrument now |
-| 4 Measure | `hardware-measure.html` | A batch: choose a curve → read a blank → read each sample in replicate tubes → per-sample inferred AHL with a 95% CI, exported as CSV |
+| 4 Measure | `hardware-measure.html` | A batch: choose a curve, read the blanks, read each sample in replicate tubes. Each sample gets an inferred AHL with a 95% CI; the batch exports as CSV. |
 | — | `hardware-data.html` | One backup file for runs, curves and batches; restore; delete everything |
 
-Instrument distinguishes a check not yet run, in progress, passed, needing attention, or incomplete. A pass applies only to dark stability and saturation under the checked configuration; LED response is not verified. A failed retry is shown as incomplete, with any earlier pass labelled as history and its configuration. Checks are not saved, and do not replace calibration or a measurement blank. Run the Instrument regression checks with `node --test tests/frontend/instrument.test.cjs` (Node.js; no server or device required).
-
-Runs, curves, fitting, batches and conversion currently live in the browser's localStorage via `hardware_local.js`, not yet moved to a backend database.
+The Instrument self-check is not saved, and it does not replace calibration or a measurement blank. A pass covers only dark stability and saturation under the checked configuration; LED response is not verified.
 
 The frontend is layered so that once a storage backend exists, only the API layer needs to change:
 
-- `js/hardware_processing.js` — pure functions: raw device reading → `Measurement` (dark subtraction, normalization, saturation check, unmixing, QC flags, config fingerprint).
-- `js/hardware_local.js` — temporary storage for calibration runs, curves and measurement batches, weighted 4PL fitting, LOD/LOQ, inversion with a 95% CI.
-- `js/hardware_api.js` — the one interface every hardware page calls: anything device-related goes through the backend, everything else through `hardware_local.js`; also defines the data contract via JSDoc (`Measurement`, `CalibrationPlan`, `CalibrationCurve`, `MeasurementBatch`, `InverseEstimate`, etc.).
-- `js/device_live.js` — the landing page's live spectrum: a ten-channel bar chart of the latest frame. Display only, never stores any live frame.
+- `js/hardware_processing.js`: pure functions that turn a raw device reading into a `Measurement` (dark subtraction, normalization, saturation check, unmixing, QC flags, config fingerprint).
+- `js/hardware_local.js`: temporary browser storage for calibration runs, curves and measurement batches; weighted 4PL fitting, LOD/LOQ, and inversion with a 95% CI.
+- `js/hardware_api.js`: the one interface every hardware page calls. Anything device-related goes through the backend; everything else goes through `hardware_local.js`. It also defines the data contract via JSDoc (`Measurement`, `CalibrationPlan`, `CalibrationCurve`, `MeasurementBatch`, `InverseEstimate`, etc.).
+- `js/device_live.js`: the landing page's live spectrum, a ten-channel bar chart of the latest frame. Display only; it never stores a frame.
+
+Two rules that must never be broken:
+- **No numeric concentration is ever shown** unless the inversion result is `ok`; the software never extrapolates outside a curve's range.
+- **The pages must never contain diagnostic claims, pathogen-detection wording, or a claim to quantify AHL.** The only exception is the required research-use-only footer line.
 
 ### Backend configuration
 
-`backend/.env` (can be copied from `.env.example`):
+`backend/.env` (copy it from `.env.example`):
 
 ```dotenv
 # How long without a message from the device before it's considered offline (firmware reports every 5 s)
@@ -244,27 +403,58 @@ HARDWARE_ONLINE_TIMEOUT_SECONDS=15
 HARDWARE_READ_TIMEOUT_SECONDS=10
 ```
 
-Two rules that must never be broken: **no numeric concentration is ever shown** unless the inversion result is `ok` (never extrapolate outside the range); and the pages **must never contain diagnostic claims, pathogen-detection wording, or a claim to quantify AHL** — the only exception is the required RUO footer line.
+## Contributing and extending
 
-## Extending the project
+Future iGEM teams are welcome to reuse, fork and extend LasReader. Please open an issue or a merge request on the repository.
 
-**Adding a backend feature**: create a folder under `backend/app/` containing its own `router.py` (defining an `APIRouter` with its own path prefix), put the computation logic in other modules alongside it, then add one `include_router()` line in `app/main.py`. There's no shared base class or plugin registry — it's wired in by hand. Please don't add routes directly to `main.py`.
+**Adding a backend feature.**
+1. Create a folder under `backend/app/` containing its own `router.py`, which defines an `APIRouter` with its own path prefix. Put the computation in other modules alongside it.
+2. Add one `include_router()` line in `app/main.py`. There's no shared base class or plugin registry; each feature is wired in by hand. Please don't add routes directly to `main.py`.
+3. Add tests under `backend/tests/`.
 
-**Adding a frontend page**: add an `.html` file under `frontend/`, load `js/config.js` first (it must come before everything else, since it defines `BACKEND_BASE_URL`), then that page's own script, and link to it from `index.html`. Each script only handles its own page and never calls another; the only thing they share is `BACKEND_BASE_URL`. The exception is CAPTURE-Screen's hardware pages, which share `hardware_api.js` and `hardware_common.js` (see the Hardware section above). No deployment config changes are needed — GitHub Actions just uploads the whole `frontend/` folder as-is.
+**Adding a frontend page.**
+1. Add an `.html` file under `frontend/`.
+2. Load `js/config.js` first (it defines `BACKEND_BASE_URL`), then that page's own script.
+3. Link the page from `index.html`.
+
+Each script handles only its own page. The exception is CAPTURE-Screen's hardware pages, which share `hardware_api.js` and `hardware_common.js`. No deployment change is needed: GitHub Actions uploads the whole `frontend/` folder as-is.
+
+**Changing the CAPTURE-Screen model.** When a formula, threshold or rule in `hardware_processing.js` or `hardware_local.js` changes, update the matching section of [docs/capture_screen_model.md](docs/capture_screen_model.md) in the same change.
 
 ## Dependencies
 
-**Backend** (`backend/requirements.txt`): FastAPI, uvicorn, websockets (needed for uvicorn to handle WebSockets), pydantic, python-multipart, python-dotenv, numpy, scipy, pandas, lmfit, pyyaml; pytest and httpx for testing.
+**Backend** (`backend/requirements.txt`, every version pinned):
+- FastAPI and uvicorn, plus websockets (uvicorn needs it to serve WebSockets);
+- pydantic, python-multipart, python-dotenv, pyyaml;
+- numpy, scipy, pandas, lmfit;
+- pytest and httpx, for testing;
+- the packages these pull in, pinned too.
 
 **Firmware** (Arduino Library Manager): DFRobot_AS7341, Adafruit SSD1306, Adafruit GFX, ArduinoJson 7, WebSockets (Markus Sattler).
 
-**Frontend**: only [Chart.js](https://www.chartjs.org/) 4.4.1, loaded via `<script>` from cdnjs — not vendored into the repo, and no npm toolchain.
+**Frontend**: only [Chart.js](https://www.chartjs.org/) 4.4.1, loaded via `<script>` from cdnjs. It isn't vendored into the repository, and there is no npm toolchain.
 
 ## Deployment
 
-- **Frontend**: pushing to `main` has [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) upload the whole `frontend/` folder as-is to GitHub Pages, with no build or transform step in between — new files are picked up automatically.
-- **Backend**: deployed on Render, configured outside this repo. To let a new frontend origin call the backend, add that origin to `CORS_ORIGINS` (see the defaults in [`backend/app/config.py`](backend/app/config.py), or override via an environment variable).
+- **Frontend.** Pushing to `main` makes [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) upload the whole `frontend/` folder as-is to GitHub Pages. There is no build or transform step, so new files are picked up automatically.
+- **Backend.** Deployed on Render, configured outside this repository. To let a new frontend origin call the backend, add it to `CORS_ORIGINS` (see the defaults in [`backend/app/config.py`](backend/app/config.py), or override it with an environment variable).
+
+## Roadmap and known limitations
+
+- **No authentication on the device link.** Anyone who knows the URL could impersonate the device or trigger a measurement. A shared secret between the device and the backend is planned.
+- **Browser-only storage.** Runs, curves and batches live in the browser's localStorage, so use the Data page's backup. They are planned to move to a backend database; only `hardware_api.js` would change.
+- **Placeholder unmixing.** The fluorescence signal is the F4 channel alone until an sfGFP standard's spectrum has been measured on the instrument ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
+- **No end-to-end test on a real export.** Parsing a real SpectraMax export and `/analyze` end to end have no automated test yet. One will be written against a real export.
+- **One backend process.** The device relay keeps its state in memory, which suits Render's single free instance. A multi-worker deployment would need a pub/sub layer.
+
+## Authors and acknowledgment
+
+LasReader was developed by the software group of **iGEM NCKU-Tainan 2026** (National Cheng Kung University, Tainan, Taiwan). Team members and their contributions are listed on the team wiki's [Team](https://2026.igem.wiki/ncku-tainan/team) and [Attributions](https://2026.igem.wiki/ncku-tainan/attributions) pages.
+
+We thank the authors of the open-source libraries listed under [Dependencies](#dependencies).
 
 ## License
 
-This project is released under the [MIT License](LICENSE), an OSI-approved open-source license.
+LasReader is released under the [MIT License](LICENSE), an OSI-approved open-source license, as required by iGEM for software tools. You may use, modify and redistribute it, including in future iGEM projects, provided the copyright notice and license text are kept.
+
+Third-party components keep their own licenses and are not redistributed in this repository: Chart.js (MIT) is loaded from a CDN, and the Python and Arduino libraries are installed by their package managers.

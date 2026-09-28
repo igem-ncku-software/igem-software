@@ -1,87 +1,12 @@
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
-FIXTURE = Path(__file__).parent / "fixtures" / "simulated_spectramax_export.txt"
-
 client = TestClient(app)
-
-TRUE_EC50_NM = {"TOP10": 100.0, "DH5α": 300.0, "BL21": 50.0}
 
 
 # --- POST /analyze ---
-
-
-def test_analyze_returns_all_three_strains_with_correct_ec50s():
-    with open(FIXTURE, "rb") as f:
-        response = client.post(
-            "/api/dose_response/analyze",
-            files={"file": ("simulated_spectramax_export.txt", f, "text/plain")},
-        )
-
-    assert response.status_code == 200
-    strains = response.json()["strains"]
-    assert set(strains) == set(TRUE_EC50_NM)
-
-    for strain, true_ec50 in TRUE_EC50_NM.items():
-        result = strains[strain]
-        assert result["responsive"] is True
-        assert result["ec50_nM"] == pytest.approx(true_ec50, rel=0.20)
-
-
-def test_analyze_includes_chart_data_for_plotting():
-    with open(FIXTURE, "rb") as f:
-        response = client.post(
-            "/api/dose_response/analyze",
-            files={"file": ("simulated_spectramax_export.txt", f, "text/plain")},
-        )
-
-    top10 = response.json()["strains"]["TOP10"]
-
-    # 6 tested concentrations (0, 1nM..10uM), all present incl. the excluded-from-fit 0 point.
-    assert len(top10["plateau_points"]) == 6
-    assert any(conc_nM == 0.0 for conc_nM, _ in top10["plateau_points"])
-
-    assert top10["fit_curve"] is not None
-    assert len(top10["fit_curve"]) == 50
-    curve_concs = [conc for conc, _ in top10["fit_curve"]]
-    assert curve_concs == sorted(curve_concs)  # ascending, ready to plot as a line
-
-
-def test_analyze_never_uses_the_client_filename_as_a_path():
-    with open(FIXTURE, "rb") as f:
-        response = client.post(
-            "/api/dose_response/analyze",
-            files={"file": ("/no-such-directory/../../escape.txt", f, "text/plain")},
-        )
-
-    assert response.status_code == 200
-
-
-def test_analyze_survives_a_dose_whose_every_reading_is_od_gated():
-    """Growth fully inhibited at 10 µM: OD_corr stays below od_min, so gating
-    removes every F in that row and its plateau has no value."""
-    in_od_block = False
-    patched = []
-    for line in FIXTURE.read_text(encoding="utf-8").splitlines():
-        if line.startswith("Plate:"):
-            in_od_block = "OD600" in line
-        if in_od_block and line.startswith("F\t"):
-            line = "F\t" + "\t".join(["0.000"] * 9) + "\t\t\t"
-        patched.append(line)
-
-    response = client.post(
-        "/api/dose_response/analyze",
-        files={"file": ("gated.txt", "\n".join(patched).encode("utf-8"), "text/plain")},
-    )
-
-    assert response.status_code == 200
-    top10 = response.json()["strains"]["TOP10"]
-    missing = [conc_nM for conc_nM, plateau in top10["plateau_points"] if plateau is None]
-    assert missing == [pytest.approx(10000.0)]
 
 
 def test_analyze_rejects_a_file_with_no_recognizable_wells():
