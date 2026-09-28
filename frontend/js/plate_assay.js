@@ -10,6 +10,10 @@
 //
 // Steps, each derived from the table and the fit, never stored:
 //   1 Enter data  2 Fit  3 Results  4 Export
+//
+// The signal is either the fluorescence as entered, or F/OD600: each well's fluorescence and OD
+// both less the medium blank's mean (medium only, no cells), then divided. Dividing by OD takes
+// out how many cells a well happens to hold, which the biosensor's output also depends on.
 // =========================================================
 
 const ASSAY_MIN_REPS = 1;
@@ -22,7 +26,10 @@ const ASSAY_TEXT_LIMIT = 200;
 const ASSAY_FIXED_COLUMNS = ["role", "key", "dilution"];
 
 let repCount = ASSAY_START_REPS;
-const rows = [];                 // { id, role: "standard" | "sample", key, dilution, reps: [text] }, cells as typed
+let odMode = false;              // signal = F/OD600, each less the medium blank; false = F as entered
+// { id, role: "standard" | "sample" | "medium", key, dilution, reps: [F text], ods: [OD text] }, cells
+// as typed. ods is kept while OD normalization is off, so switching back and forth loses nothing.
+const rows = [];
 let nextRowId = 1;
 const exclusions = new Map();    // reading id "rowId:rep" -> reason; present once ticked, reason may be empty
 let fit = null;                  // CurveFit.fit() result plus fitted_at, or null when not fitted (or discarded)
@@ -104,31 +111,72 @@ function cssVar(name) {
 
 // ---- The table's contents ------------------------------------------------------
 
-// Number("") is 0, so an empty cell has to be caught before converting.
+// Number("") is 0, so an empty cell has to be caught before converting. Excel copies a cell as it
+// is displayed, so "12,345" (comma thousands separators, only in groups of three) is accepted too;
+// any other comma is not a number, since a decimal comma can't be told apart from it.
 function parseNumber(text) {
-  const trimmed = String(text).trim();
+  let trimmed = String(text).trim();
+  if (/^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) trimmed = trimmed.replace(/,/g, "");
   return trimmed === "" ? NaN : Number(trimmed);
 }
 
 function newRow(role) {
-  return { id: nextRowId++, role, key: "", dilution: "1", reps: Array(repCount).fill("") };
+  return { id: nextRowId++, role, key: "", dilution: "1", reps: Array(repCount).fill(""), ods: Array(repCount).fill("") };
+}
+
+function isBlankText(text) {
+  return text.trim() === "";
 }
 
 // A row with nothing typed in it is left out of everything, so the starting rows cost nothing.
 function isEmptyRow(row) {
-  return row.key.trim() === "" && row.reps.every((text) => text.trim() === "");
+  return isBlankText(row.key) && row.reps.every(isBlankText) && row.ods.every(isBlankText);
+}
+
+// The value cells that count in the current mode: F only, or F and OD.
+function rowValueTexts(row) {
+  return odMode ? [...row.reps, ...row.ods] : row.reps;
+}
+
+// The medium blank: mean F and mean OD over every medium replicate with both, or null without one.
+// Only used with OD normalization.
+function mediumBlank() {
+  if (!odMode) return null;
+  const fs = [];
+  const ods = [];
+  for (const row of rows) {
+    if (row.role !== "medium") continue;
+    row.reps.forEach((text, rep) => {
+      const f = parseNumber(text);
+      const od = parseNumber(row.ods[rep]);
+      if (Number.isFinite(f) && Number.isFinite(od)) {
+        fs.push(f);
+        ods.push(od);
+      }
+    });
+  }
+  return fs.length ? { f: CurveFit.mean(fs), od: CurveFit.mean(ods), n: fs.length } : null;
 }
 
 function readingId(row, rep) {
   return `${row.id}:${rep}`;
 }
 
-// Every filled, numeric replicate cell of a row, as { id, rep, y }.
-function rowReadings(row) {
+// Every usable replicate of a row, as { id, rep, y, f, od }: y is the signal the fit and the
+// results use. With OD normalization a replicate needs both values and a medium blank, and its OD
+// less the blank's must be positive; dataProblems() reports every replicate that falls short.
+function rowReadings(row, blank = mediumBlank()) {
   const readings = [];
   row.reps.forEach((text, rep) => {
-    const y = parseNumber(text);
-    if (Number.isFinite(y)) readings.push({ id: readingId(row, rep), rep, y });
+    const f = parseNumber(text);
+    if (!Number.isFinite(f)) return;
+    if (!odMode) {
+      readings.push({ id: readingId(row, rep), rep, y: f, f, od: null });
+      return;
+    }
+    const od = parseNumber(row.ods[rep]);
+    if (!Number.isFinite(od) || !blank || !(od - blank.od > 0)) return;
+    readings.push({ id: readingId(row, rep), rep, y: (f - blank.f) / (od - blank.od), f, od });
   });
   return readings;
 }
@@ -136,12 +184,13 @@ function rowReadings(row) {
 // The standards, grouped by concentration (rows with the same concentration merge), ascending.
 function standardGroups() {
   const groups = new Map();
+  const blank = mediumBlank();
   for (const row of rows) {
     if (row.role !== "standard" || isEmptyRow(row)) continue;
     const c = parseNumber(row.key);
     if (!(Number.isFinite(c) && c >= 0)) continue;
     if (!groups.has(c)) groups.set(c, []);
-    for (const reading of rowReadings(row)) groups.get(c).push({ ...reading, row });
+    for (const reading of rowReadings(row, blank)) groups.get(c).push({ ...reading, row });
   }
   return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([c, readings]) => ({ c, readings }));
 }
@@ -202,7 +251,9 @@ function dataProblems() {
     if (isEmptyRow(row)) return;
     const n = i + 1;
     const key = row.key.trim();
-    if (row.role === "standard") {
+    if (row.role === "medium") {
+      if (!odMode) add("a medium blank is used only with F/OD600; switch it on or remove the row.", n);
+    } else if (row.role === "standard") {
       if (!key) add("enter the concentration.", n);
       else if (!(parseNumber(key) >= 0)) add("concentration must be a number ≥ 0.", n);
     } else {
@@ -219,11 +270,31 @@ function dataProblems() {
       }
       if (!(parseNumber(row.dilution) >= 1)) add("dilution must be a number ≥ 1.", n);
     }
-    const filled = row.reps.filter((text) => text.trim() !== "");
-    if (filled.length === 0) add("enter at least one replicate.", n);
-    if (filled.some((text) => !Number.isFinite(parseNumber(text)))) add("a replicate is not a number.", n);
+    const values = rowValueTexts(row).filter((text) => !isBlankText(text));
+    if (values.length === 0) add("enter at least one replicate.", n);
+    if (values.some((text) => !Number.isFinite(parseNumber(text)))) add("a value is not a number.", n);
+    // F and OD come from the same well: one without the other can't be divided.
+    if (odMode && row.reps.some((text, rep) => isBlankText(text) !== isBlankText(row.ods[rep]))) {
+      add("each replicate needs both F and OD.", n);
+    }
   });
   for (const [problem, numbers] of byProblem) problems.push(`${rowList(numbers.sort((a, b) => a - b))}: ${problem}`);
+
+  if (problems.length === 0 && odMode) {
+    const blank = mediumBlank();
+    if (!blank) {
+      problems.push("Enter a medium blank (medium only, no cells): its F and OD are subtracted from every well.");
+    } else {
+      const low = [];
+      rows.forEach((row, i) => {
+        if (row.role === "medium" || isEmptyRow(row)) return;
+        if (row.ods.some((text) => !isBlankText(text) && !(parseNumber(text) - blank.od > 0))) low.push(i + 1);
+      });
+      if (low.length) {
+        problems.push(`${rowList(low)}: OD is not above the medium blank's (${formatSignal(blank.od)}), so F/OD is undefined.`);
+      }
+    }
+  }
 
   if (problems.length === 0) {
     const groups = standardGroups();
@@ -237,8 +308,9 @@ function dataProblems() {
 
 // ---- Changes -------------------------------------------------------------------
 
-// Any change to the readings discards the fit, so the results can never describe other numbers.
-// Experiment info doesn't touch the fit, but it does go into the export.
+// Any change to the standards discards the fit, so the curve can never describe other numbers.
+// A sample's cells and the experiment info don't touch the fit; the results are recomputed from
+// the table on every render, and both go into the export.
 function dataChanged(affectsFit) {
   exported = false;
   if (affectsFit && fit) {
@@ -258,14 +330,16 @@ function addRow(role) {
   rows.push(newRow(role));
   renderEntryTable();
   dataChanged(false);
-  document.querySelector(`[data-cell="${rows.length - 1}:key"]`)?.focus();
+  document.querySelector(`[data-cell="${rows.length - 1}:${role === "medium" ? "rep0" : "key"}"]`)?.focus();
 }
 
 function setRepCount(count) {
   repCount = Math.min(ASSAY_MAX_REPS, Math.max(ASSAY_MIN_REPS, count));
   for (const row of rows) {
-    row.reps = row.reps.slice(0, repCount);
-    while (row.reps.length < repCount) row.reps.push("");
+    for (const field of ["reps", "ods"]) {
+      row[field] = row[field].slice(0, repCount);
+      while (row[field].length < repCount) row[field].push("");
+    }
   }
   pruneExclusions();
   renderEntryTable();
@@ -273,19 +347,22 @@ function setRepCount(count) {
 }
 
 // A block copied from Excel (tab-separated rows) fills the table from the cell it is pasted into,
-// rightwards and downwards, adding rows and replicate columns as needed.
+// rightwards and downwards, adding rows as needed. The columns run role, concentration / name,
+// dilution, the F replicates, then (with F/OD600) the OD replicates, so an F block and an OD block
+// can be pasted one after the other. Without OD, replicate columns are added as needed; with it
+// they aren't, since that would move every OD column.
 function pasteBlock(startRow, startCol, text) {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
   const grid = lines.map((line) => line.split("\t"));
   const width = Math.max(...grid.map((cells) => cells.length));
   const lastCol = startCol + width - 1;
-  const neededReps = lastCol - ASSAY_FIXED_COLUMNS.length + 1;
-  let ignoredColumns = 0;
-  if (neededReps > repCount) {
-    ignoredColumns = Math.max(0, neededReps - ASSAY_MAX_REPS);
-    setRepCount(neededReps);
+  if (!odMode) {
+    const neededReps = lastCol - ASSAY_FIXED_COLUMNS.length + 1;
+    if (neededReps > repCount) setRepCount(neededReps);
   }
+  const valueColumns = repCount * (odMode ? 2 : 1);
+  const ignoredColumns = Math.max(0, lastCol - (ASSAY_FIXED_COLUMNS.length + valueColumns - 1));
 
   const role = rows[startRow].role;
   grid.forEach((cells, r) => {
@@ -295,15 +372,19 @@ function pasteBlock(startRow, startCol, text) {
     cells.forEach((raw, c) => {
       const col = startCol + c;
       const text = raw.trim();
+      const value = col - ASSAY_FIXED_COLUMNS.length;
       if (col === 0) {
         if (/^st/i.test(text)) row.role = "standard";
         else if (/^sa/i.test(text)) row.role = "sample";
+        else if (/^m/i.test(text) && odMode) row.role = "medium";
       } else if (col === 1) {
         row.key = text;
       } else if (col === 2) {
         row.dilution = text;
-      } else if (col - ASSAY_FIXED_COLUMNS.length < repCount) {
-        row.reps[col - ASSAY_FIXED_COLUMNS.length] = text;
+      } else if (value < repCount) {
+        row.reps[value] = text;
+      } else if (odMode && value < 2 * repCount) {
+        row.ods[value - repCount] = text;
       }
     });
   });
@@ -314,7 +395,7 @@ function pasteBlock(startRow, startCol, text) {
   const statusEl = document.getElementById("entry-status");
   const pasted = `Pasted ${plural(grid.length, "row")} × ${plural(width, "column")}.`;
   if (ignoredColumns > 0) {
-    setStatus(statusEl, `${pasted} ${plural(ignoredColumns, "column")} past Rep ${ASSAY_MAX_REPS} ignored.`, "warn");
+    setStatus(statusEl, `${pasted} ${plural(ignoredColumns, "column")} past the last replicate ignored.`, "warn");
   } else {
     setStatus(statusEl, pasted, "success");
   }
@@ -330,9 +411,12 @@ function cellInput(row, rowIndex, col, field, label) {
   input.dataset.cell = `${rowIndex}:${field}`;
   input.setAttribute("aria-label", label);
 
-  const read = () => (field.startsWith("rep") ? row.reps[Number(field.slice(3))] : row[field]);
+  // "rep2" is the third F replicate, "od2" the OD of the same well.
+  const valueCell = /^(rep|od)(\d+)$/.exec(field);
+  const store = valueCell ? row[valueCell[1] === "rep" ? "reps" : "ods"] : null;
+  const read = () => (valueCell ? store[Number(valueCell[2])] : row[field]);
   const write = (value) => {
-    if (field.startsWith("rep")) row.reps[Number(field.slice(3))] = value;
+    if (valueCell) store[Number(valueCell[2])] = value;
     else row[field] = value;
   };
   input.value = read();
@@ -342,7 +426,7 @@ function cellInput(row, rowIndex, col, field, label) {
     let invalid = false;
     if (text !== "") {
       const value = parseNumber(text);
-      if (field.startsWith("rep")) invalid = !Number.isFinite(value);
+      if (valueCell) invalid = !Number.isFinite(value);
       else if (field === "dilution") invalid = !(value >= 1);
       else if (row.role === "standard") invalid = !(value >= 0);
     }
@@ -354,9 +438,10 @@ function cellInput(row, rowIndex, col, field, label) {
   input.addEventListener("input", () => {
     write(input.value);
     mark();
-    // A sample's name or dilution doesn't change the curve; a standard's cells and every value do.
+    // Only a standard's cells change the curve, and with F/OD600 a medium blank's too (it enters
+    // every standard's signal); a sample's only change its own result.
     pruneExclusions();
-    dataChanged(field.startsWith("rep") || row.role === "standard");
+    dataChanged(row.role === "standard" || (row.role === "medium" && odMode));
   });
   input.addEventListener("paste", (event) => {
     const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -384,7 +469,14 @@ function renderEntryTable() {
   for (const text of ["#", "Role", "Concentration (nM) / name", "Dilution"]) {
     headRow.appendChild(Object.assign(el("th", null, text), { scope: "col" }));
   }
-  for (let rep = 0; rep < repCount; rep++) headRow.appendChild(Object.assign(el("th", null, `Rep ${rep + 1}`), { scope: "col" }));
+  for (let rep = 0; rep < repCount; rep++) {
+    headRow.appendChild(Object.assign(el("th", null, odMode ? `F ${rep + 1}` : `Rep ${rep + 1}`), { scope: "col" }));
+  }
+  if (odMode) {
+    for (let rep = 0; rep < repCount; rep++) {
+      headRow.appendChild(Object.assign(el("th", "od-head", `OD ${rep + 1}`), { scope: "col" }));
+    }
+  }
   const actions = Object.assign(el("th"), { scope: "col" });
   actions.appendChild(el("span", "visually-hidden", "Actions"));
   headRow.appendChild(actions);
@@ -402,7 +494,10 @@ function renderEntryTable() {
     };
 
     const role = el("select", "table-input");
-    for (const [value, text] of [["standard", "Standard"], ["sample", "Sample"]]) {
+    const roles = [["standard", "Standard"], ["sample", "Sample"]];
+    // A medium row stays selectable after F/OD600 is switched off, so the problem list can point at it.
+    if (odMode || row.role === "medium") roles.push(["medium", "Medium blank"]);
+    for (const [value, text] of roles) {
       const option = el("option", null, text);
       option.value = value;
       role.appendChild(option);
@@ -416,13 +511,14 @@ function renderEntryTable() {
       pruneExclusions();
       renderEntryTable();
       dataChanged(true);
-      document.querySelector(`[data-cell="${i}:key"]`)?.focus();
+      document.querySelector(`[data-cell="${i}:${row.role === "medium" ? "rep0" : "key"}"]`)?.focus();
     });
 
     const key = cellInput(row, i, 1, "key", row.role === "standard" ? `Row ${n} concentration (nM)` : `Row ${n} sample name`);
-    key.placeholder = row.role === "standard" ? "nM" : "Name";
+    key.placeholder = { standard: "nM", sample: "Name", medium: "" }[row.role];
+    key.disabled = row.role === "medium";
     const dilution = cellInput(row, i, 2, "dilution", `Row ${n} dilution`);
-    dilution.disabled = row.role === "standard";
+    dilution.disabled = row.role !== "sample";
     if (dilution.disabled) dilution.value = "";
 
     const remove = el("button", "btn-secondary table-button", "Remove");
@@ -433,17 +529,26 @@ function renderEntryTable() {
       rows.splice(i, 1);
       pruneExclusions();
       renderEntryTable();
-      dataChanged(true);
+      dataChanged(row.role === "standard" && !isEmptyRow(row));
     });
 
     tr.append(el("td", null, String(n)), cell(role), cell(key), cell(dilution, "dilution-cell"));
     for (let rep = 0; rep < repCount; rep++) {
-      tr.appendChild(cell(cellInput(row, i, ASSAY_FIXED_COLUMNS.length + rep, `rep${rep}`, `Row ${n} replicate ${rep + 1}`), "rep-cell"));
+      const label = odMode ? `Row ${n} replicate ${rep + 1} fluorescence` : `Row ${n} replicate ${rep + 1}`;
+      tr.appendChild(cell(cellInput(row, i, ASSAY_FIXED_COLUMNS.length + rep, `rep${rep}`, label), "rep-cell"));
+    }
+    if (odMode) {
+      for (let rep = 0; rep < repCount; rep++) {
+        const col = ASSAY_FIXED_COLUMNS.length + repCount + rep;
+        tr.appendChild(cell(cellInput(row, i, col, `od${rep}`, `Row ${n} replicate ${rep + 1} OD600`), "rep-cell od-cell"));
+      }
     }
     tr.appendChild(cell(remove, "action-cell"));
     body.appendChild(tr);
   });
 
+  document.getElementById("add-medium").hidden = !odMode;
+  document.getElementById("od-note").hidden = !odMode;
   document.getElementById("add-rep").disabled = repCount >= ASSAY_MAX_REPS;
   document.getElementById("remove-rep").disabled = repCount <= ASSAY_MIN_REPS;
 }
@@ -452,9 +557,20 @@ function renderEntrySummary() {
   const groups = standardGroups();
   const blanks = groups.find((g) => g.c === 0)?.readings.length ?? 0;
   const concentrations = groups.filter((g) => g.c > 0).length;
+  const medium = odMode ? `, ${plural(mediumBlank()?.n ?? 0, "medium reading")}` : "";
   document.getElementById("entry-summary").textContent =
-    `${plural(concentrations, "concentration")}, ${plural(blanks, "blank reading")}, ${plural(sampleRows().length, "sample")} · `
+    `${plural(concentrations, "concentration")}, ${plural(blanks, "blank reading")}, ${plural(sampleRows().length, "sample")}${medium} · `
     + "a fit needs at least 4 concentrations and 2 blank readings";
+}
+
+// Switching the signal changes every value the fit used. The first switch to F/OD600 adds an empty
+// medium blank row at the top, since without one nothing can be divided.
+function setOdMode(on) {
+  odMode = on;
+  if (on && !rows.some((row) => row.role === "medium")) rows.unshift(newRow("medium"));
+  pruneExclusions();
+  renderEntryTable();
+  dataChanged(true);
 }
 
 function goToFit() {
@@ -519,6 +635,7 @@ function toggleExclusion(id, checked) {
 function renderFitTable() {
   const tbody = document.getElementById("fit-table-body");
   tbody.replaceChildren();
+  for (const th of document.querySelectorAll("#fit-card .od-col")) th.hidden = !odMode;
   for (const group of standardGroups()) {
     const countedYs = group.readings.filter((r) => !isExcluded(r)).map((r) => r.y);
     const mean = countedYs.length ? CurveFit.mean(countedYs) : null;
@@ -567,8 +684,9 @@ function renderFitTable() {
         reasonCell.appendChild(reason);
       }
 
+      tr.append(el("td", null, label));
+      if (odMode) tr.append(el("td", null, formatSignal(reading.f)), el("td", null, formatSignal(reading.od)));
       tr.append(
-        el("td", null, label),
         el("td", null, formatSignal(reading.y)),
         el("td", null, fit ? formatSignedSignal(reading.y - CurveFit.model(group.c, fit.params)) : "--"),
         excludeCell,
@@ -676,7 +794,7 @@ function renderFitChart() {
           ticks: { color: muted },
         },
         y: {
-          title: { display: true, text: experimentInfo().signal || "Signal", color: ink },
+          title: { display: true, text: signalLabel(), color: ink },
           grid: { color: rule },
           ticks: { color: muted },
         },
@@ -685,6 +803,12 @@ function renderFitChart() {
     },
     plugins: [errorBarPlugin],
   });
+}
+
+// What the signal axis and the CSV call the number that was fitted.
+function signalLabel() {
+  const signal = experimentInfo().signal || "Signal";
+  return odMode ? `${signal} ÷ OD600, less medium blank (a.u.)` : signal;
 }
 
 function renderFitMetrics() {
@@ -732,10 +856,10 @@ function sampleResult(row) {
 }
 
 // Outside the range only the bound is shown, scaled like the number would have been.
-function formatResult(result, scale) {
+function formatResult(result, value, scale) {
   if (result.status === "below_lod") return `< ${formatConcentration(fit.range_nM.min * scale)}`;
   if (result.status === "above_range") return `> ${formatConcentration(fit.range_nM.max * scale)}`;
-  return formatConcentration((scale === 1 ? result.well_nM : result.sample_nM));
+  return formatConcentration(value);
 }
 
 function renderResults() {
@@ -756,10 +880,10 @@ function renderResults() {
       el("td", null, formatSignal(result.mean)),
       el("td", null, result.sd === null ? "--" : formatSignal(result.sd)),
       el("td", null, result.cv === null ? "--" : formatPercent(result.cv)),
-      el("td", null, formatResult(result, 1)),
+      el("td", null, formatResult(result, result.well_nM, 1)),
       el("td", null, result.well_ci ? formatInterval(result.well_ci) : "--"),
       el("td", null, `×${result.dilution}`),
-      el("td", null, formatResult(result, result.dilution)),
+      el("td", null, formatResult(result, result.sample_nM, result.dilution)),
       el("td", null, result.sample_ci ? formatInterval(result.sample_ci) : "--"),
     );
     tbody.appendChild(tr);
@@ -793,16 +917,21 @@ function fileStem() {
 
 const CSV_HEADERS = [
   "date", "strain", "signal", "instrument", "notes",
-  "row", "role", "concentration_nM", "sample", "dilution", "replicate", "value", "excluded_reason",
+  "normalization", "medium_f_mean", "medium_od_mean",
+  "row", "role", "concentration_nM", "sample", "dilution", "replicate", "fluorescence", "od600", "signal", "excluded_reason",
   "model", "fitted_at", "top", "bottom", "ec50_nM", "hill", "lod_nM", "loq_nM", "range_min_nM", "range_max_nM", "rmse",
   "sample_n", "sample_mean", "sample_sd", "status", "ahl_well_nM", "ci95_well_low_nM", "ci95_well_high_nM",
   "ahl_sample_nM", "ci95_sample_low_nM", "ci95_sample_high_nM",
 ];
 
-// A row per reading, excluded ones included with their reason; the curve and, for a sample, its
-// result sit beside each reading, so any row reads on its own. Full precision, never the display format.
+// A row per replicate, excluded ones included with their reason and medium blanks included too; the
+// normalization, the curve and, for a sample, its result sit beside each row, so any row reads on
+// its own. signal is the number that was fitted or converted (F, or F/OD600 less the medium blank).
+// Full precision, never the display format.
 function csvRows() {
   const info = experimentInfo();
+  const blank = mediumBlank();
+  const normalization = odMode ? ["F/OD600", blank.f, blank.od] : ["none", null, null];
   const curve = [
     "4PL", fit.fitted_at, fit.params.top, fit.params.bottom, fit.params.ec50_nM, fit.params.hill,
     fit.lod_nM, fit.loq_nM, fit.range_nM.min, fit.range_nM.max, fit.rmse,
@@ -811,19 +940,26 @@ function csvRows() {
   rows.forEach((row, i) => {
     if (isEmptyRow(row)) return;
     const standard = row.role === "standard";
-    const result = standard ? null : sampleResult(row);
-    for (const reading of rowReadings(row)) {
+    const sample = row.role === "sample";
+    const result = sample ? sampleResult(row) : null;
+    const signals = new Map(rowReadings(row, blank).map((r) => [r.rep, r.y]));
+    row.reps.forEach((text, rep) => {
+      const f = parseNumber(text);
+      if (!Number.isFinite(f)) return;
       out.push([
         info.date, info.strain, info.signal, info.instrument, info.notes,
-        i + 1, row.role, standard ? parseNumber(row.key) : null, standard ? null : row.key.trim(),
-        standard ? null : result.dilution, reading.rep + 1, reading.y, standard ? exclusions.get(reading.id) ?? null : null,
+        ...normalization,
+        i + 1, row.role, standard ? parseNumber(row.key) : null, sample ? row.key.trim() : null,
+        sample ? result.dilution : null, rep + 1, f, odMode ? parseNumber(row.ods[rep]) : null,
+        row.role === "medium" ? null : signals.get(rep) ?? null,
+        standard ? exclusions.get(readingId(row, rep)) ?? null : null,
         ...curve,
         ...(result
           ? [result.n, result.mean, result.sd, result.status, result.well_nM, result.well_ci?.[0], result.well_ci?.[1],
             result.sample_nM, result.sample_ci?.[0], result.sample_ci?.[1]]
           : Array(10).fill(null)),
       ]);
-    }
+    });
   });
   return out;
 }
@@ -903,6 +1039,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   document.getElementById("add-standard").addEventListener("click", () => addRow("standard"));
   document.getElementById("add-sample").addEventListener("click", () => addRow("sample"));
+  document.getElementById("add-medium").addEventListener("click", () => addRow("medium"));
+  for (const radio of document.querySelectorAll('input[name="signal-mode"]')) {
+    radio.addEventListener("change", () => setOdMode(radio.value === "od" && radio.checked));
+  }
   document.getElementById("add-rep").addEventListener("click", () => setRepCount(repCount + 1));
   document.getElementById("remove-rep").addEventListener("click", () => setRepCount(repCount - 1));
   document.getElementById("data-next").addEventListener("click", goToFit);

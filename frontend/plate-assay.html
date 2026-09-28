@@ -69,9 +69,23 @@
 
           <fieldset class="plain-fieldset">
             <legend>Readings</legend>
+            <div class="radio-row" role="radiogroup" aria-label="Signal used for the fit">
+              <label class="check-field">
+                <input type="radio" name="signal-mode" value="f" checked />
+                Fluorescence
+              </label>
+              <label class="check-field">
+                <input type="radio" name="signal-mode" value="od" />
+                Fluorescence ÷ OD600
+              </label>
+            </div>
             <p class="plan-meta">
               Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution.
               Paste a block from Excel into any cell.
+            </p>
+            <p class="plan-meta" id="od-note" hidden>
+              F and OD of each replicate come from the same well. Medium blank: medium only, no cells;
+              its mean F and OD are subtracted from every well before dividing.
             </p>
             <div class="table-wrapper table-spaced">
               <table class="manual-table assay-table">
@@ -82,6 +96,7 @@
             <div class="button-row">
               <button type="button" class="btn-secondary" id="add-standard">Add standard</button>
               <button type="button" class="btn-secondary" id="add-sample">Add sample</button>
+              <button type="button" class="btn-secondary" id="add-medium" hidden>Add medium blank</button>
               <button type="button" class="btn-secondary" id="add-rep">Add replicate</button>
               <button type="button" class="btn-secondary" id="remove-rep">Remove replicate</button>
             </div>
@@ -120,6 +135,8 @@
                   <th scope="col">Mean signal</th>
                   <th scope="col">Mean residual</th>
                   <th scope="col">Reading</th>
+                  <th scope="col" class="od-col" hidden>F</th>
+                  <th scope="col" class="od-col" hidden>OD600</th>
                   <th scope="col">Signal</th>
                   <th scope="col">Residual</th>
                   <th scope="col">Exclude</th>

@@ -191,7 +191,7 @@ That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js).
 
 Put the AHL standards (including blanks: cells, no AHL) and the samples on the same plate, and read them together. One curve serves only the readings entered with it, since a plate reader's signal scale changes with the instrument, gain and day.
 
-1. **Enter data.** Fill in the date, biosensor strain and signal, then one row per standard concentration (0 nM for blanks) or sample, with up to six replicates each. Type the values, or paste a block from Excel into any cell. A sample carries its dilution before reading.
+1. **Enter data.** Fill in the date, biosensor strain and signal, then one row per standard concentration (0 nM for blanks) or sample, with up to six replicates each. Type the values, or paste a block from Excel into any cell. A sample carries its dilution before reading. To normalize to cell density, choose *Fluorescence ÷ OD600*: each replicate then takes the F and OD600 of one well, and a *Medium blank* row (medium only, no cells) supplies the background subtracted from both before dividing.
 2. **Fit.** Review the standards, exclude a reading with a reason if needed, and fit the 4PL. At least 4 non-zero concentrations and 2 blank readings are required.
 3. **Results.** Each sample's replicates are averaged and converted once: AHL in the well with a 95% CI, and in the original sample (× dilution). Outside the usable range only the bound is shown.
 4. **Export.** A CSV with every reading, the curve and each sample's result, and the curve as a PNG. Nothing is stored, so export before leaving the page.
@@ -263,7 +263,7 @@ Other software can call the REST API directly, for example a notebook reading `/
 
 ## Plate reader assay pipeline
 
-The assay uses CAPTURE-Screen's calibration model through the shared [`js/curve_fit.js`](frontend/js/curve_fit.js), so the same readings give the same curve on either page: a weighted 4PL (Levenberg–Marquardt, weights from the replicate spread, unweighted when there is none), LOD/LOQ from the blanks, a usable range, and inversion with a delta-method 95% CI. Each is described in [docs/capture_screen_model.md §7–11](docs/capture_screen_model.md#7-the-4pl-calibration-model). A sample's replicates are averaged before conversion, and its reading variance divided by *n*. The previous dose-response analysis was removed on 2026-09-28 and survives in git history; its Python dependencies (numpy, scipy, pandas, lmfit, PyYAML, python-multipart) stay in `requirements.txt`.
+The assay uses CAPTURE-Screen's calibration model through the shared [`js/curve_fit.js`](frontend/js/curve_fit.js), so the same readings give the same curve on either page: a weighted 4PL (Levenberg–Marquardt, weights from the replicate spread, unweighted when there is none), LOD/LOQ from the blanks, a usable range, and inversion with a delta-method 95% CI. Each is described in [docs/capture_screen_model.md §7–11](docs/capture_screen_model.md#7-the-4pl-calibration-model). With OD normalization each well's signal is (F − medium F) ÷ (OD600 − medium OD600), using the medium blank's means. A sample's replicates are averaged before conversion, and its reading variance divided by *n*. The previous dose-response analysis was removed on 2026-09-28 and survives in git history; its Python dependencies (numpy, scipy, pandas, lmfit, PyYAML, python-multipart) stay in `requirements.txt`.
 
 ## Hardware: CAPTURE-Screen
 

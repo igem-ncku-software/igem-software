@@ -740,3 +740,6 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 /* Plate Reader Assay: many replicate columns side by side, so each value cell is narrow. */
 .assay-table { min-width: 0; }
 .assay-table td.rep-cell input.table-input, .assay-table td.dilution-cell input.table-input { min-width: 72px; width: 88px; }
+/* With F/OD600, the OD columns are tinted so they read as a second block beside the F replicates. */
+.assay-table th.od-head, .assay-table td.od-cell { background: var(--solid-soft); }
+.assay-table select.table-input { min-width: 150px; }
