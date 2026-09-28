@@ -26,46 +26,7 @@
     </header>
 
     <main>
-      <section class="card">
-        <p class="section-label">Analysis</p>
-
-        <p class="section-description">
-          Upload a raw plate reader export
-        </p>
-
-        <form id="dose-response-form">
-          <label for="dose-response-file">Plate reader export file</label>
-          <input type="file" id="dose-response-file" accept=".txt" />
-
-          <button type="submit" id="analyze-button">Analyze</button>
-        </form>
-
-        <!-- aria-live: the analysis result is announced when it arrives, so a
-             screen reader user is not left waiting on a silent page. -->
-        <p class="status-message" id="dose-response-status" aria-live="polite"></p>
-
-        <div class="result-block" id="dose-response-result" hidden>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Strain</th>
-                  <th scope="col">EC50 (nM)</th>
-                  <th scope="col">95% CI (nM)</th>
-                  <th scope="col">Hill n</th>
-                  <th scope="col">R&sup2;</th>
-                  <th scope="col">Responsive</th>
-                  <th scope="col">LOD (nM)</th>
-                  <th scope="col">LOQ (nM)</th>
-                </tr>
-              </thead>
-              <tbody id="results-table-body"></tbody>
-            </table>
-          </div>
-
-          <div id="strain-charts"></div>
-        </div>
-      </section>
+      <!-- Page content is being redesigned. -->
     </main>
 
     <footer class="site-footer">

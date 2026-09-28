@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 
-# AHL dose-response analysis API
+# AHL dose-response analysis API (being rebuilt; no endpoints yet)
 app.include_router(dose_response_router)
 app.include_router(hardware_router)
 app.include_router(live_router)
@@ -36,8 +36,6 @@ def root() -> dict:
         "message": "LasReader API is running.",
         "docs": "/docs",
         "health": "/health",
-        "dose_response_analyze": "POST /api/dose_response/analyze",
-        "dose_response_predict": "POST /api/dose_response/predict",
         "hardware_status": "GET /api/hardware/status",
         "hardware_read": "POST /api/hardware/read",
         "hardware_device": "WS /api/hardware/device",

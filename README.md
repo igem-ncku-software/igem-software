@@ -37,7 +37,7 @@
 
 Many synthetic-biology biosensors report a signal molecule, here the quorum-sensing molecule AHL, by expressing a fluorescent protein. Turning that fluorescence into a number you can trust takes more than reading a value: backgrounds must be subtracted, replicates combined, a dose-response curve fitted, and its limits respected. LasReader packages those steps into two web tools that any team can open in a browser, with nothing to install:
 
-- **AHL dose-response analysis.** Upload a raw plate-reader export and the whole analysis runs automatically. For each strain you get its EC50, Hill coefficient, 95% confidence interval, R², LOD/LOQ, and whether the strain responds to AHL at all.
+- **AHL dose-response analysis** of plate-reader data. *Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history.
 - **CAPTURE-Screen interface.** CAPTURE-Screen is the team's low-cost fluorescence reader (ESP32 + AS7341 spectral sensor). Once the device powers on and joins Wi-Fi it connects to the backend by itself. The landing page then shows all ten spectral channels live, and four pages, used in order, guide you through:
   1. checking the instrument;
   2. calibrating it tube by tube with a weighted 4PL fit;
@@ -71,7 +71,6 @@ How this repository meets the requirements the *iGEM 2026 Judge Handbook* sets f
 
 ```mermaid
 flowchart LR
-    FILE["plate reader<br/>export (.txt)"]
     DEV["CAPTURE-Screen<br/>ESP32 + AS7341"]
 
     subgraph FE["frontend/ — static site (GitHub Pages)"]
@@ -85,18 +84,12 @@ flowchart LR
     end
 
     subgraph BE["backend/ — FastAPI (Render)"]
-        RT1["/api/dose_response<br/>analyze · predict"]
+        RT1["/api/dose_response<br/>(being rebuilt)"]
         HUB["/api/hardware<br/>status · read · device"]
         LIVE["/api/live<br/>spectrum"]
         LIVE -->|subscribes to device| HUB
-        subgraph PIPE["dose_response analysis pipeline"]
-            direction LR
-            IO["io"] --> NRM["normalize"] --> TS["timeseries"] --> DRS["doseresponse"]
-        end
-        RT1 --> PIPE
     end
 
-    FILE --> DR
     DR -->|HTTPS| RT1
     IDX -->|WSS live spectrum| LIVE
     HW -->|HTTPS status & measurement| HUB
@@ -108,7 +101,7 @@ flowchart LR
 ```
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
-├── dose-response.html        dose-response analysis page
+├── dose-response.html        dose-response analysis page (being redesigned)
 ├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-check
 ├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
 ├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
@@ -125,7 +118,7 @@ backend/                      FastAPI
 │   ├── config.py             environment variables and CORS settings
 │   ├── hardware/             CAPTURE-Screen's relay: device connection, status, measurement
 │   ├── live/                 live sensing: the shared Live switch and the live spectrum
-│   └── dose_response/        dose-response analysis pipeline
+│   └── dose_response/        dose-response analysis (being rebuilt; empty router)
 ├── tests/                    pytest
 └── requirements.txt
 
@@ -194,9 +187,7 @@ That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js).
 
 ### Dose-response analysis
 
-1. Open **Dose-Response** from the landing page.
-2. Choose a SpectraMax ASCII export (`.txt`, UTF-8 or UTF-16) whose plate follows the layout in [`experiment.yaml`](backend/app/dose_response/config/experiment.yaml) (see [Experiment design and thresholds](#experiment-design-and-thresholds)), and run the analysis.
-3. The summary table lists every strain. Each responsive strain also gets a chart (plateau points, fitted Hill curve, EC50) and a **predict** box that back-calculates AHL from a normalized fluorescence value. A strain that doesn't respond is reported as such, with no curve.
+*Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history.
 
 ### CAPTURE-Screen
 
@@ -212,24 +203,7 @@ Runs, curves and batches are stored in your browser. **Export a backup from the 
 
 ## Reproducing the main results
 
-LasReader produces two kinds of results. Both come from the code in this repository, run locally as described under [Installation](#installation).
-
-**1. A strain's dose-response parameters** (EC50 with its 95% CI, Hill coefficient, R², LOD/LOQ, and whether it responds).
-
-1. Start LasReader with `bash scripts/dev.sh` and open <http://127.0.0.1:5500/dose-response.html>.
-2. Upload a SpectraMax ASCII export from a plate laid out as in [`experiment.yaml`](backend/app/dose_response/config/experiment.yaml).
-3. The table lists each strain's parameters, and the charts show the plateau points and the fitted Hill curve.
-
-The same numbers are available without the web page:
-
-```bash
-cd backend
-.venv/bin/python -c "from app.dose_response.pipeline import run_pipeline; print(run_pipeline('path/to/export.txt'))"   # Windows: .venv\Scripts\python
-```
-
-The analysis is deterministic, so the same file always gives the same parameters. Each step's method is documented in the module docstrings under `backend/app/dose_response/`.
-
-**2. A CAPTURE-Screen calibration curve and the AHL inferred through it.**
+LasReader's main result is a CAPTURE-Screen calibration curve and the AHL inferred through it; it comes from the code in this repository, run locally as described under [Installation](#installation). The dose-response analysis is being redesigned, and its reproduction steps will return with it.
 
 - **With the instrument:** follow [Usage → CAPTURE-Screen](#capture-screen) steps 1–4.
 - **Without the instrument:** open Calibrate, choose *Enter recorded data*, and type in previously recorded readings (standards and blanks, in basic counts) together with the instrument configuration they were read under. Fitting, LOD/LOQ and saving work exactly as they do for a device run, so a published curve can be refitted from its recorded values.
@@ -243,7 +217,7 @@ cd backend
 pytest
 ```
 
-The suite covers the dose-response math (`test_models`, `test_normalize`, `test_timeseries`, `test_doseresponse`), plate-map handling (`test_io`), the `/predict` endpoint and `/analyze`'s rejection of an unreadable file, and the hardware relay and live spectrum (`tests/hardware/`, `tests/live/`, driven through a fake device connection). `tests/conftest.py` adds `backend/` to `sys.path`, so run `pytest` from inside `backend/`.
+The suite covers the hardware relay and live spectrum (`tests/hardware/`, `tests/live/`, driven through a fake device connection). `tests/dose_response/` is empty until the analysis is rebuilt. `tests/conftest.py` adds `backend/` to `sys.path`, so run `pytest` from inside `backend/`.
 
 The firmware compiles from the command line (warnings come only from inside the libraries):
 
@@ -258,8 +232,6 @@ Backend URL: `https://igem-ncku-software.onrender.com`
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check. The frontend footer's connection indicator polls it. |
-| `POST` | `/api/dose_response/analyze` | Upload a reader export (multipart) and get each strain's fitted results |
-| `POST` | `/api/dose_response/predict` | Back-calculate AHL concentration from a fluorescence value |
 | `GET` | `/api/hardware/status` | Whether CAPTURE-Screen is online, with its last reported status and config |
 | `POST` | `/api/hardware/read` | Ask the device for one measurement (dark → light → dark) and return the raw reading |
 | `WS` | `/api/hardware/device` | The device's own inbound connection |
@@ -267,16 +239,7 @@ Backend URL: `https://igem-ncku-software.onrender.com`
 
 The full request/response schema can be explored interactively at `/docs` once the backend is running.
 
-`/analyze` returns these fields per strain:
-- the fit: `ec50_nM`, `ec50_nM_ci95`, `n`, `top`, `bottom`, `r_squared`;
-- the response test: `responsive`, `p_value`;
-- the limits: `lod_nM`, `loq_nM`;
-- for plotting: `plateau_points` and `fit_curve`.
-
-Two deliberate design choices:
-
-- **When the flatness test decides a strain doesn't respond, `ec50_nM` and `fit_curve` come back `null`**, never a fake number. The frontend uses this to decide not to draw a curve or offer the predict box.
-- **`/predict` is stateless.** The frontend sends back the Hill parameters it got from `/analyze`, and the backend keeps no session.
+`/api/dose_response` is mounted but has no endpoints while the analysis is rebuilt.
 
 ## Data formats and integration
 
@@ -284,46 +247,16 @@ LasReader reads and writes open, documented formats, so its results can move int
 
 | Direction | Format | Where |
 |---|---|---|
-| In | SpectraMax ASCII plate-reader export (UTF-8 or UTF-16) | Dose-Response page, `POST /api/dose_response/analyze` |
 | In | Recorded CAPTURE-Screen readings, typed in | Calibrate → *Enter recorded data* |
 | Out | JSON for every API response, described by an OpenAPI schema | `/docs` (interactive) and `/openapi.json` on the backend |
 | Out | CSV (UTF-8 with BOM, opens directly in Excel), one row per tube at full precision | One calibration run, or one measurement batch |
 | In / Out | JSON backup of all runs, curves and batches (format `lasreader.hardware.backup`, version 2) | Data page |
 
-Other software can call the REST API directly, for example a notebook posting an export to `/api/dose_response/analyze`. To support another plate reader, add one parser ([Supporting a different plate reader](#supporting-a-different-plate-reader)).
+Other software can call the REST API directly, for example a notebook reading `/api/hardware/status`.
 
 ## Dose-response analysis pipeline
 
-`app/dose_response/` is one module per stage:
-
-```
-io.py            parses a SpectraMax ASCII export -> a tidy well / time_h / RFU / OD600 table
-normalize.py     subtracts blanks, applies OD gating and fluorescence normalization
-timeseries.py    collapses replicates, fits the time-axis logistic, extracts the plateau
-doseresponse.py  Hill fit (lmfit), flatness test, LOD/LOQ
-models.py        pure math (Hill, logistic) — no I/O
-pipeline.py      chains the four steps above together
-router.py        thin HTTP adapter only, no computation of its own
-```
-
-The pure math (`models.py`) is kept separate from data handling, so it can be unit-tested on its own.
-
-### Experiment design and thresholds
-
-The plate layout (which row is which concentration, which columns are which strain), the blank and positive-control wells, and every threshold are all in one file, [`backend/app/dose_response/config/experiment.yaml`](backend/app/dose_response/config/experiment.yaml).
-
-Design v.1's layout:
-
-- **AHL concentration** (3-oxo-C12-HSL), rows A–F: 0, 1 nM, 10 nM, 100 nM, 1 µM, 10 µM
-- **Strains**: TOP10 (columns 1–3), DH5α (columns 4–6), BL21 (columns 7–9)
-- **Row G** blank, **H1–H3** positive control
-- **Readings**: OD600 + GFP (Ex/Em 485/510 nm), once per hour
-
-To change the plate layout or a threshold, edit this YAML, not the numbers inside individual modules.
-
-### Supporting a different plate reader
-
-`io.py`'s `load_reader_export()` is the only place that knows what a SpectraMax ASCII export looks like. Everything downstream consumes only the tidy well / time_h / RFU / OD600 table, so supporting another instrument means adding a matching `load_*_export()`, and no other module needs to change.
+*Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history. Its dependencies (numpy, scipy, pandas, lmfit, PyYAML, python-multipart) stay in `requirements.txt` for the rebuild.
 
 ## Hardware: CAPTURE-Screen
 
@@ -444,7 +377,7 @@ Each script handles only its own page. The exception is CAPTURE-Screen's hardwar
 - **No authentication on the device link.** Anyone who knows the URL could impersonate the device or trigger a measurement. A shared secret between the device and the backend is planned.
 - **Browser-only storage.** Runs, curves and batches live in the browser's localStorage, so use the Data page's backup. They are planned to move to a backend database; only `hardware_api.js` would change.
 - **Placeholder unmixing.** The fluorescence signal is the F4 channel alone until an sfGFP standard's spectrum has been measured on the instrument ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
-- **No end-to-end test on a real export.** Parsing a real SpectraMax export and `/analyze` end to end have no automated test yet. One will be written against a real export.
+- **Dose-response analysis being rebuilt.** The page and `/api/dose_response` are empty until the new analysis lands.
 - **One backend process.** The device relay keeps its state in memory, which suits Render's single free instance. A multi-worker deployment would need a pub/sub layer.
 
 ## Authors and acknowledgment

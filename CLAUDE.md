@@ -44,7 +44,7 @@ pytest
 
 Because `main.py` lives inside the `app` package, it must be run as `app.main:app` — running `python main.py` or `uvicorn main:app` directly will fail.
 
-`backend/tests/` has 103 tests as of the last run: `tests/dose_response/` (`test_models`, `test_io`, `test_normalize`, `test_timeseries`, `test_doseresponse`, `test_router`; the simulated SpectraMax fixture, `test_pipeline` and every test that read it were deleted on 2026-09-28 at the user's request, in line with real data only, so parsing a real export and `/analyze` end to end have no test until one is written against a real export) and `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; device messages live in `payloads.py`), and `tests/live/` (the same split for `LiveHub` and `WS /api/live/spectrum`, reusing `tests/hardware/payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
+`backend/tests/` has 39 tests as of the last run: `tests/dose_response/` (empty but for `__init__.py` while the analysis is rebuilt, see below), `tests/hardware/` (`test_hub` drives `DeviceHub` directly through a fake connection; `test_router` goes through `TestClient`; device messages live in `payloads.py`), and `tests/live/` (the same split for `LiveHub` and `WS /api/live/spectrum`, reusing `tests/hardware/payloads.py`). `tests/conftest.py` puts `backend/` on `sys.path`, so `pytest` must be run from `backend/`. The hardware router tests hold two sockets (or a socket and an HTTP call) at once, so they enter the `TestClient` as a module-scoped context manager; otherwise each connection runs on its own event loop and the hub's asyncio queues and futures break.
 
 ### Firmware (from the repo root)
 
@@ -60,9 +60,11 @@ No build step. Serve the folder with any static server (e.g. `python -m http.ser
 
 ## Architecture
 
-### Dose-response has no separate spec
+### Dose-response is being rebuilt
 
-`docs/dose_response_model_spec.md` was deleted on purpose (the user's choice, 2026-09-27), and the `(spec §N)` references were removed from the code with it. The code, its docstrings and its tests are now the only description of the dose-response math: when changing behavior, keep the docstrings saying why, since there is no other document to fall back on.
+On 2026-09-28 the user cleared the dose-response feature to rebuild it from scratch, keeping its folders, URL and entry card: `backend/app/dose_response/` holds only `__init__.py` and a `router.py` with an endpoint-less `APIRouter(prefix="/api/dose_response")` (still mounted in `main.py`, so new endpoints go straight into it), `backend/tests/dose_response/` only `__init__.py`, `dose-response.html` keeps its header and footer around an empty `<main>`, and `js/dose_response.js` is an empty placeholder the page still loads. numpy, scipy, pandas, lmfit, PyYAML and python-multipart stay in `requirements.txt` for the rebuild (the user's choice). The old pipeline (SpectraMax ASCII parser, `experiment.yaml` plate map, time logistic, Hill fit) survives in git history.
+
+The team's real data is **SoftMax Pro `.sda` documents from a SpectraMax M3** (binary, not the ASCII export the old parser read). What was found in two real files (`20260810 time-course fluorescence.sda`, `20260831 pyocyanin.sda`): each read is its own Plate section (endpoint reads repeated by hand, not kinetic mode), with its own `Start Read` time written in a zh-TW locale (`下午 05:23 2026/8/10`); each plate's 96 values are a contiguous little-endian float64 array, NaN for unread wells; absorbance and fluorescence (Ex 460 / Em 530, not the old YAML's 485/510) sit in separate experiments, read at different times and different counts. Design the rebuild with the user before writing it.
 
 ### CAPTURE-Screen model document
 
@@ -105,34 +107,7 @@ Live sensing: the browser side of the live spectrum, split out of `app/hardware/
 
 #### `app/dose_response/` — prefix `/api/dose_response`
 
-The one substantial feature. Layered as a pipeline, each stage in its own module, with pure math separated from data handling so the math can be unit-tested against synthetic data alone:
-
-```
-io.py            parse SpectraMax ASCII export -> tidy well/time_h/RFU/OD600 table
-normalize.py     blank subtraction + OD-gated normalized fluorescence F
-timeseries.py    collapse replicates, fit the per-condition time logistic, extract plateau
-doseresponse.py  Hill fit (lmfit), flatness test, LOD/LOQ
-models.py        pure equations (hill, logistic_time) — no I/O, no fitting
-pipeline.py      run_pipeline(): orchestrates io -> normalize -> timeseries -> doseresponse
-router.py        thin HTTP adapter; no computation of its own
-```
-
-Two endpoints:
-- `POST /analyze` — multipart file upload of a raw reader export; runs the whole pipeline and returns `{strains: {name: {ec50_nM, ec50_nM_ci95, n, top, bottom, r_squared, responsive, p_value, lod_nM, loq_nM, plateau_points, fit_curve}}}`.
-- `POST /predict` — back-calculates `[AHL]` from a normalized fluorescence value, given a strain's already-fitted Hill params.
-
-Conventions worth preserving:
-- **Stateless.** `/predict` takes the Hill params in the request rather than looking up a stored `/analyze` result. There is no session or result storage anywhere in this backend; don't introduce one for a single endpoint.
-- **Units.** The internal math works in Molar; the HTTP layer converts to and from nM at the boundary (`router.py`). Field names carry the unit (`ec50_nM` vs `ec50_M`).
-- **Non-responsive strains return `None`, not a fake number.** When the flatness test says a strain doesn't respond, `ec50_nM` and `fit_curve` are `None` by design: never report a fake EC50. The frontend relies on this to decide whether to draw a curve.
-- **`_json_safe()`** in `router.py` converts NaN/Infinity to `null`; Python's JSON encoder would otherwise emit tokens that the browser's `JSON.parse` rejects.
-- **Uploads are written to a fixed temp filename**, never the client's: `../x` or an absolute name would escape the temp directory.
-- **`io.py` decodes by BOM** (UTF-16, UTF-8 with BOM, else UTF-8 with a latin-1 fallback), since Windows instrument software often saves UTF-16. A non-numeric cell (e.g. an overflow marker) raises an error naming the well and time instead of being dropped silently.
-- **A condition whose every reading was OD-gated has a NaN plateau** (e.g. growth inhibited at the top dose). `doseresponse.fit_mask()` leaves it out of the Hill fit the same way `[A]=0` is, `flatness_test()` must get that same subset, and `plateau_points` carries `null` for it.
-
-#### `app/dose_response/config/experiment.yaml`
-
-Single source of truth for the plate map (row → AHL concentration, column → strain), blank/positive well roles, and tunable thresholds. `config.py` loads it, and `io.py` / `normalize.py` / `timeseries.py` / `doseresponse.py` each read their defaults from it at import time. **Changing plate layout or a threshold should mean editing this YAML, not a literal in a module.** Note the strain key `DH5α` is spelled with the Unicode alpha to match the data's own `strain` values.
+Being rebuilt; no endpoints (see "Dose-response is being rebuilt" above).
 
 ### Config
 
@@ -142,7 +117,7 @@ Single source of truth for the plate map (row → AHL concentration, column → 
 
 ```
 index.html                     entry page: linked cards + live spectrum via /api/live
-dose-response.html             the analysis UI
+dose-response.html             the analysis UI (being redesigned; empty <main>)
 hardware.html                  CAPTURE-Screen step 1, Instrument: readiness verdict, signal path, current configuration, one self-check read
 hardware-calibration.html      CAPTURE-Screen step 2, Calibrate: source (instrument, live status, or recorded data) → set up (conditions + standards with reading order, or date + config) → read, or enter recorded values → 4PL fit → save; saved-run list last, CSV per run
 hardware-curves.html           CAPTURE-Screen step 3, Curves: every saved curve, what it is valid for, usable or not now (polled like Calibrate), and in Details the curve drawn over its run's tubes
@@ -232,7 +207,7 @@ Other rules:
 - Serial Monitor prints `[wifi]` / `[backend]` connection events and a "still connecting" line every 10 s — the first place to look when the device doesn't appear online.
 
 - `js/config.js` — defines `BACKEND_BASE_URL`, branching on hostname (`localhost` / `127.0.0.1` → `http://127.0.0.1:8000`, else Render). Because there's no build step there's no way to inject this at build time, so it's a runtime check kept in one file. **Must be loaded before every other script.**
-- `js/dose_response.js` (dose-response.html) — submits the chosen file to `POST /api/dose_response/analyze`, renders the summary table plus a per-strain Chart.js scatter + fit curve + EC50 line, and builds a per-strain "predict concentration" widget that calls `POST /api/dose_response/predict`. Keeps a `strainCharts` map so old Chart instances are `destroy()`ed before a re-analysis. Filters out the `x=0` point (a log axis can't plot it) and any `null` plateau in charts only; the table still shows every strain in full. Draws no curve and offers no predict widget when `responsive` is false.
+- `js/dose_response.js` (dose-response.html) — an empty placeholder while the page is redesigned.
 - `js/hardware.js`, `js/hardware_calibration.js`, `js/hardware_curves.js`, `js/hardware_measure.js`, `js/hardware_data.js` — one per hardware page, in step order. `sensorReading()` lives in `hardware_common.js` and is the single rule for `sensor_ok`: **every page that reads blocks on it** — Instrument (the self-check), Calibrate (where a dead sensor outranks "every tube has been read" in the same `#plan-read-reason`), and Measure (`readBlockReason()`, shared by the Blank and Samples reads); the step bar shows "Sensor fault" on step 1. Instrument also shows it as its own node on the signal path and in the verdict, so a connected device with a dead sensor never reads as ready. `null` (a firmware older than the field) is shown as "Not reported" and blocks nothing — that is the state every device was in before, and a failed read still explains itself. Each page re-applies the block from the status fetched alongside (or, on Instrument, right after) a read; a *failed* read says nothing about the sensor, so it leaves the button usable for a retry.
   - **Instrument (`hardware.js`)** was reorganised on 2026-09-27 at the user's request, aiming at a page that makes the device's condition clear at a glance: two cards, "Status" and "Self-check", with short text. The user wants the page concise **but keeps the full "Current configuration" table, because this is iGEM software** (a cut to a one-line config row was reverted the same day). It polls `getDeviceStatus()` every `DEVICE_STATUS_POLL_INTERVAL_MS` (a sequence number drops a response overtaken by a newer one). `linkState()` names the first link that failed — `checking`, `unreachable` (the error's `backendUnreachable`), `backend-error`, `offline` (`deviceOffline`, with `lastSeen`), `invalid` (`deviceInvalid`), `online` — and everything else is derived from it:
     - **The verdict** (`#status-verdict`, `instrumentVerdict()`): connection and self-check status, not overall measurement readiness. Connection errors and sensor faults take priority, followed by this page's self-check in progress and other MEASURING activity. An online reader then shows "Connected · Self-check not run", "Self-check incomplete", "Self-check needs attention", "Self-check passed", or "Connected · Repeat self-check" after a config change. A pass explicitly covers stable dark readings and unsaturated light channels; LED response is not verified. `lastSelfCheck` holds the latest completed check and its config fingerprint; `lastSelfCheckError` holds a newer incomplete attempt until another check completes. A failed retry never restores an earlier pass. `lastPassedSelfCheck` retains the previous passing time as labelled history with its config, shown alongside a failed/incomplete retry. These are page-session state only. Counts are grouped with `toLocaleString("en-US")`, for the same reason times use a fixed format.
