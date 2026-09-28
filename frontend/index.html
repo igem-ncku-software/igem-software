@@ -25,18 +25,40 @@
     </header>
 
     <main>
-      <nav class="nav-grid">
-        <a class="card nav-card" href="plate-assay.html">
-          <p class="section-label">Plate reader</p>
-          <h2>Plate Reader Assay</h2>
-          <p class="section-description">
-            Any plate reader: fit a standard curve from AHL standards on the plate
-            and infer AHL in the samples beside them.
-          </p>
-          <span class="nav-card-cue">Open assay &rarr;</span>
-        </a>
+      <!-- The two tools side by side, and below them Cross-Validation, which takes the output of
+           both: the bridge between draws a line down from each card joining into one arrow. -->
+      <nav class="nav-hub" aria-label="Tools">
+        <div class="nav-grid">
+          <a class="card nav-card" href="plate-assay.html">
+            <p class="section-label">Plate reader</p>
+            <h2>Plate Reader Assay</h2>
+            <p class="section-description">
+              Fit a standard curve from AHL standards on the plate and infer AHL
+              in the samples beside them.
+            </p>
+            <span class="nav-card-cue">Open assay &rarr;</span>
+          </a>
 
-        <a class="card nav-card" href="compare.html">
+          <a class="card nav-card" href="hardware.html">
+            <p class="section-label">Hardware</p>
+            <h2>CAPTURE-Screen</h2>
+            <p class="section-description">
+              Instrument checks, calibration curves, and sample measurements for the
+              AS7341 fluorescence reader.
+            </p>
+            <span class="nav-card-cue">Open instrument &rarr;</span>
+          </a>
+        </div>
+
+        <div class="nav-bridge" aria-hidden="true">
+          <span class="nav-bridge-stub is-left"></span>
+          <span class="nav-bridge-stub is-right"></span>
+          <span class="nav-bridge-join"></span>
+          <span class="nav-bridge-down"></span>
+          <span class="nav-bridge-head"></span>
+        </div>
+
+        <a class="card nav-card nav-card-bridged" href="compare.html">
           <p class="section-label">Validation</p>
           <h2>Cross-Validation</h2>
           <p class="section-description">
@@ -44,16 +66,6 @@
             CAPTURE-Screen.
           </p>
           <span class="nav-card-cue">Open comparison &rarr;</span>
-        </a>
-
-        <a class="card nav-card" href="hardware.html">
-          <p class="section-label">Hardware</p>
-          <h2>CAPTURE-Screen</h2>
-          <p class="section-description">
-            Instrument checks, calibration curves, and sample measurements for the
-            AS7341 fluorescence reader.
-          </p>
-          <span class="nav-card-cue">Open instrument &rarr;</span>
         </a>
       </nav>
 

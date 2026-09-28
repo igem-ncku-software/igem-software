@@ -276,9 +276,29 @@ canvas { max-width: 100%; }
 }
 
 /* Landing page ------------------------------------------------------ */
-.nav-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.nav-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+/* The bridge: a line down from the middle of each card above (the grid's columns are centred at
+   25% - 5px and 75% + 5px with its 20 px gap), joined, then one arrow down to Cross-Validation,
+   which sits centred below at one column's width. */
+.nav-bridge { position: relative; height: 46px; }
+.nav-bridge span { position: absolute; background: var(--accent); opacity: .45; }
+.nav-bridge-stub { top: 0; width: 2px; height: 18px; }
+.nav-bridge-stub.is-left { left: calc(25% - 6px); }
+.nav-bridge-stub.is-right { right: calc(25% - 6px); }
+.nav-bridge-join { top: 16px; height: 2px; left: calc(25% - 6px); right: calc(25% - 6px); }
+.nav-bridge-down { top: 16px; bottom: 8px; left: calc(50% - 1px); width: 2px; }
+.nav-bridge span.nav-bridge-head {
+  bottom: 0; left: calc(50% - 7px); width: 0; height: 0; background: none;
+  border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid var(--accent);
+}
+.nav-card-bridged { width: calc(50% - 10px); margin: 0 auto; }
 @media (max-width: 720px) {
+  /* Stacked: one short arrow from the two cards above. */
   .nav-grid { grid-template-columns: 1fr; }
+  .nav-bridge { height: 34px; }
+  .nav-bridge-stub, .nav-bridge-join { display: none; }
+  .nav-bridge-down { top: 4px; }
+  .nav-card-bridged { width: 100%; }
 }
 
 .nav-card {
