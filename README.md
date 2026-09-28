@@ -1,6 +1,6 @@
 # LasReader
 
-**Wet-lab data tools of iGEM NCKU-Tainan 2026 (Capture):** AHL dose-response analysis of plate-reader exports, and the software for CAPTURE-Screen, the team's own fluorescence reader.
+**Wet-lab data tools of iGEM NCKU-Tainan 2026 (Capture):** the plate reader assay (a standard curve and inferred AHL from one 96-well plate), and the software for CAPTURE-Screen, the team's own fluorescence reader.
 
 | | |
 |---|---|
@@ -24,7 +24,7 @@
 - [Testing](#testing)
 - [API](#api)
 - [Data formats and integration](#data-formats-and-integration)
-- [Dose-response analysis pipeline](#dose-response-analysis-pipeline)
+- [Plate reader assay pipeline](#plate-reader-assay-pipeline)
 - [Hardware: CAPTURE-Screen](#hardware-capture-screen)
 - [Contributing and extending](#contributing-and-extending)
 - [Dependencies](#dependencies)
@@ -35,9 +35,9 @@
 
 ## Description
 
-Many synthetic-biology biosensors report a signal molecule, here the quorum-sensing molecule AHL, by expressing a fluorescent protein. Turning that fluorescence into a number you can trust takes more than reading a value: backgrounds must be subtracted, replicates combined, a dose-response curve fitted, and its limits respected. LasReader packages those steps into two web tools that any team can open in a browser, with nothing to install:
+Many synthetic-biology biosensors report a signal molecule, here the quorum-sensing molecule AHL, by expressing a fluorescent protein. Turning that fluorescence into a number you can trust takes more than reading a value: backgrounds must be subtracted, replicates combined, a standard curve fitted, and its limits respected. LasReader packages those steps into two web tools that any team can open in a browser, with nothing to install:
 
-- **AHL dose-response analysis** of plate-reader data. *Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history.
+- **Plate reader assay.** AHL standards and samples read together on any plate reader, typed or pasted into one table: a weighted 4PL standard curve fitted from the standards, and each sample's inferred AHL with a 95% CI, scaled by its dilution. Computed in the browser, nothing stored; the CSV is the record.
 - **CAPTURE-Screen interface.** CAPTURE-Screen is the team's low-cost fluorescence reader (ESP32 + AS7341 spectral sensor). Once the device powers on and joins Wi-Fi it connects to the backend by itself. The landing page then shows all ten spectral channels live, and four pages, used in order, guide you through:
   1. checking the instrument;
   2. calibrating it tube by tube with a weighted 4PL fit;
@@ -75,22 +75,24 @@ flowchart LR
 
     subgraph FE["frontend/ — static site (GitHub Pages)"]
         IDX["index.html<br/>entry page + live spectrum"]
-        DR["dose-response.html"]
+        PA["plate-assay.html<br/>plate reader assay"]
+        CF["js/curve_fit.js<br/>shared 4PL fit & inversion"]
         HW["hardware*.html<br/>CAPTURE-Screen, four steps + Data"]
         LOCAL["js/hardware_local.js<br/>runs, curves & batches (localStorage)"]
-        IDX --> DR
+        IDX --> PA
         IDX --> HW
         HW --> LOCAL
+        PA --> CF
+        LOCAL --> CF
     end
 
     subgraph BE["backend/ — FastAPI (Render)"]
-        RT1["/api/dose_response<br/>(being rebuilt)"]
+        RT1["/api/plate_assay<br/>(no endpoints yet)"]
         HUB["/api/hardware<br/>status · read · device"]
         LIVE["/api/live<br/>spectrum"]
         LIVE -->|subscribes to device| HUB
     end
 
-    DR -->|HTTPS| RT1
     IDX -->|WSS live spectrum| LIVE
     HW -->|HTTPS status & measurement| HUB
     DEV -->|WSS, device dials out| HUB
@@ -101,7 +103,7 @@ flowchart LR
 ```
 frontend/                     plain static site, no framework, no build step
 ├── index.html                entry page: feature cards + live AS7341 spectrum
-├── dose-response.html        dose-response analysis page (being redesigned)
+├── plate-assay.html          plate reader assay: enter standards and samples, fit, infer, export
 ├── hardware.html             CAPTURE-Screen step 1: the instrument and its self-check
 ├── hardware-calibration.html CAPTURE-Screen step 2: set up a run, read the standards, fit, save a curve
 ├── hardware-curves.html      CAPTURE-Screen step 3: saved curves and what each is valid for
@@ -109,7 +111,7 @@ frontend/                     plain static site, no framework, no build step
 ├── hardware-data.html        CAPTURE-Screen: backup, restore, reset
 ├── config/unmix_basis.json   which sensor channel is the fluorescence signal (placeholder until measured)
 ├── css/style.css
-└── js/                       config / dose_response / backend_status / device_live
+└── js/                       config / curve_fit / plate_assay / backend_status / device_live
                               hardware_processing → hardware_local → hardware_api → hardware_common → each page's script
 
 backend/                      FastAPI
@@ -118,7 +120,7 @@ backend/                      FastAPI
 │   ├── config.py             environment variables and CORS settings
 │   ├── hardware/             CAPTURE-Screen's relay: device connection, status, measurement
 │   ├── live/                 live sensing: the shared Live switch and the live spectrum
-│   └── dose_response/        dose-response analysis (being rebuilt; empty router)
+│   └── plate_assay/          plate reader assay (empty router; the page computes in the browser)
 ├── tests/                    pytest
 └── requirements.txt
 
@@ -185,9 +187,14 @@ That check lives in one place, [`frontend/js/config.js`](frontend/js/config.js).
 
 ## Usage
 
-### Dose-response analysis
+### Plate reader assay
 
-*Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history.
+Put the AHL standards (including blanks: cells, no AHL) and the samples on the same plate, and read them together. One curve serves only the readings entered with it, since a plate reader's signal scale changes with the instrument, gain and day.
+
+1. **Enter data.** Fill in the date, biosensor strain and signal, then one row per standard concentration (0 nM for blanks) or sample, with up to six replicates each. Type the values, or paste a block from Excel into any cell. A sample carries its dilution before reading.
+2. **Fit.** Review the standards, exclude a reading with a reason if needed, and fit the 4PL. At least 4 non-zero concentrations and 2 blank readings are required.
+3. **Results.** Each sample's replicates are averaged and converted once: AHL in the well with a 95% CI, and in the original sample (× dilution). Outside the usable range only the bound is shown.
+4. **Export.** A CSV with every reading, the curve and each sample's result, and the curve as a PNG. Nothing is stored, so export before leaving the page.
 
 ### CAPTURE-Screen
 
@@ -203,7 +210,7 @@ Runs, curves and batches are stored in your browser. **Export a backup from the 
 
 ## Reproducing the main results
 
-LasReader's main result is a CAPTURE-Screen calibration curve and the AHL inferred through it; it comes from the code in this repository, run locally as described under [Installation](#installation). The dose-response analysis is being redesigned, and its reproduction steps will return with it.
+LasReader's main result is a CAPTURE-Screen calibration curve and the AHL inferred through it; it comes from the code in this repository, run locally as described under [Installation](#installation). A plate reader assay is reproduced by entering its readings on the Plate Reader Assay page; its CSV holds every reading, so the curve can be refitted from the file.
 
 - **With the instrument:** follow [Usage → CAPTURE-Screen](#capture-screen) steps 1–4.
 - **Without the instrument:** open Calibrate, choose *Enter recorded data*, and type in previously recorded readings (standards and blanks, in basic counts) together with the instrument configuration they were read under. Fitting, LOD/LOQ and saving work exactly as they do for a device run, so a published curve can be refitted from its recorded values.
@@ -217,7 +224,7 @@ cd backend
 pytest
 ```
 
-The suite covers the hardware relay and live spectrum (`tests/hardware/`, `tests/live/`, driven through a fake device connection). `tests/dose_response/` is empty until the analysis is rebuilt. `tests/conftest.py` adds `backend/` to `sys.path`, so run `pytest` from inside `backend/`.
+The suite covers the hardware relay and live spectrum (`tests/hardware/`, `tests/live/`, driven through a fake device connection). `tests/plate_assay/` is empty: the assay runs in the browser. `tests/conftest.py` adds `backend/` to `sys.path`, so run `pytest` from inside `backend/`.
 
 The firmware compiles from the command line (warnings come only from inside the libraries):
 
@@ -239,7 +246,7 @@ Backend URL: `https://igem-ncku-software.onrender.com`
 
 The full request/response schema can be explored interactively at `/docs` once the backend is running.
 
-`/api/dose_response` is mounted but has no endpoints while the analysis is rebuilt.
+`/api/plate_assay` is mounted but has no endpoints: the assay computes in the browser.
 
 ## Data formats and integration
 
@@ -254,9 +261,9 @@ LasReader reads and writes open, documented formats, so its results can move int
 
 Other software can call the REST API directly, for example a notebook reading `/api/hardware/status`.
 
-## Dose-response analysis pipeline
+## Plate reader assay pipeline
 
-*Being redesigned.* The previous analysis was removed on 2026-09-28 and is being rebuilt around the team's real SoftMax Pro (SpectraMax M3) data; it survives in git history. Its dependencies (numpy, scipy, pandas, lmfit, PyYAML, python-multipart) stay in `requirements.txt` for the rebuild.
+The assay uses CAPTURE-Screen's calibration model through the shared [`js/curve_fit.js`](frontend/js/curve_fit.js), so the same readings give the same curve on either page: a weighted 4PL (Levenberg–Marquardt, weights from the replicate spread, unweighted when there is none), LOD/LOQ from the blanks, a usable range, and inversion with a delta-method 95% CI. Each is described in [docs/capture_screen_model.md §7–11](docs/capture_screen_model.md#7-the-4pl-calibration-model). A sample's replicates are averaged before conversion, and its reading variance divided by *n*. The previous dose-response analysis was removed on 2026-09-28 and survives in git history; its Python dependencies (numpy, scipy, pandas, lmfit, PyYAML, python-multipart) stay in `requirements.txt`.
 
 ## Hardware: CAPTURE-Screen
 
@@ -377,7 +384,7 @@ Each script handles only its own page. The exception is CAPTURE-Screen's hardwar
 - **No authentication on the device link.** Anyone who knows the URL could impersonate the device or trigger a measurement. A shared secret between the device and the backend is planned.
 - **Browser-only storage.** Runs, curves and batches live in the browser's localStorage, so use the Data page's backup. They are planned to move to a backend database; only `hardware_api.js` would change.
 - **Placeholder unmixing.** The fluorescence signal is the F4 channel alone until an sfGFP standard's spectrum has been measured on the instrument ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
-- **Dose-response analysis being rebuilt.** The page and `/api/dose_response` are empty until the new analysis lands.
+- **Plate reader assay input.** Values are typed or pasted; no reader's file format (such as SoftMax Pro's `.sda`) is read directly.
 - **One backend process.** The device relay keeps its state in memory, which suits Render's single free instance. A multi-worker deployment would need a pub/sub layer.
 
 ## Authors and acknowledgment

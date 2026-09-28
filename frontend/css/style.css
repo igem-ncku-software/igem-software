@@ -736,3 +736,7 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
   .result-block { break-inside: avoid; }
   .site-footer { border-top: 1px solid #000; }
 }
+
+/* Plate Reader Assay: many replicate columns side by side, so each value cell is narrow. */
+.assay-table { min-width: 0; }
+.assay-table td.rep-cell input.table-input, .assay-table td.dilution-cell input.table-input { min-width: 72px; width: 88px; }

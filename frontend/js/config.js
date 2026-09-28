@@ -7,7 +7,7 @@
 // hostname check, kept in this one file rather than duplicated in every script.
 //
 // If the Render URL ever changes, updating this one line is enough — everywhere that calls
-// the backend (dose_response.js, device_live.js, hardware_api.js, backend_status.js) picks
+// the backend (plate_assay.js, device_live.js, hardware_api.js, backend_status.js) picks
 // it up automatically. CAPTURE-Screen's own URL needs updating too: BACKEND_HOST in
 // firmware/capture_screen/capture_screen.ino.
 //

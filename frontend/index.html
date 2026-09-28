@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LasReader · iGEM NCKU-Tainan 2026</title>
-  <meta name="description" content="LasReader: dose-response fitting, concentration back-calculation, and live sensor monitoring for the iGEM NCKU-Tainan 2026 AHL biosensor." />
+  <meta name="description" content="LasReader: standard curves and inferred AHL from a plate reader or CAPTURE-Screen, with live sensor monitoring, for the iGEM NCKU-Tainan 2026 LasR–AHL biosensor." />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" type="image/png" href="assets/images/favicon.png" />
@@ -17,7 +17,7 @@
         <div class="site-header-text">
           <p class="eyebrow">iGEM NCKU-Tainan 2026 · Capture</p>
           <h1>LasReader</h1>
-          <p class="subtitle">Dose-response fitting, concentration back-calculation, and live sensor monitoring for the LasR–AHL biosensor</p>
+          <p class="subtitle">Standard curves and inferred AHL from a plate reader or CAPTURE-Screen, with live sensor monitoring, for the LasR–AHL biosensor</p>
         </div>
         <img class="site-logo" src="assets/images/logo-wordmark.png"
              alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
@@ -26,14 +26,14 @@
 
     <main>
       <nav class="nav-grid">
-        <a class="card nav-card" href="dose-response.html">
-          <p class="section-label">Analysis</p>
-          <h2>AHL Dose-Response Analysis</h2>
+        <a class="card nav-card" href="plate-assay.html">
+          <p class="section-label">Plate reader</p>
+          <h2>Plate Reader Assay</h2>
           <p class="section-description">
-            Upload a plate reader export to fit EC50, Hill slope, and detection
-            limits per strain.
+            Fit a standard curve from AHL standards on the plate and infer AHL
+            in the samples beside them.
           </p>
-          <span class="nav-card-cue">Open analysis &rarr;</span>
+          <span class="nav-card-cue">Open assay &rarr;</span>
         </a>
 
         <a class="card nav-card" href="hardware.html">

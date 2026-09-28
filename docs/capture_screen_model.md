@@ -2,7 +2,7 @@
 
 How a CAPTURE-Screen reading becomes an inferred AHL concentration: every processing step, its equation, and why it is done that way.
 
-This document describes the code as it is. The code in `frontend/js/hardware_processing.js` and `frontend/js/hardware_local.js` is the reference implementation. If the two ever disagree, the code is what runs, and this document should be corrected.
+This document describes the code as it is. The code in `frontend/js/hardware_processing.js`, `frontend/js/curve_fit.js` and `frontend/js/hardware_local.js` is the reference implementation. If the two ever disagree, the code is what runs, and this document should be corrected.
 
 > **Scope.** CAPTURE-Screen is a research-use-only instrument. The output of this model is an *inferred* AHL concentration relative to a calibration curve made with the same biosensor strain and instrument configuration. It is not a diagnostic result.
 
@@ -52,8 +52,10 @@ The model has three layers:
 | Layer | What it does | Where |
 |---|---|---|
 | **Signal processing** | Raw counts → one number per tube, the fluorescence *F* in basic counts, plus its read-noise SD and QC flags. No state and no fitting. | `hardware_processing.js` |
-| **Calibration** | Standards of known AHL concentration → a four-parameter logistic (4PL) curve with its uncertainty, LOD, LOQ and usable range. | `hardware_local.js` (`fitCurve`) |
-| **Inversion** | A sample's *F* → an AHL concentration with a 95% confidence interval, only inside the curve's usable range. | `hardware_local.js` (`localInverseCore`) |
+| **Calibration** | Standards of known AHL concentration → a four-parameter logistic (4PL) curve with its uncertainty, LOD, LOQ and usable range. | `curve_fit.js` (`CurveFit.fit`), called by `hardware_local.js` (`fitCurve`) |
+| **Inversion** | A sample's *F* → an AHL concentration with a 95% confidence interval, only inside the curve's usable range. | `curve_fit.js` (`CurveFit.invert`) |
+
+The calibration and inversion layers (§7–11) are shared with the Plate Reader Assay (`plate-assay.html`), which fits the same 4PL to plate-reader standards and infers AHL in the samples on the same plate. There the signal is whatever the reader reports, each reading carries no read-noise SD, and the curve is used only for the readings entered with it.
 
 ---
 
@@ -572,11 +574,11 @@ Dark level and light − dark stay informational until a baseline has been measu
 | Read noise, flags, Measurement | `readNoiseSdCounts`, `toMeasurement` | `hardware_processing.js` |
 | Scatter baseline | `finalizeMeasurement`, `measurementContext` | [`hardware_local.js`](../frontend/js/hardware_local.js) |
 | Run reading order | `localPlanItems` | `hardware_local.js` |
-| 4PL and its gradient | `localModel`, `localGradient` | `hardware_local.js` |
-| Noise model | `localNoiseModel` | `hardware_local.js` |
-| LM fit and covariance | `localFit4PL` | `hardware_local.js` |
-| Weights, LOD/LOQ, range, checks | `fitCurve` | `hardware_local.js` |
-| Inversion and CI | `localInverseCore` | `hardware_local.js` |
+| 4PL and its gradient | `curveModel`, `curveGradient` | [`curve_fit.js`](../frontend/js/curve_fit.js) |
+| Noise model | `curveNoiseModel` | `curve_fit.js` |
+| LM fit and covariance | `curveFit4PL` | `curve_fit.js` |
+| Weights, LOD/LOQ, range, checks | `CurveFit.fit`; run checks in `fitCurve` (`hardware_local.js`) | `curve_fit.js` |
+| Inversion and CI | `CurveFit.invert` (via `localInverseCore`) | `curve_fit.js` |
 | Batch estimates | `localGroupEstimate`, `recordBatchReading` | `hardware_local.js` |
 | Curve usability | `curveBlockReason` | [`hardware_common.js`](../frontend/js/hardware_common.js) |
 | Self-check grading | `analyzeSelfCheck` | [`hardware.js`](../frontend/js/hardware.js) |

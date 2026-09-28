@@ -2,14 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.dose_response.router import router as dose_response_router
+from app.plate_assay.router import router as plate_assay_router
 from app.hardware.router import router as hardware_router
 from app.live.router import router as live_router
 
 
 app = FastAPI(
     title="LasReader API",
-    description="Backend API for LasReader: AHL dose-response analysis and hardware sensor data.",
+    description="Backend API for LasReader: plate reader assay and CAPTURE-Screen hardware.",
     version="1.3.0",
 )
 
@@ -23,8 +23,8 @@ app.add_middleware(
 )
 
 
-# AHL dose-response analysis API (being rebuilt; no endpoints yet)
-app.include_router(dose_response_router)
+# Plate reader assay API (being rebuilt; no endpoints yet)
+app.include_router(plate_assay_router)
 app.include_router(hardware_router)
 app.include_router(live_router)
 

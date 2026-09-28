@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plate Reader Assay · LasReader</title>
+  <meta name="description" content="Fit a standard curve from AHL standards on the plate and infer AHL in the samples beside them." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="assets/images/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="back-link" href="index.html">&larr; Back to overview</a>
+      <div class="site-header-row">
+        <div class="site-header-text">
+          <p class="eyebrow">iGEM NCKU-Tainan 2026 · Capture</p>
+          <h1>Plate Reader Assay</h1>
+          <p class="subtitle">Standard curve and inferred AHL from one 96-well plate</p>
+        </div>
+        <img class="site-logo" src="assets/images/logo-wordmark.png"
+             alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
+      </div>
+    </header>
+
+    <!-- Standards and samples read together, entered by hand or pasted, computed in the browser and
+         never stored: the CSV is the record. Every step derives its state from the table and the fit. -->
+    <main>
+      <!-- 1. Enter data: the experiment, then one row per standard concentration or sample. -->
+      <section class="card step-card" id="data-card">
+        <div class="step-card-head">
+          <span class="step-card-num">1</span>
+          <div>
+            <p class="section-label">Enter data</p>
+            <h2>Standards and samples</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <fieldset class="plain-fieldset">
+            <legend>Experiment</legend>
+            <div class="form-grid">
+              <div class="field">
+                <label for="info-date">Date</label>
+                <input type="date" id="info-date" />
+              </div>
+              <div class="field">
+                <label for="info-strain">Biosensor strain</label>
+                <input type="text" id="info-strain" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="info-signal">Signal</label>
+                <input type="text" id="info-signal" autocomplete="off" placeholder="e.g. Fluorescence, Ex 485 / Em 530" />
+              </div>
+              <div class="field">
+                <label for="info-instrument">Instrument (optional)</label>
+                <input type="text" id="info-instrument" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="info-notes">Notes (optional)</label>
+                <input type="text" id="info-notes" autocomplete="off" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="plain-fieldset">
+            <legend>Readings</legend>
+            <p class="plan-meta">
+              Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution.
+              Paste a block from Excel into any cell.
+            </p>
+            <div class="table-wrapper table-spaced">
+              <table class="manual-table assay-table">
+                <thead id="entry-head"></thead>
+                <tbody id="entry-body"></tbody>
+              </table>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn-secondary" id="add-standard">Add standard</button>
+              <button type="button" class="btn-secondary" id="add-sample">Add sample</button>
+              <button type="button" class="btn-secondary" id="add-rep">Add replicate</button>
+              <button type="button" class="btn-secondary" id="remove-rep">Remove replicate</button>
+            </div>
+            <p class="plan-meta" id="entry-summary" aria-live="polite"></p>
+            <p class="status-message" id="entry-status" aria-live="polite"></p>
+          </fieldset>
+
+          <div class="button-row">
+            <button type="button" id="data-next">Next: fit the curve &darr;</button>
+          </div>
+          <p class="blocked-reason" id="data-reason" hidden></p>
+        </div>
+      </section>
+
+      <!-- 2. Fit: the standards with their exclusions first, then Fit, then the curve. -->
+      <section class="card step-card" id="fit-card">
+        <div class="step-card-head">
+          <span class="step-card-num">2</span>
+          <div>
+            <p class="section-label">Fit</p>
+            <h2>4PL standard curve</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <h3 class="subsection-heading table-heading">Standards</h3>
+          <p class="chart-note">Tick a reading and give a reason to exclude it. Changing an exclusion discards the current fit.</p>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Concentration</th>
+                  <th scope="col">n</th>
+                  <th scope="col">Mean signal</th>
+                  <th scope="col">Mean residual</th>
+                  <th scope="col">Reading</th>
+                  <th scope="col">Signal</th>
+                  <th scope="col">Residual</th>
+                  <th scope="col">Exclude</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="fit-table-body"></tbody>
+            </table>
+          </div>
+
+          <div class="button-row table-spaced">
+            <button type="button" id="fit-button">Fit</button>
+            <button type="button" id="fit-next-button" hidden>Next: see the results &darr;</button>
+          </div>
+          <p class="blocked-reason" id="fit-reason" hidden></p>
+          <p class="status-message" id="fit-status" aria-live="polite"></p>
+
+          <h3 class="subsection-heading table-heading">Curve</h3>
+          <p class="chart-note">
+            Log concentration axis. Dots: readings. Squares: mean ± SD. Dashed line: EC50. Grey open
+            circles: excluded readings. Blanks (0 nM) appear in the table only.
+          </p>
+          <div class="chart-plate">
+            <canvas id="fit-chart"></canvas>
+          </div>
+
+          <div class="sensor-stats">
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">EC50</span>
+              <span class="sensor-stat-value" id="fit-ec50">--</span>
+              <span class="sensor-stat-sub" id="fit-ec50-sub"></span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">Hill slope</span>
+              <span class="sensor-stat-value" id="fit-hill">--</span>
+              <span class="sensor-stat-sub" id="fit-hill-sub"></span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">LOD</span>
+              <span class="sensor-stat-value" id="fit-lod">--</span>
+              <span class="sensor-stat-sub" id="fit-lod-sub"></span>
+            </div>
+            <div class="sensor-stat">
+              <span class="sensor-stat-label">RMSE</span>
+              <span class="sensor-stat-value" id="fit-rmse">--</span>
+              <span class="sensor-stat-sub" id="fit-rmse-sub"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Results: each sample's replicates averaged, converted once, and scaled by its dilution. -->
+      <section class="card step-card" id="results-card">
+        <div class="step-card-head">
+          <span class="step-card-num">3</span>
+          <div>
+            <p class="section-label">Results</p>
+            <h2>Inferred AHL</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta" id="results-range"></p>
+          <div class="table-wrapper table-spaced" id="results-table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Sample</th>
+                  <th scope="col">n</th>
+                  <th scope="col">Mean signal</th>
+                  <th scope="col">SD</th>
+                  <th scope="col">CV</th>
+                  <th scope="col">AHL in well</th>
+                  <th scope="col">95% CI</th>
+                  <th scope="col">Dilution</th>
+                  <th scope="col">AHL in sample</th>
+                  <th scope="col">95% CI</th>
+                </tr>
+              </thead>
+              <tbody id="results-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="results-empty" hidden>
+            <p>No samples entered.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Export: nothing is stored, so the files are the record. -->
+      <section class="card step-card" id="export-card">
+        <div class="step-card-head">
+          <span class="step-card-num">4</span>
+          <div>
+            <p class="section-label">Export</p>
+            <h2>Files</h2>
+          </div>
+          <span class="flag-chip step-card-state">--</span>
+        </div>
+        <p class="blocked-reason step-card-waiting" hidden></p>
+
+        <div class="step-card-body">
+          <p class="plan-meta">Nothing is stored. Export before leaving the page.</p>
+          <div class="button-row">
+            <button type="button" id="export-csv">Export CSV</button>
+            <button type="button" class="btn-secondary" id="export-png">Export curve (PNG)</button>
+          </div>
+          <p class="status-message" id="export-status" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p class="ruo-notice">Research use only. Not intended for diagnostic use.</p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+    </footer>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/curve_fit.js"></script>
+  <script src="js/plate_assay.js"></script>
+  <script src="js/backend_status.js"></script>
+</body>
+</html>
