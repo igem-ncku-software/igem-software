@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | **Team** | [NCKU-Tainan, iGEM 2026](https://2026.igem.wiki/ncku-tainan/) — see the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software) and [Hardware](https://2026.igem.wiki/ncku-tainan/hardware) pages |
-| **Source code** | <https://gitlab.igem.org/2026/software-tools/ncku-tainan>, the team's official repository on iGEM's GitLab |
+| **Source code** | <https://gitlab.igem.org/2026/software/ncku-tainan/lasreader>, the team's official repository on iGEM's GitLab |
 | **Live app** | <https://igem-ncku-software.github.io/igem-software/> (backend: <https://igem-ncku-software.onrender.com>). A convenience copy only: everything needed to install, run and evaluate LasReader is in this repository. |
 | **License** | [MIT](LICENSE), an OSI-approved open-source license |
 | **Status** | Active development for the iGEM 2026 Jamboree |
@@ -61,7 +61,7 @@ How this repository meets the requirements the *iGEM 2026 Judge Handbook* sets f
 
 | Requirement | Where it is met |
 |---|---|
-| Hosted on iGEM's GitLab | This repository, <https://gitlab.igem.org/2026/software-tools/ncku-tainan> |
+| Hosted on iGEM's GitLab | This repository, <https://gitlab.igem.org/2026/software/ncku-tainan/lasreader> |
 | README explaining what the software does, who it is for, how to install and run it, and how to reproduce the main results | [Description](#description), [Who it is for](#who-it-is-for), [Installation](#installation), [Usage](#usage), [Reproducing the main results](#reproducing-the-main-results) |
 | LICENSE file with an OSI-approved license | [LICENSE](LICENSE), MIT |
 | Reproducible build and run instructions | [`scripts/`](scripts/) (`setup` + `dev`, in `.sh` and `.ps1`), plus the manual command sequence under [Installation](#installation). There are no compiled binaries: the frontend is served as source, and the firmware is built from source. |
@@ -141,8 +141,8 @@ To *use* LasReader you need nothing but a browser: open the [live app](https://i
 **Requirements:** Python 3.14 (the pinned dependencies were tested with 3.14.3) and Git. The frontend has no dependencies and doesn't need Node.js. Flashing the device additionally needs the Arduino IDE (see [Flashing the firmware](#flashing-the-firmware)).
 
 ```bash
-git clone https://gitlab.igem.org/2026/software-tools/ncku-tainan.git
-cd ncku-tainan
+git clone https://gitlab.igem.org/2026/software/ncku-tainan/lasreader.git
+cd lasreader
 ```
 
 ### Using the scripts (recommended)
