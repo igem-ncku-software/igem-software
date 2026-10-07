@@ -41,7 +41,7 @@ async function refreshBackupSummary() {
       total === 0 ? "Nothing stored in this browser yet." : null);
   } catch (err) {
     console.error("Could not read what is stored:", err);
-    summaryEl.textContent = `Could not read what is stored: ${err.message}`;
+    summaryEl.textContent = `Couldn't read what is stored: ${err.message}`;
   }
 }
 
@@ -68,7 +68,7 @@ async function exportBackup(
     hardwareRemember(HARDWARE_LAST_BACKUP_KEY, new Date().toISOString());
     setHardwareStatus(statusEl,
       `Exported ${BACKUP_SECTIONS.map(([word, key]) => backupCount(payload[key].length, word)).join(", ")}. `
-      + "Check the download completed before relying on it.", "success");
+      + "Check that the download completed before relying on it.", "success");
   } catch (err) {
     console.error("Backup export failed:", err);
     setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
@@ -100,7 +100,7 @@ async function importBackup(event) {
   detail.innerHTML = "";
   detail.hidden = true;
   button.disabled = true;
-  setHardwareStatus(statusEl, `Reading ${file.name}...`, null);
+  setHardwareStatus(statusEl, `Reading ${file.name}…`, null);
 
   try {
     let payload;
@@ -108,15 +108,16 @@ async function importBackup(event) {
       payload = JSON.parse(await file.text());
     } catch (err) {
       // JSON.parse's own message names a byte offset, which tells the user nothing useful.
-      throw new Error("That file is not valid JSON.");
+      throw new Error("That file isn't valid JSON.");
     }
     const result = await HardwareApi.importBackup(payload);
 
     const parts = [`Imported ${BACKUP_SECTIONS.map(([word, key]) => backupCount(result[key].imported.length, word)).join(", ")}.`];
     const skipped = BACKUP_SECTIONS.reduce((sum, [, key]) => sum + result[key].skipped.length, 0);
     const rejected = BACKUP_SECTIONS.flatMap(([word, key]) => result[key].rejected.map((item) => ({ ...item, word })));
-    if (skipped > 0) parts.push(`${skipped} already here, left as they were.`);
-    if (rejected.length > 0) parts.push(`${rejected.length} rejected.`);
+    const entries = (n) => `${n} ${n === 1 ? "entry" : "entries"}`;
+    if (skipped > 0) parts.push(`${entries(skipped)} already here, left as they were.`);
+    if (rejected.length > 0) parts.push(`${entries(rejected.length)} rejected.`);
     setHardwareStatus(statusEl, parts.join(" "), rejected.length > 0 ? "warn" : "success");
 
     for (const { word, id, reason } of rejected) {
@@ -174,7 +175,7 @@ async function refreshResetPanel() {
     preview = await HardwareApi.getResetPreview();
   } catch (err) {
     console.error("Could not read what is stored:", err);
-    summaryEl.textContent = `Could not read what is stored: ${err.message}`;
+    summaryEl.textContent = `Couldn't read what is stored: ${err.message}`;
     warningEl.hidden = true;
     return;
   }
@@ -195,8 +196,8 @@ async function refreshResetPanel() {
     }
     // A backup time can't say what was added after it, so it is never presented as "all safe".
     parts.push(lastBackupUtc()
-      ? `${lastBackupText()} Anything added since is not in it.`
-      : "No backup has been made from this browser.");
+      ? `${lastBackupText()} Anything added since isn't in it.`
+      : "Never exported from this browser.");
     warningEl.textContent = parts.join(" ");
   }
 }
@@ -236,7 +237,7 @@ async function confirmReset() {
 
   const panelButtons = document.querySelectorAll("#reset-panel button");
   panelButtons.forEach((button) => { button.disabled = true; });
-  setHardwareStatus(statusEl, "Deleting...", null);
+  setHardwareStatus(statusEl, "Deleting…", null);
 
   try {
     const result = await HardwareApi.resetAll();
@@ -253,7 +254,7 @@ async function confirmReset() {
         + "Clear this site's data in the browser settings.", "error");
     } else {
       setHardwareStatus(statusEl,
-        "Deleted. This browser now holds no runs, curves, or batches, and the defaults are restored.", "success");
+        "Deleted. This browser now holds no runs, curves, batches, or remembered page state.", "success");
     }
   } catch (err) {
     console.error("Reset failed:", err);

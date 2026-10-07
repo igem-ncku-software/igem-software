@@ -242,8 +242,8 @@ function dataProblems() {
   if (!info.date) problems.push("Enter the date.");
   else if (info.date > today()) problems.push("The date is in the future.");
   if (!info.strain) problems.push("Enter the biosensor strain.");
-  if (!info.signal) problems.push("Enter the signal.");
-  for (const [field, name] of [["strain", "biosensor strain"], ["signal", "signal"], ["instrument", "instrument"], ["notes", "notes"]]) {
+  if (!info.signal) problems.push("Enter the detection settings.");
+  for (const [field, name] of [["strain", "biosensor strain"], ["signal", "detection text"], ["instrument", "instrument"], ["notes", "notes"]]) {
     if (info[field].length > ASSAY_TEXT_LIMIT) problems.push(`The ${name} is too long.`);
   }
 
@@ -258,7 +258,7 @@ function dataProblems() {
     const n = i + 1;
     const key = row.key.trim();
     if (row.role === "medium") {
-      if (!odMode) add("a medium blank is used only with F/OD600; switch it on or remove the row.", n);
+      if (!odMode) add("a medium blank is used only with Fluorescence ÷ OD600; select it or remove the row.", n);
     } else if (row.role === "standard") {
       if (!key) add("enter the concentration.", n);
       else if (!(parseNumber(key) >= 0)) add("concentration must be a number ≥ 0.", n);
@@ -278,7 +278,7 @@ function dataProblems() {
     }
     const values = rowValueTexts(row).filter((text) => !isBlankText(text));
     if (values.length === 0) add("enter at least one replicate.", n);
-    if (values.some((text) => !Number.isFinite(parseNumber(text)))) add("a value is not a number.", n);
+    if (values.some((text) => !Number.isFinite(parseNumber(text)))) add("a value isn't a number.", n);
     // F and OD come from the same well: one without the other can't be divided.
     if (odMode && row.reps.some((text, rep) => isBlankText(text) !== isBlankText(row.ods[rep]))) {
       add("each replicate needs both F and OD.", n);
@@ -297,7 +297,7 @@ function dataProblems() {
         if (row.ods.some((text) => !isBlankText(text) && !(parseNumber(text) - blank.od > 0))) low.push(i + 1);
       });
       if (low.length) {
-        problems.push(`${rowList(low)}: OD is not above the medium blank's (${formatSignal(blank.od)}), so F/OD is undefined.`);
+        problems.push(`${rowList(low)}: OD isn't above the medium blank's (${formatSignal(blank.od)}), so F/OD is undefined.`);
       }
     }
   }
@@ -876,7 +876,7 @@ function formatResult(result, value, scale) {
 function renderResults() {
   if (!fit) return;
   document.getElementById("results-range").textContent =
-    `Numbers only inside the usable range, ${formatInterval([fit.range_nM.min, fit.range_nM.max])} in the well.`;
+    `Values are given only within the usable range (${formatInterval([fit.range_nM.min, fit.range_nM.max])} in the well); outside it, only the bound is shown.`;
   const samples = sampleRows();
   document.getElementById("results-empty").hidden = samples.length > 0;
   document.getElementById("results-table-wrapper").hidden = samples.length === 0;

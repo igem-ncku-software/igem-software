@@ -212,7 +212,7 @@ const CurveFit = {
 
     const { p, cov } = curveFit4PL(points);
     const [top, bottom, lnEc50, hill] = p;
-    if (!cov || !cov.flat().every(Number.isFinite)) throw new Error("Fit did not converge: parameter covariance is undefined.");
+    if (!cov || !cov.flat().every(Number.isFinite)) throw new Error("Fit didn't converge: parameter covariance is undefined.");
     if (!(top > bottom)) throw new Error("No increasing response: top ≤ bottom, so no curve can be built.");
 
     const params = { top, bottom, ec50_nM: Math.exp(lnEc50), hill };

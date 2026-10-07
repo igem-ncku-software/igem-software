@@ -171,7 +171,7 @@ function readPlateCsv(text, filename) {
         ["File", filename],
         ["Date", first.date || "--"],
         ["Strain", first.strain || "--"],
-        ["Signal", first.signal_description || "--"],
+        ["Detection", first.signal_description || "--"],
         ["Normalization", first.normalization || "--"],
         ["Samples", String(samples.size)],
       ],
@@ -261,7 +261,7 @@ async function loadFile(input, reader, assign, statusEl, summaryId) {
     sideStatus(statusEl, side, file.name);
   } catch (err) {
     assign(null);
-    setStatus(statusEl, `Could not read ${file.name}: ${err.message}`, "error");
+    setStatus(statusEl, `Couldn't read ${file.name}: ${err.message}`, "error");
   }
   exported = false;
   renderSummary(summaryId, summaryId === "plate-summary" ? plateSide : deviceSide);
@@ -281,7 +281,7 @@ async function loadBatchChoice() {
       sideStatus(statusEl, deviceSide, id);
     } catch (err) {
       deviceSide = null;
-      setStatus(statusEl, `Could not read ${id}: ${err.message}`, "error");
+      setStatus(statusEl, `Couldn't read ${id}: ${err.message}`, "error");
     }
   }
   exported = false;
@@ -385,12 +385,13 @@ function renderComparison() {
   warningEl.hidden = warnings.length === 0;
 
   set("stat-pairs", stats ? String(stats.n) : "0");
-  set("stat-pairs-sub", `of ${plural(all.length, "sample")}; a number on both sides`);
+  set("stat-pairs-sub", `of ${plural(all.length, "sample")}, with a number on both sides`);
   set("stat-ratio", stats ? formatRatio(stats.gmr) : "--");
   set("stat-loa", stats?.loa ? `${formatRatio(stats.loa[0])} – ${formatRatio(stats.loa[1])}` : "--");
-  set("stat-loa-sub", stats?.n === 2 ? "Rough: only 2 pairs" : "Ratio, Bland–Altman on log scale");
+  set("stat-loa-sub", stats && !stats.loa ? "Needs at least 2 pairs"
+    : stats?.n === 2 ? "Approximate: only 2 pairs" : "Ratio, Bland–Altman on log scale");
   set("stat-overlap", stats ? `${stats.overlap} / ${stats.n}` : "--");
-  set("stat-overlap-sub", stats && !stats.loa ? "Limits need at least 2 pairs" : "pairs");
+  set("stat-overlap-sub", "pairs");
 
   const tbody = document.getElementById("compare-body");
   tbody.replaceChildren();

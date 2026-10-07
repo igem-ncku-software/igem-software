@@ -275,7 +275,7 @@ function fillProblems() {
     const empty = marked.filter((well) => plateValues[kind].get(well) === "");
     const notNumber = marked.filter((well) => plateValues[kind].get(well) !== "" && !Number.isFinite(parseNumber(plateValues[kind].get(well))));
     if (empty.length) problems.push(`No ${name} value in marked ${plural(empty.length, "well")}: ${wellList(empty)}.`);
-    if (notNumber.length) problems.push(`${name[0].toUpperCase()}${name.slice(1)} is not a number in ${wellList(notNumber)}.`);
+    if (notNumber.length) problems.push(`${name[0].toUpperCase()}${name.slice(1)} isn't a number in ${wellList(notNumber)}.`);
   }
   if (!odMode && marked.some((well) => plateMarks.get(well).role === "medium")) {
     problems.push("Medium blank wells need Fluorescence ÷ OD600.");

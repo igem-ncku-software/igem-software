@@ -89,6 +89,12 @@ function formatPercent(fraction) {
   return `${(fraction * 100).toFixed(1)}%`;
 }
 
+// An error message as a clause to continue a sentence: the backend's details end in a period and
+// the browser's own messages mostly don't, so "…: ${message}. Run it again." would print "..".
+function hwClause(message) {
+  return String(message).trim().replace(/\.+$/, "");
+}
+
 // Data is always stored in UTC; the display always shows the browser's local time, in one fixed
 // 24-hour format (YYYY-MM-DD HH:MM:SS) rather than the browser locale's, which on a zh-TW system
 // would put 下午 into an English interface. It also matches a manual entry's bare YYYY-MM-DD date.
@@ -213,7 +219,7 @@ function setStepCard(card, state, waitingReason = null) {
 //          that is the state every device was in before, and a failed read still says so.
 function sensorReading(sensorOk) {
   if (sensorOk === false) {
-    return { text: "Not responding", tone: "error", blocks: "The AS7341 is not responding, so no reading can be taken." };
+    return { text: "Not responding", tone: "error", blocks: "The AS7341 isn't responding, so no reading can be taken." };
   }
   if (sensorOk === true) return { text: "Responding", tone: null, blocks: null };
   return { text: "Not reported", tone: null, blocks: null };
@@ -397,7 +403,7 @@ function renderHardwareSubnav() {
     link.href = step.href;
     if (step.key === nav.dataset.page) link.setAttribute("aria-current", "step");
     const text = hwEl("span", "hw-step-text");
-    text.append(hwEl("span", "hw-step-label", step.label), hwEl("span", "hw-step-state", "..."));
+    text.append(hwEl("span", "hw-step-label", step.label), hwEl("span", "hw-step-state", "…"));
     link.append(hwEl("span", "hw-step-num", String(i + 1)), text);
     item.appendChild(link);
     list.appendChild(item);

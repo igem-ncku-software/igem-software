@@ -43,7 +43,7 @@
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <p class="plan-meta">The CSV exported at the Plate Reader Assay's Export step. Each sample's AHL in sample (× dilution) is compared.</p>
+          <p class="plan-meta">The CSV exported at the Plate Reader Assay's Export step. The AHL in each sample (× dilution) is compared.</p>
           <label for="plate-file">Plate Reader Assay CSV</label>
           <input type="file" id="plate-file" accept=".csv,text/csv" />
           <p class="status-message" id="plate-status" aria-live="polite"></p>
@@ -82,7 +82,7 @@
               <input type="text" id="device-dilution" inputmode="decimal" autocomplete="off" value="1" />
             </div>
           </div>
-          <p class="plan-meta">CAPTURE-Screen batches carry no dilution: its values are multiplied by this one, for every sample.</p>
+          <p class="plan-meta">CAPTURE-Screen batches don't record a dilution, so every sample's value is multiplied by this one.</p>
           <p class="status-message" id="device-status" aria-live="polite"></p>
           <div class="table-wrapper" id="device-summary-wrapper" hidden>
             <table class="kv-table">
@@ -150,7 +150,7 @@
           <p class="plan-meta" id="compare-unmatched" hidden></p>
 
           <h3 class="subsection-heading table-heading">Plot</h3>
-          <p class="chart-note">Log axes, AHL in sample. Bars: 95% CIs. Dashed line: perfect agreement (y = x). Only pairs with a number on both sides.</p>
+          <p class="chart-note">Log axes, AHL in sample. Bars: 95% CIs. Only pairs with a number on both sides.</p>
           <div class="chart-plate">
             <canvas id="compare-chart" role="img" aria-label="AHL inferred on CAPTURE-Screen against the plate reader, log axes, with 95% CIs and the line y = x"></canvas>
           </div>
@@ -182,7 +182,7 @@
 
     <footer class="site-footer">
       <p class="ruo-notice">Research use only. Not intended for diagnostic use.</p>
-      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking…</span></p>
     </footer>
   </div>
 

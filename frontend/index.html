@@ -32,21 +32,21 @@
       <nav class="nav-hub" aria-label="Tools">
         <div class="nav-grid">
           <a class="card nav-card" href="plate-assay.html">
-            <p class="section-label">Plate reader</p>
+            <p class="section-label">Any plate reader</p>
             <h2>Plate Reader Assay</h2>
             <p class="section-description">
-              Fit a standard curve from AHL standards on the plate and infer AHL
-              in the samples beside them.
+              Fit a curve to the AHL standards on a plate and infer AHL in the
+              samples read with them.
             </p>
             <span class="nav-card-cue">Open assay &rarr;</span>
           </a>
 
           <a class="card nav-card" href="hardware.html">
-            <p class="section-label">Hardware</p>
+            <p class="section-label">Our instrument</p>
             <h2>CAPTURE-Screen</h2>
             <p class="section-description">
-              Instrument checks, calibration curves, and sample measurements for the
-              AS7341 fluorescence reader.
+              Check the instrument, build calibration curves, and measure samples on
+              the AS7341 fluorescence reader.
             </p>
             <span class="nav-card-cue">Open instrument &rarr;</span>
           </a>
@@ -64,7 +64,7 @@
           <p class="section-label">Validation</p>
           <h2>Cross-Validation</h2>
           <p class="section-description">
-            The same samples on both: compare the AHL inferred on a plate reader and on
+            Compare the AHL inferred for the same samples on a plate reader and on
             CAPTURE-Screen.
           </p>
           <span class="nav-card-cue">Open comparison &rarr;</span>
@@ -109,7 +109,7 @@
           </div>
         </div>
 
-        <div id="live-empty" class="live-empty">Backend may take up to 1 min to wake</div>
+        <div id="live-empty" class="live-empty">Backend may take up to a minute to wake</div>
         <!-- The only aria-live region: the status above without its ticking seconds (device_live.js). -->
         <p id="live-announce" class="visually-hidden" aria-live="polite"></p>
         <div id="live-spectrum" hidden>
@@ -131,7 +131,8 @@
     </main>
 
     <footer class="site-footer">
-      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+      <p class="ruo-notice">Research use only. Not intended for diagnostic use.</p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking…</span></p>
     </footer>
   </div>
 

@@ -180,7 +180,7 @@ class DeviceHub:
         if error == "busy":
             future.set_exception(DeviceBusy("CAPTURE-Screen is busy. Try again."))
         elif error == "sensor_offline":
-            future.set_exception(DeviceError("The AS7341 sensor is not responding. Check its I2C wiring."))
+            future.set_exception(DeviceError("The AS7341 sensor isn't responding. Check its I2C wiring."))
         else:
             future.set_exception(DeviceError(f"CAPTURE-Screen rejected the read: {error[:80]}"))
 
@@ -214,7 +214,7 @@ class DeviceHub:
                 await self.command({"cmd": "read", "request_id": request_id})
                 return await asyncio.wait_for(future, self.read_timeout_s)
             except asyncio.TimeoutError:
-                raise DeviceTimeout("CAPTURE-Screen did not answer in time.") from None
+                raise DeviceTimeout("CAPTURE-Screen didn't answer in time.") from None
             finally:
                 self._pending.pop(request_id, None)
                 if future.done() and not future.cancelled():

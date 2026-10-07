@@ -73,12 +73,12 @@ function renderChooserStatus() {
   const statusEl = document.getElementById("batch-curves-status");
   statusEl.hidden = false;
   if (chooserLoadError) {
-    setHardwareStatus(statusEl, `Could not load curves: ${chooserLoadError}`, "error");
+    setHardwareStatus(statusEl, `Couldn't load curves: ${chooserLoadError}`, "error");
   } else if (chooserCurves.length === 0) {
     setHardwareStatus(statusEl, "No saved curves yet. ", "warn");
     statusEl.appendChild(hwLink("hardware-calibration.html", "Calibrate →"));
   } else if (deviceFingerprint === null) {
-    setHardwareStatus(statusEl, `Instrument unreachable: ${deviceError}`, "warn");
+    setHardwareStatus(statusEl, `Can't check curves against the instrument: ${deviceError ? hwClause(deviceError) : "no answer yet"}.`, "warn");
   } else {
     setHardwareStatus(statusEl, "", null);
     statusEl.hidden = true;
@@ -154,7 +154,7 @@ function renderCurveChoices(preselectId) {
       hwEl("span", "choice-title", `${formatConditions(curve.conditions)}`),
       hwEl("span", "choice-meta",
         `${curve.curve_id} · EC50 ${formatConcentration(curve.params.ec50_nM)} · LOD ${formatConcentration(curve.lod_nM)} · `
-        + `range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · fitted ${formatLocalTime(curve.fitted_at)}`),
+        + `usable range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · fitted ${formatLocalTime(curve.fitted_at)}`),
     );
     if (blocked) text.appendChild(hwEl("span", "choice-meta", `Not usable: ${blocked}`));
     label.append(input, text);
@@ -170,7 +170,7 @@ async function startBatch(event) {
   if (button.disabled) return;
 
   button.disabled = true;
-  setHardwareStatus(statusEl, "Starting batch...", null);
+  setHardwareStatus(statusEl, "Starting batch…", null);
   try {
     const created = await HardwareApi.createBatch({
       curve_id: selectedCurveId(),
@@ -184,7 +184,7 @@ async function startBatch(event) {
     refreshHardwareSteps();
   } catch (err) {
     console.error("Could not start batch:", err);
-    setHardwareStatus(statusEl, `Could not start the batch: ${err.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't start the batch: ${err.message}`, "error");
     updateBatchStartControls();
   }
 }
@@ -212,11 +212,11 @@ function renderBatchSummary() {
 
 function readBlockReason() {
   if (batch.finished_at) return "This batch is finished. Start a new batch to read more.";
-  if (deviceFingerprint === null) return "Instrument unreachable.";
+  if (deviceFingerprint === null) return deviceError ? `${hwClause(deviceError)}.` : "Checking the instrument…";
   const sensor = sensorReading(deviceSensorOk).blocks;
   if (sensor) return sensor;
   if (deviceFingerprint !== batch.curve.config_fingerprint) {
-    return `The instrument now runs config ${deviceFingerprint}, not the curve's ${batch.curve.config_fingerprint}. Readings would not count.`;
+    return `The instrument now runs config ${deviceFingerprint}, not the curve's ${batch.curve.config_fingerprint}, so reading is blocked: a reading under another config wouldn't count.`;
   }
   return null;
 }
@@ -264,7 +264,7 @@ async function setTubeExclusion(sampleId, reason) {
       reason === null ? `${sampleId} counts again.` : `${sampleId} left out: ${reason.trim()}`, "success");
   } catch (err) {
     console.error("Could not change the tube:", err);
-    setHardwareStatus(document.getElementById("results-status"), `Could not change ${sampleId}: ${err.message}`, "error");
+    setHardwareStatus(document.getElementById("results-status"), `Couldn't change ${sampleId}: ${err.message}`, "error");
   }
   renderBatch();
   refreshBatches();
@@ -285,7 +285,7 @@ function renderBlank() {
   const estimate = batch.blank_estimate;
   check.hidden = counted === 0;
   if (estimate.status === "below_lod") {
-    setHardwareStatus(check, `Blank mean ${formatFluorescence(estimate.mean_signal)} reads below the curve's LOD, as it should.`, "success");
+    setHardwareStatus(check, `Blank mean ${formatFluorescence(estimate.mean_signal)} ${HARDWARE_FLUORESCENCE_UNIT} reads below the curve's LOD, as it should.`, "success");
   } else if (estimate.status === "ok" || estimate.status === "above_range") {
     setHardwareStatus(check,
       `Blank mean reads as ${formatEstimate(estimate, batch.curve)} AHL. Check for AHL carry-over or drift before reading samples.`, "warn");
@@ -411,7 +411,7 @@ function renderChannelChart(raw) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (context) => `${formatFluorescence(context.parsed.y)} ${HARDWARE_FLUORESCENCE_UNIT}` } },
-        channelAnnotations: { annotations: { F4: { text: "sfGFP 510 nm", color: accent }, F3: { text: "leakage", color: goldInk } } },
+        channelAnnotations: { annotations: { F4: { text: "sfGFP", color: accent }, F3: { text: "leakage", color: goldInk } } },
       },
     },
     plugins: [channelAnnotationPlugin],
@@ -466,7 +466,7 @@ async function readTube(role) {
 
   measureReading = true;
   renderBatch();
-  setHardwareStatus(statusEl, `Reading ${label}...`, null);
+  setHardwareStatus(statusEl, `Reading ${label}…`, null);
 
   let sensorOk;
   try {
@@ -646,7 +646,7 @@ async function exportBatchCsv(batchId, button, statusEl) {
       batch = await HardwareApi.getBatch(batchId);
       renderBatch();
     }
-    setHardwareStatus(statusEl, `Exported ${batchId}. Check the download completed before relying on it.`, "success");
+    setHardwareStatus(statusEl, `Exported ${batchId}. Check that the download completed before relying on it.`, "success");
   } catch (err) {
     console.error("Batch export failed:", err);
     setHardwareStatus(statusEl, `Export failed: ${err.message}`, "error");
@@ -671,7 +671,7 @@ async function finishBatch() {
     setHardwareStatus(statusEl, `${batch.batch_id} finished.`, "success");
   } catch (err) {
     console.error("Could not finish the batch:", err);
-    setHardwareStatus(statusEl, `Could not finish: ${err.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't finish: ${err.message}`, "error");
   }
   renderBatch();
   refreshBatches();
@@ -714,7 +714,7 @@ async function openBatch(batchId, alreadyLoaded) {
     console.error("Failed to load batch:", batchResult.reason);
     history.replaceState(null, "", "hardware-measure.html");
     await showChooser();
-    setHardwareStatus(document.getElementById("batch-start-status"), `Could not load ${batchId}: ${batchResult.reason.message}`, "error");
+    setHardwareStatus(document.getElementById("batch-start-status"), `Couldn't load ${batchId}: ${batchResult.reason.message}`, "error");
     return;
   }
   batch = batchResult.value;
@@ -748,7 +748,7 @@ async function refreshBatches() {
     setHardwareStatus(statusEl, "", null);
   } catch (err) {
     console.error("Could not load batches:", err);
-    setHardwareStatus(statusEl, `Could not load batches: ${err.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't load batches: ${err.message}`, "error");
     return;
   }
   document.getElementById("batches-empty").hidden = batches.length > 0;

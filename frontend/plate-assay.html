@@ -20,7 +20,7 @@
         <div class="site-header-text">
           <p class="eyebrow">iGEM NCKU-Tainan 2026 · Capture</p>
           <h1>Plate Reader Assay</h1>
-          <p class="subtitle">Standard curve and inferred AHL from one 96-well plate</p>
+          <p class="subtitle">Standard curve and inferred AHL from standards and samples read together</p>
         </div>
         <img class="site-logo" src="assets/images/logo-wordmark.png"
              alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
@@ -55,8 +55,8 @@
                 <input type="text" id="info-strain" autocomplete="off" />
               </div>
               <div class="field">
-                <label for="info-signal">Signal</label>
-                <input type="text" id="info-signal" autocomplete="off" placeholder="e.g. Fluorescence, Ex 485 / Em 530" />
+                <label for="info-signal">Detection</label>
+                <input type="text" id="info-signal" autocomplete="off" placeholder="e.g. Fluorescence, Ex 460 / Em 530" />
               </div>
               <div class="field">
                 <label for="info-instrument">Instrument (optional)</label>
@@ -82,7 +82,7 @@
               </label>
             </div>
             <p class="plan-meta">
-              Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution.
+              Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution factor (≥ 1, e.g. 10 for 1:10).
               Paste a block from Excel into any cell.
             </p>
             <p class="plan-meta" id="od-note" hidden>
@@ -120,7 +120,7 @@
                     <option value="standard">Standard</option>
                     <option value="sample">Sample</option>
                     <option value="medium">Medium blank</option>
-                    <option value="clear">Not used</option>
+                    <option value="clear">Clear mark</option>
                   </select>
                 </div>
                 <div class="field" id="plate-conc-field">
@@ -212,10 +212,7 @@
           <p class="status-message" id="fit-status" aria-live="polite"></p>
 
           <h3 class="subsection-heading table-heading">Curve</h3>
-          <p class="chart-note">
-            Log concentration axis. Dots: readings. Squares: mean ± SD. Dashed line: EC50. Grey open
-            circles: excluded readings. Blanks (0 nM) appear in the table only.
-          </p>
+          <p class="chart-note">Blanks (0 nM) appear in the table only.</p>
           <div class="chart-plate">
             <canvas id="fit-chart"></canvas>
           </div>
@@ -313,7 +310,7 @@
 
     <footer class="site-footer">
       <p class="ruo-notice">Research use only. Not intended for diagnostic use.</p>
-      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking…</span></p>
     </footer>
   </div>
 

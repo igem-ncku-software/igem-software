@@ -24,7 +24,7 @@ const CURVES_COLUMN_COUNT = 8;
 
 // The instrument's config and the current signal decide which curves are usable. Polled every
 // DEVICE_STATUS_POLL_INTERVAL_MS, and the table re-rendered only when either changes, so an
-// instrument coming online turns "unverified" into "usable" without a reload.
+// instrument coming online turns "Unverified" into "Usable" without a reload.
 async function refreshCurvesDevice() {
   const [statusResult, signalResult] = await Promise.allSettled([
     HardwareApi.getDeviceStatus(),
@@ -46,11 +46,11 @@ function renderCurvesStatus() {
   const statusEl = document.getElementById("curves-status");
   if (curvesFingerprint === null) {
     setHardwareStatus(statusEl,
-      `Instrument unreachable (${curvesDeviceError}), so it can't be checked which curves match its config.`, "warn");
+      `Can't check curves against the instrument: ${hwClause(curvesDeviceError)}.`, "warn");
     return;
   }
   statusEl.textContent = "";
-  statusEl.append("The instrument runs config ", hwFingerprint(curvesFingerprint),
+  statusEl.append("The instrument now runs config ", hwFingerprint(curvesFingerprint),
     curvesSignal ? `, signal ${curvesSignal}.` : ".");
   statusEl.className = "status-message";
 }
@@ -61,7 +61,7 @@ async function loadCurves() {
   const [curvesResult] = await Promise.allSettled([HardwareApi.listCurves(), refreshCurvesDevice()]);
   if (curvesResult.status === "rejected") {
     console.error("Failed to load curves:", curvesResult.reason);
-    setHardwareStatus(statusEl, `Could not load curves: ${curvesResult.reason.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't load curves: ${curvesResult.reason.message}`, "error");
     return;
   }
   curvesList = curvesResult.value;
@@ -83,8 +83,8 @@ function renderCurves() {
     const blocked = curveBlockReason(curve, curvesFingerprint, curvesSignal);
 
     const statusCell = hwEl("td");
-    if (curvesFingerprint === null) statusCell.appendChild(hwEl("span", "flag-chip", "unverified"));
-    else statusCell.appendChild(hwEl("span", `flag-chip ${blocked ? "error" : "ok"}`, blocked ? "not usable" : "usable"));
+    if (curvesFingerprint === null) statusCell.appendChild(hwEl("span", "flag-chip", "Unverified"));
+    else statusCell.appendChild(hwEl("span", `flag-chip ${blocked ? "error" : "ok"}`, blocked ? "Not usable" : "Usable"));
     if (blocked && curvesFingerprint !== null) statusCell.append(" ", hwEl("span", "cell-note", blocked));
 
     const actions = hwEl("td", "action-cell");
@@ -154,7 +154,7 @@ function renderCurveDetails(curve) {
 
   cell.appendChild(hwEl("p", "detail-heading", "Curve"));
   const note = hwEl("p", "chart-note",
-    "Log concentration axis. Dots: tubes. Grey open circles: excluded tubes. Dashed line: EC50. Blanks (0 nM) aren't drawn.");
+    "Blanks (0 nM) aren't drawn.");
   const plate = hwEl("div", "chart-plate curve-chart");
   const canvas = hwEl("canvas");
   plate.appendChild(canvas);
@@ -226,9 +226,9 @@ async function drawCurveChart(curve, canvas, plate) {
     type: "scatter",
     data: {
       datasets: [
-        { label: "Tube", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent },
+        { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent },
         {
-          label: "Excluded", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
+          label: "Tube (excluded)", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
           pointBorderColor: muted, pointBorderWidth: 1.5,
         },
         { label: "4PL fit", data: curvePoints, type: "line", pointRadius: 0, borderWidth: 2, tension: 0, borderColor: gold },

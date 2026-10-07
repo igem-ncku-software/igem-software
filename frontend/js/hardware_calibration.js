@@ -128,12 +128,12 @@ function renderDeviceStatus(el, withHint = false) {
   const text = hwEl("span");
   el.replaceChildren(dot, text);
   if (deviceState === "checking") {
-    text.textContent = "Checking the instrument...";
+    text.textContent = "Checking the instrument…";
     return;
   }
   if (deviceState === "offline") {
-    text.append(deviceLastSeen ? `Offline · last seen ${formatSeenTime(deviceLastSeen)}.` : deviceError);
-    if (withHint) text.append(" You can fill in Set up now; Create run waits for it.");
+    text.append(deviceLastSeen ? `Offline · last seen ${formatSeenTime(deviceLastSeen)}.` : `${hwClause(deviceError)}.`);
+    if (withHint) text.append(" You can fill in Set up now; Create run waits for the instrument.");
     text.append(" ", hwLink("hardware.html", "Check on Instrument →"));
     return;
   }
@@ -253,7 +253,7 @@ function updateSetupControls() {
     const planProblem = updatePlanPreview(); // always, so the tube list shows while conditions are still empty
     problem = problem ?? planProblem;
     // A run is bound to the instrument's config when it is created, so the instrument has to answer.
-    if (deviceState === "checking") problem = problem ?? "Checking the instrument...";
+    if (deviceState === "checking") problem = problem ?? "Checking the instrument…";
     if (deviceState === "offline") problem = problem ?? `${deviceError.replace(/\.?$/, ".")} Or enter recorded data instead.`;
     const button = document.getElementById("setup-create-button");
     setBlocked(button, document.getElementById("setup-create-reason"), problem);
@@ -317,7 +317,7 @@ async function createRun(button, statusEl) {
 
   manualCreating = true;
   updateSetupControls();
-  setHardwareStatus(statusEl, "Creating...", null);
+  setHardwareStatus(statusEl, "Creating…", null);
 
   try {
     const conditions = setupConditions();
@@ -347,7 +347,7 @@ async function createRun(button, statusEl) {
     refreshHardwareSteps();
   } catch (err) {
     console.error("Run creation failed:", err);
-    setHardwareStatus(statusEl, `Could not create: ${err.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't create: ${err.message}`, "error");
   } finally {
     manualCreating = false;
     if (!plan) updateSetupControls();
@@ -389,7 +389,7 @@ function renderConfigWarning() {
 
 // Why Read can't run now, or null.
 function readBlockReason() {
-  if (deviceState === "checking") return "Checking the instrument...";
+  if (deviceState === "checking") return "Checking the instrument…";
   if (deviceState === "offline") return deviceError;
   const sensorBlock = sensorReading(deviceSensorOk).blocks;
   if (sensorBlock) return sensorBlock;
@@ -562,7 +562,7 @@ async function readPlanTarget() {
     // planReading, or a rendering bug leaves Read disabled for good, with no request sent and
     // nothing on screen saying why.
     renderAll();
-    setHardwareStatus(statusEl, `Reading tube ${item.slot} (${item.label})...`, null);
+    setHardwareStatus(statusEl, `Reading tube ${item.slot} (${item.label})…`, null);
 
     const input = {
       sample_id: `${plan.plan_id}-${String(item.slot).padStart(2, "0")}`,
@@ -736,7 +736,7 @@ function renderFitChart() {
     .map(({ ys, c }) => ({ x: c, y: fitMean(ys), sd: fitSd(ys) }));
 
   const datasets = [
-    { label: "Tube (included)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent, showLine: false },
+    { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent, showLine: false },
     {
       label: "Tube (excluded)", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
       pointBorderColor: muted, pointBorderWidth: 1.5, showLine: false,
@@ -911,7 +911,7 @@ async function runFit() {
   const statusEl = document.getElementById("fit-status");
   fitBusy = true;
   renderAll();
-  setHardwareStatus(statusEl, "Fitting 4PL...", null);
+  setHardwareStatus(statusEl, "Fitting 4PL…", null);
 
   try {
     fitCurveResult = await HardwareApi.fitCurve(plan.plan_id, [...fitExclusions.keys()]);
@@ -956,7 +956,7 @@ function renderFitControls() {
     const curve = fitCurveResult;
     document.getElementById("save-facts").textContent =
       `EC50 ${formatConcentration(curve.params.ec50_nM)} · LOD ${formatConcentration(curve.lod_nM)} · `
-      + `usable ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · `
+      + `usable range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · `
       + `${plural(fitExclusions.size, "tube")} excluded`;
     const binding = document.getElementById("save-binding");
     binding.textContent = "";
@@ -964,7 +964,6 @@ function renderFitControls() {
   }
 
   // Once a curve from this run exists: the reminder that it lives only in this browser.
-  document.getElementById("save-backup").hidden = fitted || planCurves.length === 0;
 
   const refit = document.getElementById("refit-button");
   refit.hidden = fitState !== "saved";
@@ -983,7 +982,7 @@ function renderSavedCurves() {
       hwEl("span", "choice-title", curve.curve_id),
       hwEl("span", "choice-meta",
         `EC50 ${formatConcentration(curve.params.ec50_nM)} · LOD ${formatConcentration(curve.lod_nM)} · `
-        + `range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · `
+        + `usable range ${formatConcentrationInterval([curve.range_nM.min, curve.range_nM.max])} · `
         + `${plural(curve.excluded.length, "tube")} excluded · fitted ${formatLocalTime(curve.fitted_at)}`),
     );
     const links = hwEl("span", "choice-meta");
@@ -998,7 +997,7 @@ async function saveFit() {
   const statusEl = document.getElementById("save-status");
   fitBusy = true;
   renderAll();
-  setHardwareStatus(statusEl, "Saving curve...", null);
+  setHardwareStatus(statusEl, "Saving curve…", null);
 
   try {
     // fitCurve only takes sample ids; the reason is attached when saving.
@@ -1076,7 +1075,7 @@ async function openPlan(planId, alreadyLoaded) {
   if (planResult.status === "rejected") {
     console.error("Failed to load run:", planResult.reason);
     history.replaceState(null, "", "hardware-calibration.html");
-    showSetup(`Could not load run ${planId}: ${planResult.reason.message}`);
+    showSetup(`Couldn't load run ${planId}: ${planResult.reason.message}`);
     return;
   }
   plan = planResult.value;
@@ -1126,7 +1125,7 @@ function manualConfigValues() {
 // { fingerprint } when the config is known, otherwise { error } saying why not.
 function manualConfig() {
   if (manualConfigMode() === "current") {
-    if (deviceState === "checking") return { error: "Checking the instrument's config..." };
+    if (deviceState === "checking") return { error: "Checking the instrument's config…" };
     if (deviceState === "offline") {
       return { error: "Instrument unreachable, so its current config is unknown. Enter the config manually." };
     }
@@ -1210,7 +1209,7 @@ function updateManualControls() {
   const current = document.getElementById("manual-current-config");
   current.textContent = "";
   if (deviceState === "online") current.append("(config ", hwFingerprint(deviceFingerprint), ")");
-  else current.textContent = deviceState === "checking" ? "(checking...)" : "(instrument offline)";
+  else current.textContent = deviceState === "checking" ? "(checking…)" : "(instrument offline)";
   document.getElementById("manual-current-note").hidden = manualConfigMode() !== "current";
   const { tubes, concentrations, blanks } = manualCounts();
   document.getElementById("manual-summary").textContent =
@@ -1408,7 +1407,7 @@ async function refreshRuns() {
     setHardwareStatus(statusEl, "", null);
   } catch (err) {
     console.error("Could not load saved runs:", err);
-    setHardwareStatus(statusEl, `Could not load saved runs: ${err.message}`, "error");
+    setHardwareStatus(statusEl, `Couldn't load saved runs: ${err.message}`, "error");
   }
 }
 

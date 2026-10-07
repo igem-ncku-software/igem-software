@@ -82,7 +82,7 @@ function instrumentVerdict() {
   const status = instrumentStatus;
   switch (linkState()) {
     case "checking":
-      return { tone: null, title: "Checking the instrument...", detail: "" };
+      return { tone: null, title: "Checking the instrument…", detail: "" };
     case "unreachable":
       return { tone: "error", title: "Not ready: backend not reachable",
         detail: `May be waking up (up to a minute). Retrying every ${POLL_SECONDS} s.` };
@@ -99,7 +99,7 @@ function instrumentVerdict() {
   }
   if (status.sensor_ok === false) {
     return { tone: "error", title: "Not ready: AS7341 sensor not responding",
-      detail: "Check the I2C wiring. It reconnects automatically within seconds." };
+      detail: "Check the I2C wiring. Once it responds, this updates within seconds." };
   }
   if (selfCheckRunning) {
     return { tone: "warn", title: "Self-check in progress", detail: "Reading dark · light · dark." };
@@ -112,16 +112,16 @@ function instrumentVerdict() {
   if (lastSelfCheckError) {
     const { at, message } = lastSelfCheckError;
     return { tone: "warn", title: "Self-check incomplete",
-      detail: [`Read failed at ${formatClockTime(at)}: ${message}. Run it again.`, previousSelfCheckPass(), ...notes].filter(Boolean).join(" · ") };
+      detail: [`Read failed at ${formatClockTime(at)}: ${hwClause(message)}. Run it again.`, previousSelfCheckPass(status.config.fingerprint), ...notes].filter(Boolean).join(" · ") };
   }
   const check = lastSelfCheck?.fingerprint === status.config.fingerprint ? lastSelfCheck : null;
   if (check?.problems.length) {
     return { tone: "warn", title: "Self-check needs attention",
-      detail: [`${capitalize(check.problems.join("; "))} (${formatClockTime(check.at)}). Run it again once fixed.`, previousSelfCheckPass(), ...notes].filter(Boolean).join(" · ") };
+      detail: [`${capitalize(check.problems.join("; "))} (${formatClockTime(check.at)}). Run it again once fixed.`, previousSelfCheckPass(status.config.fingerprint), ...notes].filter(Boolean).join(" · ") };
   }
   if (check) {
     return { tone: "ok", title: "Self-check passed",
-      detail: [`Dark readings stable; no light channel saturated (${formatClockTime(check.at)}). LED response is not verified.`, ...notes].join(" · ") };
+      detail: [`Dark readings stable; no light channel saturated (${formatClockTime(check.at)}). LED response isn't verified.`, ...notes].join(" · ") };
   }
   return lastSelfCheck
     ? { tone: "warn", title: "Connected · Repeat self-check",
@@ -130,10 +130,11 @@ function instrumentVerdict() {
       detail: ["Run a self-check with buffer before calibrating or measuring.", ...notes].join(" · ") };
 }
 
-function previousSelfCheckPass() {
-  return lastPassedSelfCheck
-    ? `Previous checks passed at ${formatClockTime(lastPassedSelfCheck.at)} (config ${lastPassedSelfCheck.fingerprint})`
-    : "";
+// The config is named only when it differs from the current one, which the verdict already lists.
+function previousSelfCheckPass(currentFingerprint) {
+  if (!lastPassedSelfCheck) return "";
+  const config = lastPassedSelfCheck.fingerprint === currentFingerprint ? "" : ` (config ${lastPassedSelfCheck.fingerprint})`;
+  return `Previous check passed at ${formatClockTime(lastPassedSelfCheck.at)}${config}`;
 }
 
 // The device's last contact, for the verdict and its node alike.
@@ -193,10 +194,10 @@ function renderPath() {
   const link = linkState();
   const status = instrumentStatus;
   const unknown = link === "checking"
-    ? { text: "Checking...", unknown: true }
+    ? { text: "Checking…", unknown: true }
     : { text: "Unknown", sub: UPSTREAM_CAUSE[link], unknown: true };
 
-  if (link === "checking") setNode("backend", { text: "Checking...", sub: backendName(), unknown: true });
+  if (link === "checking") setNode("backend", { text: "Checking…", sub: backendName(), unknown: true });
   else if (link === "unreachable") setNode("backend", { text: "Unreachable", tone: "error", sub: `Retrying every ${POLL_SECONDS} s` });
   else if (link === "backend-error") setNode("backend", { text: "Error", tone: "error", sub: "See above" });
   else setNode("backend", { text: "Reachable", tone: "ok", sub: backendName() });
@@ -264,7 +265,7 @@ function renderConfig(tbody, status) {
     ["Gain", `${config.gain}×`, "AS7341 analog gain"],
     ["ATIME / ASTEP", `${config.atime} / ${config.astep}`, "AS7341 integration registers"],
     ["Integration time", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`, "(ATIME + 1) × (ASTEP + 1) × 2.78 µs"],
-    ["Full scale", `${formatCounts(HardwareProcessing.fullScaleCounts(config))} counts`, "min(65,535, (ATIME + 1) × (ASTEP + 1))"],
+    ["Full scale", `${formatCounts(HardwareProcessing.fullScaleCounts(config))} counts`, "min(65535, (ATIME + 1) × (ASTEP + 1))"],
     ["Build ID", config.build_id, "Hardware and reading-path revision"],
     ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID; curves are bound to it"],
     ["Device ID", status.device_id, "This unit's assigned name"],
@@ -288,7 +289,7 @@ function renderConfig(tbody, status) {
 
 function selfCheckBlockReason() {
   switch (linkState()) {
-    case "checking": return "Checking status...";
+    case "checking": return "Checking status…";
     case "unreachable": return "Backend not reachable.";
     case "backend-error": return "Status unavailable.";
     case "offline": return "CAPTURE-Screen is offline.";
@@ -320,7 +321,7 @@ async function runSelfCheck() {
   selfCheckRunning = true;
   applySelfCheckBlock();
   result.hidden = true;
-  setHardwareStatus(statusEl, "Reading...", null);
+  setHardwareStatus(statusEl, "Reading…", null);
   renderVerdict();
 
   try {
@@ -328,7 +329,7 @@ async function runSelfCheck() {
   } catch (err) {
     console.error("Self-check failed:", err);
     lastSelfCheckError = { at: new Date(), message: err.message };
-    setHardwareStatus(statusEl, `Self-check incomplete at ${formatClockTime(lastSelfCheckError.at)}: ${err.message}. Run again.`, "error");
+    setHardwareStatus(statusEl, `Self-check incomplete at ${formatClockTime(lastSelfCheckError.at)}: ${hwClause(err.message)}. Run it again.`, "error");
   } finally {
     selfCheckRunning = false;
     renderVerdict();
@@ -377,13 +378,13 @@ function analyzeSelfCheck(check) {
   const problems = [];
   if (saturated.length) {
     problems.push({ text: `saturated on ${saturated.map(channelName).join(", ")}`,
-      advice: "Lower the gain (Serial command g), then run again." });
+      advice: "Lower the gain (Serial command g), then run it again." });
   }
   if (!driftPeak) {
-    problems.push({ text: "a dark reading is missing", advice: "Run again." });
+    problems.push({ text: "a dark reading is missing", advice: "Run it again." });
   } else if (!stable) {
     problems.push({ text: `dark reading drifted ${countsText(driftPeak.value, true)} on ${channelName(driftPeak.ch)}`,
-      advice: "Keep the lid closed and the room light steady, then run again." });
+      advice: "Keep the lid closed and the room light steady, then run it again." });
   }
   return { drift, net, darkMax, fullScale, driftPeak, lightPeak, saturated: saturated.length > 0, stable, problems };
 }
@@ -436,7 +437,7 @@ function renderSelfCheck(check, container, statusEl) {
     ]),
   );
 
-  const scope = hwEl("p", "plan-meta", "Dark level and light − dark are informational; LED response is not verified.");
+  const scope = hwEl("p", "plan-meta", "Dark level and light − dark are informational; LED response isn't verified.");
   container.replaceChildren(list, scope, raw);
   container.hidden = false;
 }

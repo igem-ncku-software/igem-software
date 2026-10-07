@@ -80,7 +80,7 @@ const HardwareProcessing = (() => {
 
   function validateDeviceConfig(config) {
     if (!config || typeof config !== "object") return "missing config";
-    if (!Number.isFinite(config.led_current_mA)) return "config.led_current_mA is not a number";
+    if (!Number.isFinite(config.led_current_mA)) return "config.led_current_mA isn't a number";
     if (!(Number.isFinite(config.gain) && config.gain > 0)) return "config.gain must be a positive number";
     if (!(Number.isInteger(config.atime) && config.atime >= 0)) return "config.atime must be a non-negative integer";
     if (!(Number.isInteger(config.astep) && config.astep >= 0)) return "config.astep must be a non-negative integer";
@@ -93,7 +93,7 @@ const HardwareProcessing = (() => {
   }
 
   function validateDeviceStatus(body) {
-    if (!body || typeof body !== "object") return "response is not a JSON object";
+    if (!body || typeof body !== "object") return "response isn't a JSON object";
     if (typeof body.device_id !== "string") return "device_id is missing";
     const identity = validateIdentity(body);
     if (identity) return identity;
@@ -119,7 +119,7 @@ const HardwareProcessing = (() => {
   }
 
   function validateDeviceReading(body) {
-    if (!body || typeof body !== "object") return "response is not a JSON object";
+    if (!body || typeof body !== "object") return "response isn't a JSON object";
     if (body.mode !== "measurement") return `mode is "${body.mode}", expected "measurement"`;
     const identity = validateIdentity(body);
     if (identity) return identity;
@@ -181,7 +181,7 @@ const HardwareProcessing = (() => {
   // what they were fitted on and can't silently convert numbers of a different kind.
   function signalId(basis) {
     if (!basis || basis.method !== "single_channel") {
-      throw new Error(`Unmixing method "${basis?.method}" is not implemented.`);
+      throw new Error(`Unmixing method "${basis?.method}" isn't implemented.`);
     }
     return String(basis.signal_channel);
   }

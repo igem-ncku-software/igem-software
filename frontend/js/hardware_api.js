@@ -200,7 +200,7 @@ function loadUnmixBasis() {
       })
       .catch((err) => {
         hardwareBasisPromise = null; // retry next time
-        throw new Error(`Could not load the unmixing basis (${HARDWARE_BASIS_URL}): ${err.message}`);
+        throw new Error(`Couldn't load the unmixing basis (${HARDWARE_BASIS_URL}): ${err.message}`);
       });
   }
   return hardwareBasisPromise.then((basis) => structuredClone(basis));
@@ -230,7 +230,7 @@ const HardwareApi = {
     if (!body.online) {
       const error = new Error(body.last_seen
         ? `CAPTURE-Screen is offline (last seen ${new Date(body.last_seen).toLocaleString()}).`
-        : "CAPTURE-Screen has not connected to the backend. Power it on where it can reach its Wi-Fi.");
+        : "CAPTURE-Screen hasn't connected to the backend. Power it on where it can reach its Wi-Fi.");
       error.deviceOffline = true;
       error.lastSeen = body.last_seen ?? null;
       throw error;

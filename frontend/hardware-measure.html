@@ -45,7 +45,7 @@
 
         <div class="step-card-body">
           <form id="batch-form" novalidate>
-            <p class="status-message" id="batch-curves-status" aria-live="polite">Loading curves...</p>
+            <p class="status-message" id="batch-curves-status" aria-live="polite">Loading curves…</p>
             <fieldset class="plain-fieldset" id="curve-choice">
               <legend class="visually-hidden">Curve</legend>
               <ul class="choice-list" id="batch-curve-list"></ul>
@@ -92,7 +92,7 @@
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <p class="plan-meta">Sets the HIGH_SCATTER baseline.</p>
+          <p class="plan-meta">Also sets the baseline for the HIGH_SCATTER flag.</p>
           <div class="button-row">
             <button type="button" id="blank-read-button">Read blank</button>
           </div>
@@ -127,7 +127,7 @@
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
-        <p class="step-bench"><b>Bench</b> <span>Each sample in as many cuvettes as tubes per sample.</span></p>
+        <p class="step-bench"><b>Bench</b> <span>Each sample in one cuvette per tube (Tubes per sample).</span></p>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
@@ -184,8 +184,8 @@
 
         <div class="step-card-body">
           <p class="plan-meta">
-            Each sample: the mean of its counted tubes, converted through the curve. No number outside
-            the usable range.
+            Each sample: the mean of its counted tubes, converted through the curve. Values are given only
+            within the usable range; outside it, only the bound is shown.
           </p>
           <div class="table-wrapper table-spaced">
             <table>
@@ -243,10 +243,6 @@
             Same samples on a plate reader too?
             <a class="text-link" href="compare.html">Compare on the Cross-Validation page &rarr;</a>
           </p>
-          <p class="plan-meta">
-            Kept in this browser only.
-            <a class="text-link" href="hardware-data.html">Back up everything on the Data page &rarr;</a>
-          </p>
         </div>
       </section>
 
@@ -254,7 +250,7 @@
       <section class="card">
         <p class="section-label">Batches</p>
         <h2 class="card-title">All measurement batches</h2>
-        <p class="status-message" id="batches-status" aria-live="polite">Loading batches...</p>
+        <p class="status-message" id="batches-status" aria-live="polite">Loading batches…</p>
         <div class="empty-state" id="batches-empty" hidden>
           <p>No batches yet.</p>
         </div>
@@ -284,7 +280,7 @@
 
     <footer class="site-footer">
       <p class="ruo-notice">Research use only. This device reads relative fluorescence only and is not intended for diagnostic use.</p>
-      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking…</span></p>
     </footer>
   </div>
 

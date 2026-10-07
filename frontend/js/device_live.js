@@ -181,7 +181,7 @@ function liveStatus() {
       dot: "reconnecting",
       label: retrying ? "Reconnecting" : "Connecting",
       // A sleeping Render backend can take nearly a minute to wake — without saying so, it looks broken.
-      message: retrying ? `Retrying in ${retryS} s` : "Backend may take up to 1 min to wake",
+      message: retrying ? `Retrying in ${retryS} s` : "Backend may take up to a minute to wake",
       spoken: retrying ? "Retrying" : undefined,
     };
   }
@@ -444,7 +444,7 @@ function onLiveFrame(message) {
 function onLiveError(message) {
   if (message.error === "origin_not_allowed") {
     // Only the backend's CORS_ORIGINS can fix this, so retrying is pointless: say so and stop.
-    liveFatal = "Backend does not allow this page's origin";
+    liveFatal = "Backend doesn't allow this page's origin";
     console.error(`The live backend rejected this page's origin (${location.origin}). Add it to the backend's CORS_ORIGINS.`);
     renderLive();
     return;

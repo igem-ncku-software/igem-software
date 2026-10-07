@@ -159,7 +159,7 @@ def test_a_sensor_offline_read_says_so_in_words():
         await hub.handle_device_message(
             device, json.dumps({"mode": "error", "request_id": command["request_id"], "error": "sensor_offline"})
         )
-        with pytest.raises(DeviceError, match="AS7341 sensor is not responding") as caught:
+        with pytest.raises(DeviceError, match="AS7341 sensor isn't responding") as caught:
             await read
         assert "sensor_offline" not in str(caught.value)
 

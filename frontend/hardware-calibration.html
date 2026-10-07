@@ -54,7 +54,7 @@
                   <span>
                     <span class="choice-title">Read on CAPTURE-Screen</span>
                     <span class="choice-meta">Read each tube now; each reading is saved as it is taken.</span>
-                    <span class="choice-meta source-status" id="source-device-status">Checking the instrument...</span>
+                    <span class="choice-meta source-status" id="source-device-status">Checking the instrument…</span>
                   </span>
                 </label>
               </li>
@@ -221,7 +221,7 @@
         <div class="step-card-body">
           <div id="manual-entry" hidden>
             <p class="plan-meta">
-              Enter each tube's F4 signal in basic counts, the unit Measure reports:
+              Enter each tube's sfGFP signal (F4) in basic counts, the unit Measure reports:
               (light &minus; dark) &divide; (gain &times; integration time in ms). Not the raw counts on the device's display.
             </p>
             <div class="table-wrapper table-spaced">
@@ -269,7 +269,7 @@
 
             <!-- The standards read so far, no fit: an odd value shows while the cuvette is in hand. -->
             <div class="chart-plate read-chart" id="read-chart-plate" hidden>
-              <p class="chart-note">Standards read so far, no fit. Gold: the last tube read. Dashed line: mean of the blanks.</p>
+              <p class="chart-note">Standards read so far, no fit.</p>
               <canvas id="read-chart"></canvas>
             </div>
 
@@ -335,10 +335,7 @@
           <p class="status-message" id="fit-status" aria-live="polite"></p>
 
           <h3 class="subsection-heading table-heading">Curve</h3>
-          <p class="chart-note">
-            Log concentration axis. Dots: tubes. Squares: mean ± SD. Dashed line: EC50. Grey open
-            circles: excluded tubes. Blanks (0 nM) appear in the table only.
-          </p>
+          <p class="chart-note">Blanks (0 nM) appear in the table only.</p>
           <p class="chart-note" data-basis-note hidden></p>
           <div class="chart-plate">
             <canvas id="fit-chart"></canvas>
@@ -387,7 +384,7 @@
             <p class="save-facts" id="save-facts"></p>
             <p class="save-facts" id="save-binding"></p>
             <p class="plan-meta">
-              Samples convert through it only with this strain and config. Once saved it can't be changed;
+              Samples convert through it only with this strain and config. Once saved it cannot be changed;
               fitting again makes a new curve.
             </p>
           </div>
@@ -396,10 +393,6 @@
           </div>
           <p class="blocked-reason" id="save-reason" hidden></p>
           <p class="status-message" id="save-status" aria-live="polite"></p>
-          <p class="plan-meta" id="save-backup" hidden>
-            Kept in this browser only.
-            <a class="text-link" href="hardware-data.html">Back up on the Data page &rarr;</a>
-          </p>
 
           <div id="saved-curves" hidden>
             <h3 class="subsection-heading table-heading">Curves from this run</h3>
@@ -418,7 +411,7 @@
       <section class="card">
         <p class="section-label">Saved runs</p>
         <h2 class="card-title">All calibration runs</h2>
-        <p class="status-message" id="runs-status" aria-live="polite">Loading runs...</p>
+        <p class="status-message" id="runs-status" aria-live="polite">Loading runs…</p>
 
         <div class="empty-state" id="runs-empty" hidden>
           <p>No saved runs yet.</p>
@@ -453,7 +446,7 @@
 
     <footer class="site-footer">
       <p class="ruo-notice">Research use only. This device reads relative fluorescence only and is not intended for diagnostic use.</p>
-      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking...</span></p>
+      <p>Backend: <span id="backend-status" class="backend-status-badge">Checking…</span></p>
     </footer>
   </div>
 

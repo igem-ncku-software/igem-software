@@ -310,17 +310,17 @@ function localMakeRoomForBatch(store) {
 function localMeasurementProblem(m, expectedType, item = null) {
   const finite = (value) => Number.isFinite(value);
   const nullOrFinite = (value) => value === null || finite(value);
-  if (!m || typeof m !== "object") return "measurement is not an object";
+  if (!m || typeof m !== "object") return "measurement isn't an object";
   if (typeof m.sample_id !== "string" || !m.sample_id.trim()) return "measurement.sample_id is missing";
-  if (!localIsDate(m.timestamp_utc)) return "measurement.timestamp_utc is not a date";
+  if (!localIsDate(m.timestamp_utc)) return "measurement.timestamp_utc isn't a date";
   if (m.sample_type !== expectedType) return `measurement.sample_type "${m.sample_type}" should be "${expectedType}"`;
   if (item && item.sample_type === "standard") {
-    if (m.known_concentration_nM !== item.concentration_nM) return "measurement.known_concentration_nM does not match the slot";
+    if (m.known_concentration_nM !== item.concentration_nM) return "measurement.known_concentration_nM doesn't match the slot";
   } else if (m.known_concentration_nM !== null) {
     return "only a standard may carry known_concentration_nM";
   }
   if (typeof m.signal !== "string" || !m.signal.trim()) return "measurement.signal is missing";
-  if (!finite(m.fluorescence)) return "measurement.fluorescence is not a number";
+  if (!finite(m.fluorescence)) return "measurement.fluorescence isn't a number";
   // Null on both: a manual entry records neither read noise nor scatter.
   if (!nullOrFinite(m.fluorescence_sd)) return "measurement.fluorescence_sd is neither a number nor null";
   if (!nullOrFinite(m.scatter)) return "measurement.scatter is neither a number nor null";
@@ -338,7 +338,7 @@ function localMeasurementProblem(m, expectedType, item = null) {
 function localPlanProblem(entry) {
   if (!entry || typeof entry !== "object") return "not an object";
   if (typeof entry.plan_id !== "string" || !entry.plan_id.trim()) return "plan_id is missing";
-  if (!localIsDate(entry.created_at)) return "created_at is not a date";
+  if (!localIsDate(entry.created_at)) return "created_at isn't a date";
   if (!["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
   if (entry.measured_on !== null && !localIsPastDate(entry.measured_on)) return "measured_on is neither a past date nor null";
   if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
@@ -349,7 +349,7 @@ function localPlanProblem(entry) {
 
   const slots = new Set();
   for (const item of entry.items) {
-    if (!item || typeof item !== "object") return "an item is not an object";
+    if (!item || typeof item !== "object") return "an item isn't an object";
     if (!Number.isInteger(item.slot) || item.slot < 1) return "an item has a bad slot number";
     // Duplicate slots would make the run disagree with itself about which tube is next.
     if (slots.has(item.slot)) return `slot ${item.slot} appears twice`;
@@ -369,7 +369,7 @@ function localPlanProblem(entry) {
   // A manual dataset has every slot filled at creation and can't take a reading, so a gap here
   // would be a run that can never be completed.
   if (entry.source === "manual" && entry.items.some((item) => item.measurement === null)) {
-    return "a manual dataset cannot have an unread slot";
+    return "a manual dataset can't have an unread slot";
   }
   return null;
 }
@@ -381,7 +381,7 @@ function localCurveProblem(entry) {
   if (!entry || typeof entry !== "object") return "not an object";
   if (typeof entry.curve_id !== "string" || !entry.curve_id.trim()) return "curve_id is missing";
   if (entry.model !== "4PL") return `unsupported model "${entry.model}"`;
-  if (!localIsDate(entry.fitted_at)) return "fitted_at is not a date";
+  if (!localIsDate(entry.fitted_at)) return "fitted_at isn't a date";
   if (!["device", "manual"].includes(entry.source)) return `unknown source "${entry.source}"`;
   if (typeof entry.plan_id !== "string" || !entry.plan_id.trim()) return "plan_id is missing";
   if (!/^[0-9a-f]{6}$/.test(String(entry.config_fingerprint))) return "config_fingerprint is malformed";
@@ -391,13 +391,13 @@ function localCurveProblem(entry) {
 
   const params = entry.params;
   if (!params || typeof params !== "object") return "params is missing";
-  if (![params.top, params.bottom, params.ec50_nM, params.hill].every(finite)) return "params are not all numbers";
+  if (![params.top, params.bottom, params.ec50_nM, params.hill].every(finite)) return "params aren't all numbers";
   // The same invariants fitCurve() enforces: without them the 4PL cannot be inverted sensibly.
-  if (!(params.top > params.bottom)) return "params.top is not above params.bottom";
-  if (!(params.ec50_nM > 0)) return "params.ec50_nM is not positive";
-  if (!(params.hill > 0)) return "params.hill is not positive";
+  if (!(params.top > params.bottom)) return "params.top isn't above params.bottom";
+  if (!(params.ec50_nM > 0)) return "params.ec50_nM isn't positive";
+  if (!(params.hill > 0)) return "params.hill isn't positive";
 
-  if (![entry.lod_nM, entry.loq_nM, entry.rmse].every(finite)) return "lod_nM / loq_nM / rmse are not all numbers";
+  if (![entry.lod_nM, entry.loq_nM, entry.rmse].every(finite)) return "lod_nM / loq_nM / rmse aren't all numbers";
   const range = entry.range_nM;
   if (!range || !finite(range.min) || !finite(range.max) || !(range.min < range.max)) return "range_nM is malformed";
 
@@ -411,9 +411,9 @@ function localCurveProblem(entry) {
   const priv = entry.private;
   if (!priv || typeof priv !== "object") return "fit internals are missing";
   if (!priv.noise || !finite(priv.noise.a) || !finite(priv.noise.b)) return "fit internals: the noise model is malformed";
-  if (!Array.isArray(priv.cov) || priv.cov.length !== 4) return "fit internals: the covariance is not 4x4";
+  if (!Array.isArray(priv.cov) || priv.cov.length !== 4) return "fit internals: the covariance isn't 4x4";
   for (const row of priv.cov) {
-    if (!Array.isArray(row) || row.length !== 4 || !row.every(finite)) return "fit internals: the covariance is not 4x4";
+    if (!Array.isArray(row) || row.length !== 4 || !row.every(finite)) return "fit internals: the covariance isn't 4x4";
   }
   return null;
 }
@@ -425,7 +425,7 @@ function localEstimateProblem(estimate) {
   if (!estimate || typeof estimate !== "object") return "estimate is missing";
   if (!["ok", "below_lod", "above_range", "no_tubes"].includes(estimate.status)) return `unknown estimate.status "${estimate.status}"`;
   if (estimate.status === "ok") {
-    if (!finite(estimate.concentration_nM)) return "estimate.concentration_nM is not a number";
+    if (!finite(estimate.concentration_nM)) return "estimate.concentration_nM isn't a number";
     if (!Array.isArray(estimate.ci95_nM) || estimate.ci95_nM.length !== 2 || !estimate.ci95_nM.every(finite)) {
       return "estimate.ci95_nM is malformed";
     }
@@ -441,7 +441,7 @@ function localEstimateProblem(estimate) {
 function localTubesProblem(tubes, expectedType) {
   if (!Array.isArray(tubes)) return "tubes are missing";
   for (const tube of tubes) {
-    if (!tube || typeof tube !== "object") return "a tube is not an object";
+    if (!tube || typeof tube !== "object") return "a tube isn't an object";
     if (!(tube.excluded_reason === null || (typeof tube.excluded_reason === "string" && tube.excluded_reason.trim()))) {
       return "a tube's excluded_reason is malformed";
     }
@@ -455,7 +455,7 @@ function localBatchProblem(entry) {
   const finite = (value) => Number.isFinite(value);
   if (!entry || typeof entry !== "object") return "not an object";
   if (typeof entry.batch_id !== "string" || !entry.batch_id.trim()) return "batch_id is missing";
-  if (!localIsDate(entry.created_at)) return "created_at is not a date";
+  if (!localIsDate(entry.created_at)) return "created_at isn't a date";
   if (!(entry.finished_at === null || localIsDate(entry.finished_at))) return "finished_at is neither a date nor null";
   if (!(entry.exported_at === null || localIsDate(entry.exported_at))) return "exported_at is neither a date nor null";
   if (typeof entry.curve_id !== "string" || !entry.curve_id.trim()) return "curve_id is missing";
@@ -672,7 +672,7 @@ const HardwareLocal = {
     if (!plan) localFail(`Run ${plan_id} not found.`);
     if (plan.source === "manual") localFail(`${plan_id} holds entered data; its values can't be replaced.`);
     const item = plan.items.find((it) => it.slot === slot);
-    if (!item) localFail(`Slot ${slot} does not exist in ${plan_id}.`);
+    if (!item) localFail(`Slot ${slot} doesn't exist in ${plan_id}.`);
 
     // The single cuvette has to run in order: only the "next tube" can be measured, or an already-measured tube redone.
     const next = plan.items.find((it) => it.measurement === null);
@@ -707,7 +707,7 @@ const HardwareLocal = {
 
     const excluded = new Set(excluded_sample_ids ?? []);
     const sampleIds = new Set(plan.items.map((it) => it.measurement.sample_id));
-    for (const id of excluded) if (!sampleIds.has(id)) localFail(`Excluded sample ${id} is not in this run.`);
+    for (const id of excluded) if (!sampleIds.has(id)) localFail(`Excluded sample ${id} isn't in this run.`);
 
     const included = plan.items.filter((it) => !excluded.has(it.measurement.sample_id));
     const stale = included.filter((it) => it.measurement.config_fingerprint !== plan.config_fingerprint);
@@ -881,7 +881,7 @@ const HardwareLocal = {
     if (!batch) localFail(`Batch ${batch_id} not found.`);
     if (batch.finished_at) localFail(`${batch_id} is finished; its tubes can't change.`);
     const tube = localFindTube(batch, sample_id);
-    if (!tube) localFail(`Tube ${sample_id} is not in this batch.`);
+    if (!tube) localFail(`Tube ${sample_id} isn't in this batch.`);
     const m = tube.measurement;
     const automatic = m.config_fingerprint !== batch.curve.config_fingerprint || m.signal !== batch.curve.signal;
     if (automatic) localFail(`${sample_id} was read under a different config or signal and can't be included.`);
@@ -989,7 +989,7 @@ const HardwareLocal = {
   // stored. Sections are independent: one bad curve must not cost you the runs in the same file.
   importBackup(payload) {
     if (!payload || typeof payload !== "object" || payload.format !== LOCAL_BACKUP_FORMAT) {
-      localFail("That file is not a LasReader backup.");
+      localFail("That file isn't a LasReader backup.");
     }
     // A missing version is a malformed file, not a newer one; saying "newer" would send the user
     // looking for a build that doesn't exist.
