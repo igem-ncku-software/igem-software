@@ -112,7 +112,7 @@ The repository ships no example dataset, because LasReader uses real readings on
 - **Plate Reader Assay:** the CSV holds every reading with its well and exclusion reason. Enter the readings again, apply the same exclusions and fit; the curve and inferred AHL are recomputed by [`js/curve_fit.js`](frontend/js/curve_fit.js).
 - **CAPTURE-Screen curve:** with the instrument, follow Usage steps 1–4. Without it, open Calibrate → *Enter recorded data*, type in the recorded standards and blanks with the configuration they were read under, and fit. A curve can also be restored from the Data page's backup.
 - **Cross-Validation:** load the same two CSVs and the same dilution.
-- **Swarming Assay:** upload the same photos with the same plate diameter; the CSV records the photo name and diameter on every row. The analysis is deterministic, so the numbers come out the same.
+- **Swarming Assay:** upload the same photos with the same plate diameter; the CSV records the photo name and diameter on every row. The analysis is deterministic, so the numbers come out the same. A photo wider than 1200 px is shrunk to 1200 px wide before analysis (the notebook's pixel thresholds were set on photos of about that size), and the CSV records both sizes.
 
 ## How it works
 
@@ -167,7 +167,7 @@ When the OLED shows `Web ok`, the device is online and the landing page shows it
 
 ```bash
 cd backend
-pytest        # 43 tests: device relay, live spectrum, swarming upload
+pytest        # 45 tests: device relay, live spectrum, swarming upload
 ```
 
 The firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen`.

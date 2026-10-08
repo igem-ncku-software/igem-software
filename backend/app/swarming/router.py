@@ -12,7 +12,7 @@ import threading
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.swarming.analysis import ACTUAL_DISH_DIAMETER_MM, PhotoUnreadable, analyze, decode_photo
+from app.swarming.analysis import ACTUAL_DISH_DIAMETER_MM, PhotoUnreadable, analyze, decode_photo, fit_width
 from app.swarming.models import SwarmingResult
 
 router = APIRouter(prefix="/api/swarming", tags=["swarming"])
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 # A phone photo is a few MB; this bounds one upload's memory on Render's free tier.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
-# One analysis at a time: a 12-megapixel photo holds several float copies of itself in memory
-# at once, and two at the same moment could exceed Render's free-tier memory.
+# One analysis at a time: even shrunk by `fit_width`, a photo holds several float copies of
+# itself in memory at once, and Render's free tier has little memory.
 _analysis_lock = threading.Lock()
 
 
@@ -41,6 +41,8 @@ def swarming_analyze(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     with _analysis_lock:
+        original = {"width_px": int(img.shape[1]), "height_px": int(img.shape[0])}
+        img = fit_width(img)
         try:
             result = analyze(img, dish_diameter_mm)
         except Exception as error:  # an OpenCV error on an odd photo, worded for the user
@@ -50,5 +52,6 @@ def swarming_analyze(
                 detail="This photo could not be analysed. Check that the plate is in the photo.",
             ) from error
 
+    result["original_image"] = original
     result["annotated_png"] = base64.b64encode(result["annotated_png"]).decode("ascii")
     return result

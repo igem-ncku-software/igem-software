@@ -8,7 +8,9 @@
 //   { dish: { x_px, y_px, radius_px, diameter_mm, method: "hough" | "contour" },
 //     mm_per_px, mode: "normal" | "uv", purple_fraction,
 //     threshold: { otsu, loose, core, uv_base, uv_peak, uv_thr } (the other mode's are null),
-//     image: { width_px, height_px },
+//     image: { width_px, height_px } (as analysed: a photo wider than 1200 px is shrunk to 1200 px
+//       wide first, and every *_px and the annotated image are in its pixels),
+//     original_image: { width_px, height_px } (as uploaded),
 //     colonies: [{ index, feret_mm, eq_diameter_mm, area_mm2 }],
 //     annotated_png: base64 PNG }
 // and an error's `detail` is shown to the user verbatim. One photo per request: the backend runs
@@ -377,6 +379,11 @@ function simpleTable(className, headers, rows) {
 const MODE_TEXT = { normal: "Normal", uv: "UV" };
 
 // The thresholds of the mode that ran, as the notebook labelled them.
+// The upload's size; a backend from before the shrink to 1200 px analysed the photo as uploaded.
+function originalSize(r) {
+  return r.original_image ?? r.image;
+}
+
 function thresholdText(r) {
   const t = r.threshold;
   return r.mode === "uv"
@@ -423,7 +430,8 @@ function detailRow(p) {
     ["Mode", MODE_TEXT[r.mode]],
     ["Blue-purple share", `${fmt(r.purple_fraction * 100, 1)} % (UV above 35 %)`],
     ["Thresholds", thresholdText(r)],
-    ["Photo", `${r.image.width_px} × ${r.image.height_px} px`],
+    ["Photo", `${originalSize(r).width_px} × ${originalSize(r).height_px} px`],
+    ["Analysed at", `${r.image.width_px} × ${r.image.height_px} px`],
   ].map(([key, value]) => {
     const row = el("tr");
     const th = el("th", null, key);
@@ -547,7 +555,7 @@ function csvCell(value) {
 
 const CSV_HEADERS = [
   "date", "strain", "condition", "replicate", "incubation_h", "notes",
-  "photo_number", "photo", "photo_width_px", "photo_height_px",
+  "photo_number", "photo", "photo_width_px", "photo_height_px", "analysed_width_px", "analysed_height_px",
   "dish_diameter_mm", "dish_found_by", "dish_x_px", "dish_y_px", "dish_radius_px", "mm_per_px",
   "mode", "purple_fraction", "otsu_threshold", "loose_threshold", "core_threshold", "uv_base", "uv_peak", "uv_threshold",
   "colony", "feret_mm", "eq_diameter_mm", "area_mm2",
@@ -563,7 +571,8 @@ function exportCsv() {
     const d = r.dish;
     const base = [
       info.date, p.strain.trim(), p.condition.trim(), Number(p.replicate), info.incubation, info.notes,
-      photoNumber(p), p.file.name, r.image.width_px, r.image.height_px,
+      photoNumber(p), p.file.name, originalSize(r).width_px, originalSize(r).height_px,
+      r.image.width_px, r.image.height_px,
       d.diameter_mm, d.method, d.x_px, d.y_px, d.radius_px, r.mm_per_px,
       r.mode, r.purple_fraction, r.threshold.otsu, r.threshold.loose, r.threshold.core,
       r.threshold.uv_base, r.threshold.uv_peak, r.threshold.uv_thr,

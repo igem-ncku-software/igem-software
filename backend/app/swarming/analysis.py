@@ -8,6 +8,8 @@ their values. Only the input and output changed to fit a web request:
 
 - the photo arrives as bytes from an upload (`cv2.imdecode`) instead of a Google Drive path
   (`cv2.imread`); both read it as 3-channel BGR;
+- a photo wider than ANALYSIS_MAX_WIDTH_PX is shrunk to that width before the analysis
+  (`fit_width`), which the notebook did not do; `analyze()` itself is unchanged;
 - `ACTUAL_DISH_DIAMETER_MM` is an argument, defaulting to the notebook's 93 mm, since a plate
   of another size would scale every result wrongly;
 - what the notebook printed (plate, scale, the purple fraction and the mode it chose, the colony
@@ -46,6 +48,9 @@ UV_HALF = 0.5               # UV-mode threshold position between background and 
 SPLIT_SOLIDITY = 0.80       # below this, something is stuck to it and it is split
 CORE_RATIO = 0.5
 
+# Not the notebook's: a wider photo is shrunk to this width before `analyze()` (see `fit_width`).
+ANALYSIS_MAX_WIDTH_PX = 1200
+
 
 class PhotoUnreadable(ValueError):
     """The upload could not be decoded as an image."""
@@ -57,6 +62,23 @@ def decode_photo(data: bytes) -> np.ndarray:
     if img is None:
         raise PhotoUnreadable("The file could not be read as an image.")
     return img
+
+
+def fit_width(img: np.ndarray) -> np.ndarray:
+    """The photo shrunk to ANALYSIS_MAX_WIDTH_PX wide, keeping its shape; a narrower one unchanged.
+
+    Added on top of the notebook. Its thresholds and kernels are in pixels (MIN_AREA_PX, the 15 px
+    opening, the 30-pixel core) and were set on photos 440-1150 px wide, so a 3000-4000 px phone
+    photo found other colonies than the same plate's screenshot, and took ~35 s and ~630 MB on
+    the background blur alone - more than Render's free tier holds. 1200 leaves every photo the
+    notebook was checked on untouched. The scale comes from the plate found in the shrunk photo,
+    so the mm stay right.
+    """
+    h, w = img.shape[:2]
+    if w <= ANALYSIS_MAX_WIDTH_PX:
+        return img
+    return cv2.resize(img, (ANALYSIS_MAX_WIDTH_PX, round(h * ANALYSIS_MAX_WIDTH_PX / w)),
+                      interpolation=cv2.INTER_AREA)
 
 
 def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) -> dict:
