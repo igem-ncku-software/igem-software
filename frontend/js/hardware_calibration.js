@@ -410,7 +410,7 @@ function renderReadChart() {
   plate.hidden = plan.source !== "device" || read.length === 0;
   if (plate.hidden) return;
 
-  const accent = cssVar("--accent");
+  const fluor = cssVar("--fluor");
   const gold = cssVar("--gold");
   const ink = cssVar("--text");
   const muted = cssVar("--muted");
@@ -421,7 +421,7 @@ function renderReadChart() {
   const xMax = Math.max(...concs);
 
   const datasets = [
-    { label: "Tube", data: read.filter((it) => it.slot !== lastReadSlot).map(toPoint), pointRadius: 3.5, pointBackgroundColor: accent, pointBorderColor: accent },
+    { label: "Tube", data: read.filter((it) => it.slot !== lastReadSlot).map(toPoint), pointRadius: 3.5, pointBackgroundColor: fluor, pointBorderColor: fluor },
     { label: "Last read", data: read.filter((it) => it.slot === lastReadSlot).map(toPoint), pointRadius: 6, pointBackgroundColor: gold, pointBorderColor: gold },
   ];
   const blanks = plan.items.filter((it) => it.sample_type === "blank" && it.measurement).map((it) => it.measurement.fluorescence);
@@ -714,9 +714,8 @@ function renderFitChart() {
   const canvas = document.getElementById("fit-chart");
   if (fitChart) fitChart.destroy();
 
-  const accent = cssVar("--accent");
+  const fluor = cssVar("--fluor");
   const gold = cssVar("--gold");
-  const error = cssVar("--error");
   const ink = cssVar("--text");
   const muted = cssVar("--muted");
   const rule = cssVar("--border");
@@ -736,7 +735,7 @@ function renderFitChart() {
     .map(({ ys, c }) => ({ x: c, y: fitMean(ys), sd: fitSd(ys) }));
 
   const datasets = [
-    { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent, showLine: false },
+    { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: fluor, pointBorderColor: fluor, showLine: false },
     {
       label: "Tube (excluded)", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
       pointBorderColor: muted, pointBorderWidth: 1.5, showLine: false,
@@ -765,7 +764,7 @@ function renderFitChart() {
       {
         label: "EC50",
         data: [{ x: curve.params.ec50_nM, y: Math.min(...allY) }, { x: curve.params.ec50_nM, y: Math.max(...allY) }],
-        type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: error,
+        type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: muted,
       },
     );
   }

@@ -741,9 +741,8 @@ const errorBarPlugin = {
 function renderFitChart() {
   if (fitChart) fitChart.destroy();
   fitChart = null;
-  const accent = cssVar("--accent");
+  const fluor = cssVar("--fluor");
   const gold = cssVar("--gold");
-  const error = cssVar("--error");
   const ink = cssVar("--text");
   const muted = cssVar("--muted");
   const rule = cssVar("--border");
@@ -758,7 +757,7 @@ function renderFitChart() {
     .map(({ c, ys }) => ({ x: c, y: CurveFit.mean(ys), sd: CurveFit.sampleSd(ys) }));
 
   const datasets = [
-    { label: "Reading (counted)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent, showLine: false },
+    { label: "Reading (counted)", data: included, pointRadius: 3, pointBackgroundColor: fluor, pointBorderColor: fluor, showLine: false },
     {
       label: "Reading (excluded)", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
       pointBorderColor: muted, pointBorderWidth: 1.5, showLine: false,
@@ -785,7 +784,7 @@ function renderFitChart() {
       {
         label: "EC50",
         data: [{ x: fit.params.ec50_nM, y: Math.min(...allY) }, { x: fit.params.ec50_nM, y: Math.max(...allY) }],
-        type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: error,
+        type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: muted,
       },
     );
   }

@@ -198,9 +198,8 @@ async function drawCurveChart(curve, canvas, plate) {
     return;
   }
 
-  const accent = cssVar("--accent");
+  const fluor = cssVar("--fluor");
   const gold = cssVar("--gold");
-  const error = cssVar("--error");
   const ink = cssVar("--text");
   const muted = cssVar("--muted");
   const rule = cssVar("--border");
@@ -226,7 +225,7 @@ async function drawCurveChart(curve, canvas, plate) {
     type: "scatter",
     data: {
       datasets: [
-        { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: accent, pointBorderColor: accent },
+        { label: "Tube (counted)", data: included, pointRadius: 3, pointBackgroundColor: fluor, pointBorderColor: fluor },
         {
           label: "Tube (excluded)", data: excluded, pointRadius: 4.5, pointBackgroundColor: "rgba(0,0,0,0)",
           pointBorderColor: muted, pointBorderWidth: 1.5,
@@ -235,7 +234,7 @@ async function drawCurveChart(curve, canvas, plate) {
         {
           label: "EC50",
           data: [{ x: curve.params.ec50_nM, y: Math.min(...allY) }, { x: curve.params.ec50_nM, y: Math.max(...allY) }],
-          type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: error,
+          type: "line", pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4], borderColor: muted,
         },
       ],
     },

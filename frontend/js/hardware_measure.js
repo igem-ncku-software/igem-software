@@ -349,7 +349,7 @@ function renderSamples() {
 
 // ---- The last tube's detail: signal, flags, all ten channels, and the config it was read under ----
 
-// Draws a text label above the F4 / F3 bars. Chart.js has no built-in annotation support,
+// Draws a text label above the F4 bar. Chart.js has no built-in annotation support,
 // and the plugin would be a new dependency, so this draws it manually.
 const channelAnnotationPlugin = {
   id: "channelAnnotations",
@@ -375,9 +375,9 @@ function renderChannelChart(raw) {
   const canvas = document.getElementById("measure-channel-chart");
   if (channelChart) channelChart.destroy();
 
+  const fluor = cssVar("--fluor");
   const accent = cssVar("--accent");
-  const gold = cssVar("--gold");
-  const goldInk = cssVar("--gold-ink");
+  const contextBar = cssVar("--chart-muted");
   const muted = cssVar("--muted");
   const ink = cssVar("--text");
   const rule = cssVar("--border");
@@ -389,7 +389,7 @@ function renderChannelChart(raw) {
       datasets: [{
         label: "Basic counts",
         data: HARDWARE_CHANNELS.map(({ key }) => raw[key]),
-        backgroundColor: HARDWARE_CHANNELS.map(({ key }) => (key === "F4" ? accent : key === "F3" ? gold : muted)),
+        backgroundColor: HARDWARE_CHANNELS.map(({ key }) => (key === "F4" ? fluor : contextBar)),
         borderRadius: 4,
       }],
     },
@@ -411,7 +411,7 @@ function renderChannelChart(raw) {
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (context) => `${formatFluorescence(context.parsed.y)} ${HARDWARE_FLUORESCENCE_UNIT}` } },
-        channelAnnotations: { annotations: { F4: { text: "sfGFP", color: accent }, F3: { text: "leakage", color: goldInk } } },
+        channelAnnotations: { annotations: { F4: { text: "sfGFP", color: accent } } },
       },
     },
     plugins: [channelAnnotationPlugin],

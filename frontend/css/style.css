@@ -1,14 +1,24 @@
 /* ============================================================
-   Original layout, glass surfaces, wiki palette.
+   Light, in the team wiki's deep-teal palette.
+
+   1. Ground: a pale blue-grey with two still, soft tints (mint top
+      left, blue bottom right). Nothing moves and nothing glows; the
+      tints are only there so the glass has something to frost.
+   2. Glass: header, step bar, cards. White frosted panes - mostly
+      opaque, blurred, a white top edge, a hairline and a short
+      shadow. Buttons are flat and solid, so an action is never vague.
+   3. Data: tables, inputs, charts, stat tiles, the plate map. Opaque
+      white: a number never sits over a blurred backdrop.
 
    Layout is untouched: the 1080px column, the header block, the
-   panels and the one-line footer all sit exactly where they did.
-   What changes is the material - panels become frosted glass, in
-   the team wiki's colours.
+   panels and the one-line footer sit exactly where they did.
 
-   Ink is the wiki's own warm near-black (#3d3229 / #5c4e42), not a
-   neutral grey. On a cream-green ground a cold grey reads as a
-   different design system; the warm ink reads as black and belongs.
+   The colours are the wiki's (static/style.css, body.hw-nexus), used
+   on white: its ground #0e242e is the ink, #1c4352 and #24596b the
+   secondary inks and lines, mint #49c5b6 the filled actions, blue
+   #2779a7 a background tint, and its brand green #075a3e the accent.
+   Its lime is not used: on white it cannot be read. The charts read
+   these from :root (cssVar() in each page script).
    ============================================================ */
 
 @font-face { font-family:"Changa"; src:url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-regular.ttf") format("truetype"); font-weight:400; font-style:normal; font-display:swap; }
@@ -16,74 +26,124 @@
 @font-face { font-family:"Changa"; src:url("https://static.igem.wiki/teams/6379/wiki/fonts/changa/changa-bold.ttf") format("truetype");    font-weight:700; font-style:normal; font-display:swap; }
 
 :root {
-  /* Ink and paper, from wiki/pages/software.html. */
-  --text: #3d3229;
-  --text-dim: #5c4e42;
-  --muted: #8a7a6a;
-  --border: #dfe8e2;
-  --gold: #c9a227;
-  --gold-ink: #8a6d12;
-
-  /* Greens, straight from the wiki's style.css - no mixed values:
-       #075a3e  the brand green it uses 95 times
-       #1f4a38  the deeper green its headings use
-       #05442e  the ink of the navigation bar, and our pressed state */
+  /* Inks. Contrast on white: text 16:1, dim 10:1, muted 7.7:1, accent 8:1. */
+  --text: #0e242e;
+  --text-dim: #1c4352;
+  --muted: #24596b;
+  --heading: #0e242e;
+  --border: rgba(36,89,107,.18);
+  --border-strong: rgba(36,89,107,.36);
   --accent: #075a3e;
-  --accent-hover: #1f4a38;
   --accent-active: #05442e;
-  --error: #a3382c;
+  /* Red and gold are this site's own, not the wiki's (whose only reds and
+     golds belong to its Board Game page). Gold is the hue of the wiki's
+     caution colour #e6b060 (36 deg), darkened until it reads on white: as
+     text, and as a line or fill. Red sits opposite the teals. On the bare
+     tinted ground, the darkest place any of them appears: error 5.3:1,
+     gold-ink 4.9:1; gold as a line is 3.3:1 on white, where the charts are. */
+  --error: #b42318;
+  --gold: #b98325;
+  --gold-ink: #86590f;
 
-  /* Ground and panels, also the wiki's own:
-       #f2f9f5  its palest green-white, here the page ground
-       #fffdf7  the cream it paints panels and buttons with
-       #eaf7dd  its pale green, here the one green surface (the header) */
-  --bg: #f2f9f5;
+  /* A step that cannot be used yet: the teal #24596b with its colour drained,
+     so it reads as off rather than as another heading. The light one is only
+     for large titles (3:1 is the bar there); small text takes the dark one. */
+  --idle: #738389;
+  --idle-ink: #5a6b72;
+  --solid: #ffffff;
+  --solid-soft: #f0faf9;        /* mint at 8% on white: header rows, tints */
+  --focus: #24596b;
 
-  --glass-panel: rgba(255,253,247,.68);
-  --glass-band: rgba(234,247,221,.78);
-  --glass-chip: rgba(255,253,247,.60);
-  --blur: blur(22px) saturate(190%);
-  --blur-chip: blur(10px) saturate(160%);
+  /* A fluorescence reading, wherever one is plotted: sfGFP emits near 510 nm
+     and CAPTURE-Screen reads it in F4 (515 nm). The true spectral colour there
+     is about #00ff40, 1.4:1 on white - invisible as a point or bar - so this is
+     the same hue (133 deg) at the brightest it can be and still clear 3:1 on
+     white (3.5:1). A flat colour, never a glow. */
+  --fluor: #1f9d3a;
 
-  /* What actually reads as glass on a quiet ground: a lit top edge, a
-     faint lower one, and a soft shadow underneath. The bevel gives the
-     panel thickness; the backdrop-filter alone would not. */
-  --bevel:
-    inset 0  1px 0 rgba(255,255,255,.9),
-    inset 0 -1px 0 rgba(255,255,255,.35),
-    0 6px 18px rgba(61,50,41,.09);
+  /* The other channels in the channel bar charts: context only, kept light so
+     F4 is told apart by brightness as well as hue (1.8:1 between them), not
+     by hue alone, which a colour-blind reader may not see. */
+  --chart-muted: #a9bcc4;
 
-  /* Opaque surfaces: anything carrying numbers opts out of the glass. */
-  --solid: rgba(255,253,247,.95);
-  --solid-soft: rgba(242,249,245,.96);
+  /* Filled actions and finished steps: the wiki's mint, ink in its ground
+     colour (7.6:1). */
+  --brand: #49c5b6;
+  --brand-hover: #3eb5a7;
+  --brand-ink: #0e242e;
+
+  --ground: #f4f7f8;            /* the wiki's line colour at 5% on white */
+
+  /* The glass: white, mostly opaque, so text on it reads as on paper. */
+  --glass-fill: rgba(255,255,255,.70);
+  --glass-fill-strong: rgba(255,255,255,.78);
+  /* The header's glass: a very light green in the hue of the wiki's brand green
+     #075a3e (about 155 deg). Greener than the mint tints elsewhere on purpose:
+     on the blue-grey ground a mint header read as the same colour as the page. */
+  --glass-fill-header: rgba(235,247,242,.80);
+  --glass-fill-faint: rgba(255,255,255,.52);
+  --glass-blur: blur(20px) saturate(140%);
+  --glass-depth:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 1px 2px rgba(14,36,46,.05),
+    0 4px 14px rgba(14,36,46,.06);
+  --data-depth: 0 1px 2px rgba(14,36,46,.05);
 
   --radius: 16px;
   --heading-font: "Changa", "Noto Sans TC", sans-serif;
+
+  /* Type scale: eight steps. Readouts (a live count, the next tube) are
+     display numbers and keep their own sizes. */
+  --fs-title: clamp(1.9rem, 4.5vw, 2.5rem);  /* 40px  page title */
+  --fs-section: 1.625rem;                     /* 26px  a group of cards (Phenotype): above a card's title */
+  --fs-card: 1.375rem;                        /* 22px  card titles */
+  --fs-sub: 1rem;                             /* 16px  subheadings */
+  --fs-body: .9375rem;                        /* 15px  prose */
+  --fs-data: .875rem;                         /* 14px  tables, inputs */
+  --fs-label: .8125rem;                       /* 13px  labels, headers, chips */
+  --fs-small: .75rem;                         /* 12px  the floor */
 }
 
 * { box-sizing: border-box; }
+
+/* The ground and its two still tints. Fixed, so the content moves over
+   them rather than dragging them along. */
+html {
+  background-color: var(--ground);
+  background-image:
+    radial-gradient(60% 55% at 6% 4%, rgba(73,197,182,.14) 0%, rgba(73,197,182,0) 70%),
+    radial-gradient(55% 55% at 96% 96%, rgba(39,121,167,.11) 0%, rgba(39,121,167,0) 70%);
+  background-attachment: fixed;
+}
 
 body {
   margin: 0;
   min-height: 100vh;
   font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+  font-size: var(--fs-body);
   color: var(--text-dim);
-  background: var(--bg);
 }
 
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 
 .page { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 80px; }
 
+/* The glass: every panel shares one recipe. */
+.site-header, .card, .hw-step a, .hw-data-link {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  box-shadow: var(--glass-depth);
+}
+
+/* The header: the same glass, a little more opaque and faintly green, so it reads as the
+   page's title block rather than as one more card. */
 .site-header {
   margin-bottom: 28px;
   padding: 40px 36px;
   border-radius: var(--radius);
-  background: var(--glass-band);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  border: 1px solid rgba(255,255,255,.65);
-  box-shadow: var(--bevel);
+  background: var(--glass-fill-header);
 }
 
 /* Header band: LasReader mark, title block, team wordmark on the right. */
@@ -95,15 +155,14 @@ button, input, textarea { font: inherit; }
    the heading wrap instead of pushing the logos off the edge. */
 .site-header-text { flex: 1; min-width: 0; }
 
-/* Height drives the size, width follows. The LasReader mark keeps its white
-   ground, as a rounded tile; the wordmark PNG carries its own white outline. */
+/* Height drives the size, width follows. Both PNGs are transparent: the
+   LasReader mark sits straight on the glass, with no tile or frame; the team
+   logo carries its own white sticker outline. */
 .site-mark {
   flex: none;
   display: block;
   width: auto;
   height: clamp(110px, 14vw, 160px);
-  border-radius: 16px;
-  box-shadow: 0 1px 4px rgba(0,0,0,.08);
 }
 .site-logo {
   flex: none;
@@ -114,115 +173,84 @@ button, input, textarea { font: inherit; }
 
 .eyebrow {
   margin: 0 0 8px; color: var(--gold-ink);
-  font-size: .76rem; font-weight: 700;
+  font-size: var(--fs-small); font-weight: 700;
 }
 
 .site-header h1 {
   margin: 0;
   font-family: var(--heading-font); font-weight: 700;
-  font-size: clamp(1.9rem, 4.5vw, 2.9rem); line-height: 1.15;
-  color: var(--text);
+  font-size: var(--fs-title); line-height: 1.15;
+  color: var(--heading);
 }
 
-.subtitle { margin: 14px 0 0; color: var(--text-dim); font-size: 1.05rem; line-height: 1.6; }
+.subtitle { margin: 14px 0 0; color: var(--text-dim); font-size: var(--fs-sub); line-height: 1.6; }
 .section-description { color: var(--text-dim); line-height: 1.7; }
 
 .card {
   margin-top: 20px;
   padding: 30px;
   border-radius: var(--radius);
-  background: var(--glass-panel);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  border: 1px solid rgba(255,255,255,.65);
-  box-shadow: var(--bevel);
 }
 
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
-.section-heading h2, .subsection-heading { font-family: var(--heading-font); font-weight: 700; color: var(--text); }
-.section-heading h2 { margin: 0; font-size: 1.4rem; }
-.subsection-heading { margin: 0; font-size: 1.05rem; }
+.section-heading h2 { margin: 0; font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-card); line-height: 1.25; color: var(--heading); }
+.subsection-heading { margin: 0; font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-sub); color: var(--text); }
 
 .section-label {
   margin: 0 0 8px; color: var(--gold-ink);
-  font-size: .76rem; font-weight: 700;
+  font-size: var(--fs-small); font-weight: 700;
 }
 
 form { display: flex; flex-direction: column; gap: 8px; }
-label { margin-top: 12px; color: var(--text); font-size: .9rem; font-weight: 600; }
+label { margin-top: 12px; color: var(--text); font-size: var(--fs-data); font-weight: 600; }
 
 /* Controls and results are opaque: glass frames the data, never sits
    underneath it. */
 textarea, input[type="file"], input[type="number"] {
   width: 100%; padding: 11px 12px;
-  border: 1px solid var(--border); border-radius: 10px;
+  border: 1px solid var(--border-strong); border-radius: 8px;
   color: var(--text); background: var(--solid);
+  font-size: var(--fs-data);
 }
 textarea { resize: vertical; }
 
-textarea:focus, input:focus { outline: 3px solid var(--gold); outline-offset: 2px; border-color: var(--text-dim); }
-button:focus-visible, .back-link:focus-visible, .nav-card-cue:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+textarea:focus, input:focus { outline: 3px solid var(--focus); outline-offset: 2px; border-color: var(--text-dim); }
+button:focus-visible, .back-link:focus-visible, .nav-card-cue:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
-/* Buttons are glass too: a rectangular pane rather than a solid fill,
-   so the primary action belongs to the same material as the panels.
-   Body font, not Changa - Changa is a display face and reads as a
-   headline on a control. */
+/* Buttons are flat and solid: an action should never look like decoration.
+   The primary is the wiki's mint with ground-coloured ink, in Changa as on the
+   wiki's own buttons. */
 button {
   align-self: flex-start;
-  min-height: 44px; margin-top: 14px; padding: 11px 22px;
-  border-radius: 10px;
-  color: var(--accent);
-  background: rgba(255,253,247,.62);
-  backdrop-filter: var(--blur-chip);
-  -webkit-backdrop-filter: var(--blur-chip);
-  border: 1px solid rgba(255,255,255,.85);
-  box-shadow:
-    inset 0  1px 0 rgba(255,255,255,.95),
-    inset 0 -1px 0 rgba(255,255,255,.4),
-    0 3px 10px rgba(61,50,41,.10);
-  font-weight: 600;
-  letter-spacing: .01em;
+  min-height: 44px; margin-top: 14px; padding: 10px 22px;
+  border: 1px solid var(--brand); border-radius: 8px;
+  color: var(--brand-ink);
+  background: var(--brand);
+  font-family: var(--heading-font);
+  font-size: var(--fs-body);
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+  transition: background-color .15s ease, border-color .15s ease, opacity .15s ease;
 }
+button:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+button:active { box-shadow: inset 0 2px 4px rgba(14,36,46,.22); }
+button:disabled { cursor: wait; opacity: .5; box-shadow: none; }
 
-button:hover {
-  background: rgba(255,253,247,.88);
-  border-color: #fff;
-  box-shadow:
-    inset 0  1px 0 rgba(255,255,255,1),
-    inset 0 -1px 0 rgba(255,255,255,.5),
-    0 5px 14px rgba(61,50,41,.14);
-}
-
-/* Pressed: the pane sinks - the lit top edge goes, a soft inner shadow
-   replaces it. */
-button:active {
-  color: var(--accent-active);
-  background: rgba(255,253,247,.75);
-  box-shadow: inset 0 2px 5px rgba(61,50,41,.16);
-}
-
-button:disabled {
-  cursor: wait; opacity: .55;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
-}
-
-/* Secondary reads quieter: the same pane, less of it. */
+/* Secondary: white with a line, the ink colour. */
 button.btn-secondary {
-  color: var(--text-dim);
-  background: rgba(255,253,247,.38);
-  border-color: rgba(255,255,255,.7);
+  color: var(--text);
+  background: var(--solid);
+  border-color: var(--border-strong);
 }
-button.btn-secondary:hover { color: var(--text); background: rgba(255,253,247,.72); }
+button.btn-secondary:hover { background: var(--solid-soft); border-color: var(--muted); }
 
-/* Only for what cannot be undone. Same glass pane as the other buttons, with the error colour on
-   the text and border, so it reads as different without becoming a solid red block. */
-button.btn-danger { color: var(--error); border-color: var(--error); }
-button.btn-danger:hover { color: var(--error); background: rgba(255,253,247,.9); }
+/* Only for what cannot be undone: the error colour on the text and line,
+   so it reads as different without becoming a solid red block. */
+button.btn-danger { color: var(--error); background: var(--solid); border-color: var(--error); }
+button.btn-danger:hover { color: var(--error); background: rgba(180,35,24,.06); border-color: var(--error); }
 button.btn-danger:active { color: var(--error); }
 
-.status-message { min-height: 1.4em; margin: 16px 0 0; color: var(--text-dim); font-size: .92rem; }
+.status-message { min-height: 1.4em; margin: 16px 0 0; color: var(--text-dim); font-size: var(--fs-body); }
 
 /* The wiki's notice box: paper, hairline border, one coloured bar. */
 .status-message.success, .status-message.error {
@@ -230,33 +258,33 @@ button.btn-danger:active { color: var(--error); }
   border: 1px solid var(--border);
   border-left: 4px solid var(--gold);
   border-radius: 8px;
-  background: var(--solid-soft);
+  background: var(--solid);
 }
 .status-message.error { border-left-color: var(--error); color: var(--error); }
 
-.result-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.7); }
+.result-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
 
 /* Relative so a visually hidden header label (absolute) stays inside the scroll box instead of
    widening the page on a phone. */
-.table-wrapper { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.table-wrapper { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); box-shadow: var(--data-depth); }
 table { width: 100%; min-width: 860px; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
-th { color: var(--muted); background: var(--solid-soft); font-size: .74rem; font-weight: 700; }
-td { color: var(--text-dim); font-size: .9rem; font-variant-numeric: tabular-nums; }
+th { color: var(--muted); background: var(--solid-soft); font-size: var(--fs-label); font-weight: 600; }
+td { color: var(--text); font-size: var(--fs-data); font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--solid-soft); }
 .significance-cell { color: var(--text); font-weight: 700; }
 
-.chart-note { margin: -8px 0 16px; color: var(--muted); font-size: .8rem; }
+.chart-note { margin: -8px 0 16px; color: var(--muted); font-size: var(--fs-label); }
 
-.chart-plate { margin: 8px 0 16px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.chart-plate { margin: 8px 0 16px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); box-shadow: var(--data-depth); }
 canvas { max-width: 100%; }
 
-.site-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.7); color: var(--muted); font-size: .85rem; }
+.site-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-label); }
 
 .sensor-stats { display: flex; gap: 12px; margin-top: 16px; }
-.sensor-stat { flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
-.sensor-stat-label { display: block; color: var(--muted); font-size: .74rem; font-weight: 700; }
+.sensor-stat { flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); box-shadow: var(--data-depth); }
+.sensor-stat-label { display: block; color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
 .sensor-stat-value {
   display: block; margin-top: 4px;
   font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem;
@@ -268,10 +296,8 @@ canvas { max-width: 100%; }
 
 .backend-status-badge {
   display: inline-block; padding: 4px 12px; border-radius: 999px;
-  color: var(--accent); background: var(--glass-chip);
-  backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
-  border: 1px solid rgba(255,255,255,.8);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 6px rgba(61,50,41,.08);
+  color: var(--accent); background: var(--solid);
+  border: 1px solid var(--border);
   font-weight: 700;
 }
 .backend-status-badge.offline { color: var(--error); }
@@ -295,7 +321,7 @@ canvas { max-width: 100%; }
    25% - 5px and 75% + 5px with its 20 px gap), joined, then one arrow down to Cross-Validation,
    which sits centred below at one column's width. */
 .nav-bridge { position: relative; height: 46px; }
-.nav-bridge span { position: absolute; background: var(--accent); opacity: .45; }
+.nav-bridge span { position: absolute; background: var(--brand); opacity: .6; }
 .nav-bridge-stub { top: 0; width: 2px; height: 18px; }
 .nav-bridge-stub.is-left { left: calc(25% - 6px); }
 .nav-bridge-stub.is-right { right: calc(25% - 6px); }
@@ -303,14 +329,14 @@ canvas { max-width: 100%; }
 .nav-bridge-down { top: 16px; bottom: 8px; left: calc(50% - 1px); width: 2px; }
 .nav-bridge span.nav-bridge-head {
   bottom: 0; left: calc(50% - 7px); width: 0; height: 0; background: none;
-  border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid var(--accent);
+  border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid var(--brand);
 }
 .nav-card-bridged { width: calc(50% - 10px); margin: 0 auto; }
 /* Swarming, at the bottom of the page and apart from the AHL tools: a divider and its own
    heading, then the card at full width. */
-.nav-hub-phenotype { margin-top: 40px; padding-top: 24px; border-top: 1px solid rgba(7,90,62,.25); }
+.nav-hub-phenotype { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--border); }
 .nav-section-head { margin-bottom: 16px; }
-.nav-section-title { margin: 0 0 6px; font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem; color: var(--text); }
+.nav-section-title { margin: 0 0 6px; font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-section); color: var(--heading); }
 .nav-section-head .section-description { margin: 0; }
 @media (max-width: 720px) {
   /* Stacked: one short arrow from the two cards above. */
@@ -324,8 +350,8 @@ canvas { max-width: 100%; }
 /* Swarming Assay: the photo and the detection side by side, stacked on a phone. */
 .swarm-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 0 0 16px; }
 .swarm-images figure { margin: 0; }
-.swarm-images img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
-.swarm-images figcaption { margin-top: 6px; color: var(--text-dim); font-size: .85rem; }
+.swarm-images img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+.swarm-images figcaption { margin-top: 6px; color: var(--text-dim); font-size: var(--fs-data); }
 @media (max-width: 720px) {
   .swarm-images { grid-template-columns: 1fr; }
 }
@@ -334,7 +360,7 @@ canvas { max-width: 100%; }
 .swarm-photo-table input.table-input { width: 100%; }
 .swarm-photo-table td:nth-child(5) input.table-input { min-width: 64px; width: 72px; }
 .swarm-photo-table td.photo-state { min-width: 150px; white-space: normal; }
-.cell-sub { display: block; margin-top: 2px; color: var(--muted); font-size: .8rem; white-space: normal; }
+.cell-sub { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-label); white-space: normal; }
 .cell-sub.is-error { color: var(--error); }
 .swarm-table-note { margin: 8px 0 0; }
 tr.detail-row .swarm-images { margin-top: 4px; }
@@ -343,18 +369,19 @@ tr.detail-row .swarm-images { margin-top: 4px; }
   display: flex; flex-direction: column; margin-top: 0;
   color: inherit; text-decoration: none;
   /* No transform: Safari corrupts a backdrop-filter that moves - the
-     same bug the wiki works around at style.css:208. */
-  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+     same bug the wiki works around at style.css:208. The lift is the
+     shadow and a firmer edge instead. */
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .2s ease;
 }
 .nav-card:hover {
-  background: rgba(255,253,247,.82);
-  border-color: rgba(255,255,255,.95);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 10px 26px rgba(61,50,41,.14);
+  background: var(--glass-fill-strong);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 2px 4px rgba(14,36,46,.06), 0 8px 22px rgba(14,36,46,.09);
 }
-.nav-card:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
-.nav-card h2 { margin: 0 0 10px; font-family: var(--heading-font); font-weight: 700; font-size: 1.4rem; color: var(--text); }
+.nav-card:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.nav-card h2 { margin: 0 0 10px; font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-card); line-height: 1.25; color: var(--heading); }
 .nav-card .section-description { margin: 0; }
-.nav-card-cue { margin-top: auto; padding-top: 18px; color: var(--accent); font-size: .9rem; font-weight: 700; }
+.nav-card-cue { margin-top: auto; padding-top: 18px; color: var(--accent); font-size: var(--fs-data); font-weight: 700; }
 
 /* Landing-page live spectrum. */
 .live-card { margin-top: 20px; }
@@ -363,27 +390,27 @@ tr.detail-row .swarm-images { margin-top: 4px; }
 .live-heading-row { align-items: center; }
 .live-heading-row h2 { margin: 0; }
 .live-controls { display: flex; align-items: center; gap: 18px; }
-.live-state { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-dim); background: var(--solid); font-size: .85rem; font-weight: 600; }
-.live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(138,122,106,.12); }
+.live-state { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-dim); background: var(--solid); font-size: var(--fs-label); font-weight: 600; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(36,89,107,.12); }
 .live-dot.is-streaming { background: var(--accent); box-shadow: 0 0 0 3px rgba(7,90,62,.14); }
-.live-dot.is-reconnecting { background: var(--gold); box-shadow: 0 0 0 3px rgba(201,162,39,.16); }
+.live-dot.is-reconnecting { background: var(--gold); box-shadow: 0 0 0 3px rgba(185,131,37,.16); }
 .live-switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; }
 .live-switch input { position: absolute; opacity: 0; pointer-events: none; }
-.live-switch-track { width: 42px; height: 24px; padding: 3px; border-radius: 999px; background: var(--border); transition: background-color .15s ease; }
-.live-switch-track span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--solid); box-shadow: 0 1px 4px rgba(61,50,41,.22); transition: transform .15s ease; }
-.live-switch input:checked + .live-switch-track { background: var(--accent); }
+.live-switch-track { width: 42px; height: 24px; padding: 3px; border-radius: 999px; background: rgba(36,89,107,.22); transition: background-color .15s ease; }
+.live-switch-track span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(14,36,46,.25); transition: transform .15s ease; }
+.live-switch input:checked + .live-switch-track { background: var(--brand); }
 .live-switch input:checked + .live-switch-track span { transform: translateX(18px); }
-.live-switch input:focus-visible + .live-switch-track { outline: 3px solid var(--gold); outline-offset: 2px; }
+.live-switch input:focus-visible + .live-switch-track { outline: 3px solid var(--focus); outline-offset: 2px; }
 .live-switch:has(input:disabled) { cursor: not-allowed; opacity: .55; }
 .live-empty { display: grid; min-height: 180px; margin-top: 16px; padding: 16px; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); background: var(--solid-soft); text-align: center; }
 /* With the chart up the box carries the message as one line above it, not as a stand-in for the chart. */
-.live-empty.is-inline { display: block; min-height: 1.5em; margin-top: 14px; padding: 0; border: 0; background: none; font-size: .88rem; text-align: left; }
+.live-empty.is-inline { display: block; min-height: 1.5em; margin-top: 14px; padding: 0; border: 0; background: none; font-size: var(--fs-data); text-align: left; }
 /* Held in the layout, not removed from it: a measurement's note must not push the chart down and back. */
 .live-empty.is-silent { visibility: hidden; }
-.live-legend { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px 16px; margin: 18px 0 6px; color: var(--muted); font-size: .8rem; }
+.live-legend { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px 16px; margin: 18px 0 6px; color: var(--muted); font-size: var(--fs-label); }
 .live-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .live-swatch { width: 10px; height: 10px; border-radius: 2px; }
-.live-swatch.is-f4 { background: var(--accent); }
+.live-swatch.is-f4 { background: var(--fluor); }
 .live-description { margin: 12px 0 0; }
 .live-settings { margin-top: 8px; }
 /* No new frames arrive during a measurement: fade the last one so it doesn't read as current. */
@@ -396,23 +423,24 @@ tr.detail-row .swarm-images { margin-top: 4px; }
   .live-controls { width: 100%; flex-wrap: wrap; justify-content: space-between; row-gap: 10px; }
 }
 
-.back-link { display: inline-block; margin-bottom: 16px; color: var(--accent); font-size: .85rem; font-weight: 700; text-decoration: none; }
+.back-link { display: inline-block; margin-bottom: 16px; color: var(--accent); font-size: var(--fs-data); font-weight: 700; text-decoration: none; }
 .back-link:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) { .nav-card { transition: none; } }
 
 /* Hardware pages (CAPTURE-Screen) -----------------------------------
    Same materials as above: glass frames the page, opaque surfaces sit
-   under every number. No new colours - meaning is carried by the ones
-   already in :root: accent = OK or actionable, gold = caution,
-   error = unusable, muted = neutral. */
+   under every number. Meaning is carried by the palette's roles:
+   accent = OK or actionable, gold = caution, error = unusable,
+   muted = neutral. */
 
 input[type="text"], input[type="date"], select {
   width: 100%; padding: 11px 12px;
-  border: 1px solid var(--border); border-radius: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
   color: var(--text); background: var(--solid);
+  font-size: var(--fs-data);
 }
-select:focus { outline: 3px solid var(--gold); outline-offset: 2px; border-color: var(--text-dim); }
+select:focus { outline: 3px solid var(--focus); outline-offset: 2px; border-color: var(--text-dim); }
 /* The date picker's inner field is taller than a text line; this keeps it level with the text box beside it. */
 input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 
@@ -430,72 +458,87 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 .hw-step a, .hw-data-link {
   display: flex; align-items: center; gap: 10px; height: 100%; box-sizing: border-box;
   padding: 9px 12px; border-radius: 12px;
-  color: var(--text-dim); background: var(--glass-chip);
-  backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
-  border: 1px solid rgba(255,255,255,.8);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 6px rgba(61,50,41,.08);
+  color: var(--text-dim);
   text-decoration: none;
-  transition: background-color .15s ease, border-color .15s ease;
+  transition: background-color .15s ease;
 }
-.hw-step a:hover, .hw-data-link:hover { color: var(--text); background: rgba(255,253,247,.88); }
-.hw-step a:focus-visible, .hw-data-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.hw-step a:hover, .hw-data-link:hover { color: var(--text); background: var(--glass-fill-strong); border-color: var(--border-strong); }
+.hw-step a:focus-visible, .hw-data-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .hw-step-num {
   display: grid; flex: none; width: 28px; height: 28px; place-items: center; border-radius: 50%;
   border: 2px solid var(--border); color: var(--muted); background: var(--solid);
-  font-weight: 700; font-size: .9rem;
+  font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-data);
 }
 .hw-step-text { display: flex; min-width: 0; flex-direction: column; }
-.hw-step-label { color: var(--text); font-weight: 700; font-size: .92rem; }
-.hw-step-state { overflow: hidden; color: var(--muted); font-size: .76rem; white-space: nowrap; text-overflow: ellipsis; }
-.hw-step.is-done .hw-step-num { border-color: var(--accent); color: #fff; background: var(--accent); }
+.hw-step-label { color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-body); }
+.hw-step-state { overflow: hidden; color: var(--muted); font-size: var(--fs-small); white-space: nowrap; text-overflow: ellipsis; }
+.hw-step.is-done .hw-step-num { border-color: var(--brand); color: var(--brand-ink); background: var(--brand); }
 .hw-step.is-next .hw-step-num { border-color: var(--gold); color: var(--gold-ink); }
 .hw-step.is-next .hw-step-state { color: var(--gold-ink); font-weight: 600; }
 .hw-step.is-attention .hw-step-state { color: var(--error); }
-.hw-step a[aria-current="step"] { border-color: var(--accent); background: rgba(255,253,247,.92); box-shadow: inset 0 -3px 0 var(--accent), 0 2px 6px rgba(61,50,41,.08); }
-.hw-data-link { flex: 0 0 auto; justify-content: center; margin-left: auto; padding: 9px 18px; font-size: .9rem; font-weight: 600; }
-.hw-data-link[aria-current="page"] { color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.hw-step a[aria-current="step"] {
+  background: var(--solid);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 -3px 0 var(--brand), 0 1px 2px rgba(14,36,46,.06);
+}
+.hw-data-link { flex: 0 0 auto; justify-content: center; margin-left: auto; padding: 9px 18px; font-family: var(--heading-font); font-size: var(--fs-data); font-weight: 500; }
+.hw-data-link[aria-current="page"] { color: var(--accent); font-weight: 700; background: var(--solid); box-shadow: inset 0 -3px 0 var(--brand), 0 1px 2px rgba(14,36,46,.06); }
 
 /* The link at the bottom of a page to the step after it. */
 .hw-next { margin-top: 20px; }
 .hw-next-link {
   display: flex; flex-direction: column; gap: 2px; padding: 16px 22px;
-  border: 1px solid var(--border); border-left: 6px solid var(--accent); border-radius: 12px;
+  border: 1px solid var(--border); border-left: 6px solid var(--brand); border-radius: 12px;
   background: var(--solid); text-decoration: none;
+  box-shadow: var(--data-depth);
 }
 .hw-next-link:hover .hw-next-title { text-decoration: underline; }
-.hw-next-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-.hw-next-label { color: var(--gold-ink); font-size: .76rem; font-weight: 700; }
-.hw-next-title { color: var(--accent); font-weight: 700; font-size: 1.02rem; }
+.hw-next-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.hw-next-label { color: var(--gold-ink); font-size: var(--fs-small); font-weight: 700; }
+.hw-next-title { color: var(--accent); font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-sub); }
 
 /* A numbered step within a page. A waiting step shows only its heading and what it waits for. */
 .step-card-head { display: flex; align-items: flex-start; gap: 14px; }
 .step-card-head > div { flex: 1; min-width: 0; }
-.step-card-head h2, .card-title { margin: 0; font-family: var(--heading-font); font-size: 1.3rem; color: var(--text); }
+.step-card-head h2, .card-title { margin: 0; font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-card); line-height: 1.25; color: var(--heading); }
 .step-card-num {
   display: grid; flex: none; width: 34px; height: 34px; place-items: center; border-radius: 50%;
-  border: 2px solid var(--gold); color: var(--gold-ink); background: var(--solid); font-weight: 700;
+  border: 2px solid var(--gold); color: var(--gold-ink); background: var(--solid);
+  font-family: var(--heading-font); font-weight: 700;
 }
-.step-card[data-state="done"] .step-card-num { border-color: var(--accent); color: #fff; background: var(--accent); }
-.step-card[data-state="waiting"] .step-card-num { border-color: var(--border); color: var(--muted); }
-.step-card[data-state="waiting"] .step-card-head h2 { color: var(--muted); }
+.step-card[data-state="done"] .step-card-num { border-color: var(--brand); color: var(--brand-ink); background: var(--brand); }
+/* A waiting step must read as not usable yet, at a glance: no glass, a dashed edge, and every
+   part of its heading in the drained grey - the number, the label, the title and its chip.
+   What it waits for, and the bench line, stay in their normal ink: those are meant to be read. */
+.step-card[data-state="waiting"] {
+  background: rgba(255,255,255,.28);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: 1px dashed rgba(36,89,107,.3);
+  box-shadow: none;
+}
+.step-card[data-state="waiting"] .step-card-num { border: 2px dashed var(--idle); color: var(--idle-ink); background: transparent; }
+.step-card[data-state="waiting"] .section-label { color: var(--idle-ink); }
+.step-card[data-state="waiting"] .step-card-head h2 { color: var(--idle); }
+.step-card[data-state="waiting"] .step-card-state { color: var(--idle-ink); border-color: var(--idle); border-style: dashed; background: transparent; }
 .step-card .step-card-waiting { margin: 10px 0 0 48px; }
 .step-card-body { margin-top: 16px; }
 /* What to have ready at the bench: shown even while the step waits, so it can be prepared meanwhile. */
-.step-card .step-bench { margin: 10px 0 0 48px; color: var(--text-dim); font-size: .88rem; }
-.step-bench b { margin-right: 4px; color: var(--gold-ink); font-size: .76rem; }
+.step-card .step-bench { margin: 10px 0 0 48px; color: var(--text-dim); font-size: var(--fs-data); }
+.step-bench b { margin-right: 4px; color: var(--gold-ink); font-size: var(--fs-small); }
 
 /* Choosing a curve: one selectable row per curve. */
 .choice-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 .choice {
   display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;
   border: 1px solid var(--border); border-radius: 12px; background: var(--solid); cursor: pointer;
+  box-shadow: var(--data-depth);
 }
 .choice input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); }
-.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent), var(--data-depth); }
 .choice:has(input:disabled) { cursor: not-allowed; opacity: .75; }
 .choice.is-static { cursor: default; }
 .choice-title { display: block; color: var(--text); font-weight: 700; }
-.choice-meta { display: block; margin-top: 2px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.choice-meta { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-data); line-height: 1.5; }
 #source-summary .choice-title, #source-summary .choice-meta { margin: 0; }
 #source-summary .choice-meta { margin-top: 2px; }
 /* Calibrate's Source: the same 16px under the heading as every other step card. The choices are
@@ -514,10 +557,10 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
    step above the field labels so the two read as groups. A group inside one keeps the label size. */
 #setup-form > .plain-fieldset { margin-top: 24px; }
 #setup-form > .plain-fieldset:first-child { margin-top: 0; }
-#setup-form > .plain-fieldset > legend { font-size: 1rem; font-weight: 700; }
+#setup-form > .plain-fieldset > legend { font-family: var(--heading-font); font-size: var(--fs-sub); font-weight: 700; }
 
 /* Calibrate's Set up: the tube list a run will make, in reading order. */
-.tube-order { margin-top: 8px; font-size: .88rem; }
+.tube-order { margin-top: 8px; font-size: var(--fs-data); }
 .tube-order summary { cursor: pointer; color: var(--accent); font-weight: 700; }
 .tube-order ol { columns: 9rem; column-gap: 24px; margin: 8px 0 0; padding-left: 2.4em; color: var(--text-dim); }
 .tube-order li { break-inside: avoid; }
@@ -526,14 +569,14 @@ input[type="date"] { padding-top: 9px; padding-bottom: 9px; }
 
 .text-link { color: var(--accent); font-weight: 700; text-decoration: none; }
 .text-link:hover { text-decoration: underline; }
-.text-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.text-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .link-row { margin: 16px 0 0; }
 
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
 .button-row .text-link, .button-row .check-field { margin-top: 14px; }
 
 /* A button that is off because a step is missing always says why. */
-.blocked-reason { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+.blocked-reason { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-data); }
 button.is-blocked:disabled { cursor: not-allowed; }
 
 .status-message.warn {
@@ -547,14 +590,15 @@ button.is-blocked:disabled { cursor: not-allowed; }
 .check-field { display: flex; align-items: center; gap: 8px; }
 .check-field input, td input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 .plain-fieldset { min-width: 0; margin: 12px 0 0; padding: 0; border: 0; }
-.plain-fieldset legend { padding: 0; color: var(--text); font-size: .9rem; font-weight: 600; }
+.plain-fieldset legend { padding: 0; color: var(--text); font-size: var(--fs-data); font-weight: 600; }
 .radio-row { display: flex; flex-wrap: wrap; gap: 0 28px; }
+.radio-row input { accent-color: var(--accent); }
 
 .table-heading { margin: 26px 0 12px; }
 .step-card-body > .table-heading:first-child { margin-top: 0; }
 .table-spaced { margin-top: 16px; }
-.plan-meta { margin: 8px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.6; }
-.cell-note { color: var(--muted); font-size: .8rem; }
+.plan-meta { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-data); line-height: 1.6; }
+.cell-note { color: var(--muted); font-size: var(--fs-label); }
 
 .fingerprint {
   padding: 1px 7px; border: 1px solid var(--border); border-radius: 6px;
@@ -564,9 +608,9 @@ button.is-blocked:disabled { cursor: not-allowed; }
 
 .sensor-stats { flex-wrap: wrap; }
 .sensor-stat { min-width: 200px; }
-.sensor-stat-sub { display: block; margin-top: 4px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.sensor-stat-sub { display: block; margin-top: 4px; color: var(--muted); font-size: var(--fs-data); line-height: 1.5; }
 .sensor-stat-value.is-large { font-size: clamp(1.9rem, 4vw, 2.6rem); }
-.sensor-stat-value.is-message { font-size: 1.15rem; line-height: 1.4; }
+.sensor-stat-value.is-message { font-size: var(--fs-sub); line-height: 1.4; }
 .sensor-stat-value.is-error { color: var(--error); }
 
 /* QC flags and curve states. */
@@ -576,7 +620,7 @@ td .chip-row { margin-top: 0; }
   display: inline-block; padding: 2px 10px;
   border: 1px solid var(--border); border-radius: 999px;
   color: var(--text-dim); background: var(--solid);
-  font-size: .75rem; font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+  font-size: var(--fs-label); font-weight: 600; white-space: nowrap;
 }
 .flag-chip.ok { color: var(--accent); border-color: var(--accent); }
 .flag-chip.warn { color: var(--gold-ink); border-color: var(--gold); }
@@ -586,11 +630,12 @@ td .chip-row { margin-top: 0; }
   display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
   padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px;
   color: var(--text-dim); background: var(--solid);
-  font-size: .82rem; text-align: right;
+  box-shadow: var(--data-depth);
+  font-size: var(--fs-label); text-align: right;
 }
-.curve-chip strong { color: var(--text); font-size: .95rem; }
-.curve-chip-label { color: var(--gold-ink); font-size: .7rem; font-weight: 700; }
-.curve-summary-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text); font-size: 1.05rem; }
+.curve-chip strong { color: var(--text); font-size: var(--fs-body); }
+.curve-chip-label { color: var(--gold-ink); font-size: var(--fs-small); font-weight: 700; }
+.curve-summary-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text); font-size: var(--fs-sub); }
 
 /* Calibration run: the next tube stays pinned while the list scrolls. */
 .next-tube {
@@ -598,39 +643,39 @@ td .chip-row { margin-top: 0; }
   margin-top: 18px; padding: 18px 22px 16px;
   border: 1px solid var(--border); border-left: 6px solid var(--accent); border-radius: 12px;
   background: var(--solid);
-  box-shadow: 0 6px 18px rgba(61,50,41,.09);
+  box-shadow: 0 2px 4px rgba(14,36,46,.06), 0 8px 20px rgba(14,36,46,.08);
 }
 .next-tube.is-reread { border-left-color: var(--gold); }
 .next-tube.is-done { border-left-color: var(--muted); }
-.next-tube-label { margin: 0; color: var(--gold-ink); font-size: .76rem; font-weight: 700; }
+.next-tube-label { margin: 0; color: var(--gold-ink); font-size: var(--fs-small); font-weight: 700; }
 .next-tube-value {
   margin: 4px 0 0; color: var(--text);
   font-family: var(--heading-font); font-weight: 700; font-size: clamp(1.4rem, 3.6vw, 2.1rem); line-height: 1.2;
 }
 .next-tube .status-message { margin-top: 10px; }
-.next-tube-action { margin: 4px 0 0; color: var(--text-dim); font-size: .9rem; }
+.next-tube-action { margin: 4px 0 0; color: var(--text-dim); font-size: var(--fs-data); }
 .read-chart { margin-top: 16px; }
 /* Fit: a tube that keeps the fit from running (read under another config) until it is excluded. */
-tr.is-problem td { background: rgba(163, 56, 44, .07); }
+tr.is-problem td { background: rgba(180,35,24,.07); }
 /* Save: the curve's key numbers and what it is bound to, one line each. */
 .save-facts { margin: 0; color: var(--text); font-weight: 600; }
 .save-facts + .save-facts { margin-top: 4px; }
 .read-chart .chart-note { margin-top: 0; }
-.progress { height: 10px; margin-top: 14px; border-radius: 999px; background: var(--border); overflow: hidden; }
-.progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
-.progress-text { margin: 6px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.progress { height: 10px; margin-top: 14px; border-radius: 999px; background: rgba(36,89,107,.14); overflow: hidden; }
+.progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--brand); transition: width .2s ease; }
+.progress-text { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-data); font-variant-numeric: tabular-nums; }
 
 /* Tables. */
 .kv-table { min-width: 0; }
-.kv-table th { width: 34%; color: var(--text-dim); font-size: .85rem; }
+.kv-table th { width: 34%; color: var(--text-dim); font-size: var(--fs-data); }
 
 /* A datasheet: parameter, value, and where the value comes from. The structure is the wiki's
    hardware tables (Quantity / Measured / Note); the material is this site's, like every other table. */
 .spec-table { min-width: 0; }
-.spec-table tbody th { width: 24%; color: var(--text-dim); font-size: .85rem; }
+.spec-table tbody th { width: 24%; color: var(--text-dim); font-size: var(--fs-data); }
 .spec-table td.spec-value { color: var(--text); }
 /* The one column allowed to wrap, so the table fits a phone without scrolling sideways. */
-.spec-table td.spec-note { width: 46%; color: var(--muted); font-size: .82rem; line-height: 1.5; white-space: normal; }
+.spec-table td.spec-note { width: 46%; color: var(--muted); font-size: var(--fs-label); line-height: 1.5; white-space: normal; }
 @media (max-width: 640px) {
   .spec-table th, .spec-table td { padding: 10px 8px; }
   .spec-table tbody th { white-space: normal; }
@@ -638,19 +683,20 @@ tr.is-problem td { background: rgba(163, 56, 44, .07); }
 
 /* A health dot, in the palette's meanings: accent OK, gold busy, error broken, muted unknown.
    Same sizes as the landing page's live dot. */
-.status-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(138,122,106,.12); }
+.status-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(36,89,107,.12); }
 .status-dot.is-ok { background: var(--accent); box-shadow: 0 0 0 3px rgba(7,90,62,.14); }
-.status-dot.is-warn { background: var(--gold); box-shadow: 0 0 0 3px rgba(201,162,39,.16); }
-.status-dot.is-error { background: var(--error); box-shadow: 0 0 0 3px rgba(163,56,44,.14); }
+.status-dot.is-warn { background: var(--gold); box-shadow: 0 0 0 3px rgba(185,131,37,.2); }
+.status-dot.is-error { background: var(--error); box-shadow: 0 0 0 3px rgba(180,35,24,.18); }
 
 /* Instrument verdict: one line answering "can I measure now?", its bar in the verdict's tone. */
 .hw-verdict {
   margin-top: 14px; padding: 16px 20px;
   border: 1px solid var(--border); border-left: 6px solid var(--muted); border-radius: 12px;
   background: var(--solid);
+  box-shadow: var(--data-depth);
 }
-.hw-verdict-title { margin: 0; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: 1.3rem; line-height: 1.3; }
-.hw-verdict-detail { margin: 4px 0 0; color: var(--text-dim); font-size: .92rem; line-height: 1.55; }
+.hw-verdict-title { margin: 0; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-card); line-height: 1.3; }
+.hw-verdict-detail { margin: 4px 0 0; color: var(--text-dim); font-size: var(--fs-body); line-height: 1.55; }
 .hw-verdict.is-ok { border-left-color: var(--accent); }
 .hw-verdict.is-ok .hw-verdict-title { color: var(--accent); }
 .hw-verdict.is-warn { border-left-color: var(--gold); }
@@ -665,15 +711,15 @@ tr.is-problem td { background: rgba(163, 56, 44, .07); }
   display: grid; align-items: center; margin-top: 16px;
   grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) 44px minmax(0, 1fr);
 }
-.hw-node { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.hw-node { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); box-shadow: var(--data-depth); }
 .hw-node.is-error { border-color: var(--error); }
-.hw-node-label { color: var(--muted); font-size: .74rem; font-weight: 700; }
-.hw-node-value { display: flex; align-items: center; gap: 9px; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: 1.15rem; }
+.hw-node-label { color: var(--muted); font-size: var(--fs-label); font-weight: 600; }
+.hw-node-value { display: flex; align-items: center; gap: 9px; color: var(--text); font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-sub); }
 .hw-node.is-unknown .hw-node-value { color: var(--muted); }
-.hw-node-sub { min-height: 1.3em; color: var(--muted); font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere; }
+.hw-node-sub { min-height: 1.3em; color: var(--muted); font-size: var(--fs-label); line-height: 1.45; overflow-wrap: anywhere; }
 .hw-node-pair { display: grid; grid-auto-rows: 1fr; gap: 10px; }
 
-.hw-link, .hw-fork-stem, .hw-fork-branch { border: 0 solid var(--border); }
+.hw-link, .hw-fork-stem, .hw-fork-branch { border: 0 solid var(--border-strong); }
 .hw-link { display: block; border-top-width: 2px; }
 .hw-fork { position: relative; align-self: stretch; }
 .hw-fork-stem { position: absolute; left: 0; width: 50%; top: 50%; border-top-width: 2px; }
@@ -704,18 +750,18 @@ tr.is-problem td { background: rgba(163, 56, 44, .07); }
   position: absolute; left: 0; top: -1px;
   display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%;
   border: 2px solid var(--accent); color: var(--accent); background: var(--solid);
-  font-weight: 700; font-size: .88rem;
+  font-family: var(--heading-font); font-weight: 700; font-size: var(--fs-data);
 }
 /* Self-check result: one row per check, its verdict chip at the end. */
-.check-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.check-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); box-shadow: var(--data-depth); }
 .check-list li { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
 .check-list li:last-child { border-bottom: 0; }
-.check-name { flex: 0 0 9rem; color: var(--text); font-size: .92rem; font-weight: 700; }
-.check-value { flex: 1; min-width: 0; color: var(--text-dim); font-size: .92rem; font-variant-numeric: tabular-nums; }
+.check-name { flex: 0 0 9rem; color: var(--text); font-size: var(--fs-body); font-weight: 700; }
+.check-value { flex: 1; min-width: 0; color: var(--text-dim); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
 .check-list li.is-fail .check-value { color: var(--error); font-weight: 600; }
 .raw-details { margin-top: 14px; }
-.raw-details summary { width: fit-content; color: var(--accent); font-size: .9rem; font-weight: 700; cursor: pointer; }
-.raw-details summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.raw-details summary { width: fit-content; color: var(--accent); font-size: var(--fs-data); font-weight: 700; cursor: pointer; }
+.raw-details summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 @media (max-width: 640px) {
   .check-name { flex-basis: 7rem; }
 }
@@ -726,7 +772,7 @@ tr.is-excluded td:not(.group-cell) { color: var(--muted); }
 tr.group-start td { border-top: 1px solid var(--border); }
 td.group-cell { vertical-align: top; color: var(--text); background: var(--solid-soft); }
 .action-cell { white-space: nowrap; }
-.table-button { width: auto; min-height: 34px; margin: 0 6px 0 0; padding: 5px 12px; font-size: .85rem; }
+.table-button { width: auto; min-height: 34px; margin: 0 6px 0 0; padding: 5px 14px; font-size: var(--fs-data); }
 .table-input { min-width: 200px; padding: 6px 10px; }
 .table-input.is-missing { border-color: var(--error); }
 /* Recorded-data entry: narrower than the result tables, one compact control per cell. */
@@ -739,7 +785,7 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px 20px; }
 .detail-value { display: block; margin-top: 2px; color: var(--text); font-variant-numeric: tabular-nums; }
 .curve-chart { margin: 8px 0 0; }
-.detail-heading { margin: 16px 0 6px; color: var(--text); font-size: .88rem; font-weight: 700; }
+.detail-heading { margin: 16px 0 6px; color: var(--text); font-size: var(--fs-data); font-weight: 700; }
 .excluded-list { margin: 0; padding-left: 20px; }
 
 .empty-state { margin-top: 12px; padding: 20px 22px; border: 1px dashed var(--border); border-radius: 12px; background: var(--solid-soft); }
@@ -748,7 +794,7 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 .provenance {
   display: flex; flex-wrap: wrap; gap: 6px 22px;
   margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border);
-  color: var(--text-dim); font-size: .84rem;
+  color: var(--text-dim); font-size: var(--fs-data);
 }
 .provenance b { color: var(--muted); font-weight: 700; }
 
@@ -762,23 +808,19 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
   .table-button { width: auto; }
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .hw-step a, .hw-data-link { background: #fffdf7; }
-}
-
 @media print {
   .hw-steps, .hw-next, .next-tube button, .table-button { display: none; }
   .next-tube { position: static; box-shadow: none; }
 }
 
-/* Without backdrop-filter the panels would be washed-out boxes. */
+/* Without backdrop-filter the glass would be a washed-out tint: make it white. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .site-header, .card, .backend-status-badge, button, button.btn-secondary { background: #fffdf7; }
+  .site-header, .card, .hw-step a, .hw-data-link { background: #fff; }
 }
 
-/* Print: backdrop-filter does not print, and the ground wastes toner. */
+/* Print: no ground, no glass, ink on white. */
 @media print {
-  body { background: #fff; }
+  html { background: #fff; }
   .page { width: 100%; padding: 0; }
   .back-link, form, .predict-form, .backend-status-badge, .nav-card-cue { display: none; }
   .site-header {
@@ -799,34 +841,37 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 .assay-table { min-width: 0; }
 .assay-table td.rep-cell input.table-input, .assay-table td.dilution-cell input.table-input { min-width: 72px; width: 88px; }
 /* With F/OD600, the OD columns are tinted so they read as a second block beside the F replicates. */
-.assay-table th.od-head, .assay-table td.od-cell { background: var(--solid-soft); }
+.assay-table th.od-head, .assay-table td.od-cell { background: rgba(73,197,182,.13); }
 .assay-table select.table-input { min-width: 150px; }
 
 /* Plate import: an 8 x 12 map of wells. Each well is a small button showing its mark and value;
-   the global button styles (44 px, glass) are undone here so 96 of them fit. */
+   the global button styles (44 px, solid mint) are undone here so 96 of them fit. The map sits in a
+   .table-wrapper, so it is already on white. */
 .plate-import { margin-top: 14px; }
 .plate-import summary { width: fit-content; color: var(--accent); font-weight: 700; cursor: pointer; }
-.plate-import summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-.plate-import textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .8rem; white-space: pre; }
+.plate-import summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.plate-import textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--fs-label); white-space: pre; }
 .plate-grid { width: auto; min-width: 0; border-collapse: separate; border-spacing: 3px; }
 .plate-grid th, .plate-grid td { padding: 0; border: 0; background: none; text-align: center; }
 .plate-grid button {
   min-height: 0; margin: 0; padding: 0;
   border-radius: 6px; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  font-family: inherit;
 }
-.plate-grid .plate-head { width: 100%; min-width: 28px; height: 28px; color: var(--text-dim); font-size: .78rem; background: transparent; border: 1px solid transparent; }
-.plate-grid .plate-head:hover { border-color: var(--border); background: var(--solid); }
+.plate-grid .plate-head { width: 100%; min-width: 28px; height: 28px; color: var(--text-dim); font-size: var(--fs-label); font-weight: 600; background: transparent; border: 1px solid transparent; }
+.plate-grid .plate-head:hover { border-color: var(--border); background: var(--solid-soft); }
 .plate-well {
   display: flex; flex-direction: column; justify-content: center; gap: 1px;
-  width: 58px; height: 40px; overflow: hidden;
-  color: var(--text-dim); font-size: .68rem; font-weight: 500; line-height: 1.2;
+  width: 64px; height: 42px; overflow: hidden;
+  color: var(--text-dim); font-size: var(--fs-small); font-weight: 500; line-height: 1.2;
   background: var(--solid); border: 1px solid var(--border);
 }
+.plate-well:hover { background: var(--solid-soft); }
 .plate-well-tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .plate-well-value { font-variant-numeric: tabular-nums; }
 .plate-well-value.is-invalid { color: var(--error); }
 .plate-well.is-standard { background: rgba(7,90,62,.10); border-color: rgba(7,90,62,.35); color: var(--accent); }
-.plate-well.is-sample { background: rgba(201,162,39,.14); border-color: rgba(201,162,39,.5); color: var(--gold-ink); }
+.plate-well.is-sample { background: rgba(185,131,37,.14); border-color: rgba(185,131,37,.5); color: var(--gold-ink); }
 .plate-well.is-medium { background: var(--solid-soft); border-style: dashed; border-color: var(--muted); }
 .plate-well.is-selected { outline: 2px solid var(--gold); outline-offset: 1px; }
 .plate-mark { margin-top: 4px; }

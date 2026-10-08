@@ -34,7 +34,7 @@
 //
 // Rules:
 //   - Live data is only ever drawn; it's never written to storage, added to a plan, or fitted
-//   - Only the sfGFP channel F4 is called out; leakage (F3) and the update rate aren't shown
+//   - Only the sfGFP channel F4 is called out; no other channel is labelled, and the update rate isn't shown
 //   - The chart is cleared whenever the device goes offline or the connection drops — the last
 //     frame is never left showing as if it were current
 //   - Reconnects automatically on disconnect (a sleeping Render backend can take tens of
@@ -307,7 +307,7 @@ function ensureLiveChart() {
   const muted = liveCssVar("--muted");
   const ink = liveCssVar("--text");
   const rule = liveCssVar("--border");
-  const accent = liveCssVar("--accent");
+  const fluor = liveCssVar("--fluor");
   const ticks = { color: muted, font: { size: 10 } };
   const canvas = liveEl("live-chart");
 
@@ -319,7 +319,7 @@ function ensureLiveChart() {
         label: "Raw counts",
         data: LIVE_CHANNELS.map(() => 0),
         // Set once here, not per frame: only F4 is ever called out, and the palette can't change under us.
-        backgroundColor: LIVE_CHANNELS.map(({ key }) => (key === "F4" ? accent : muted)),
+        backgroundColor: LIVE_CHANNELS.map(({ key }) => (key === "F4" ? fluor : liveCssVar("--chart-muted"))),
         borderRadius: 3,
       }],
     },
