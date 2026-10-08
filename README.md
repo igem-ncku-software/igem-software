@@ -25,7 +25,7 @@ Apart from AHL, a fourth tool measures a phenotype:
 
 | Tool | For | Result |
 |---|---|---|
-| **Swarming Assay** | A photo of a swarming plate | The plate is found and its known diameter (93 mm by default) sets the scale; each colony's longest span, equivalent diameter and area are measured, and the photo is returned annotated. Runs on the backend (Python, OpenCV). |
+| **Swarming Assay** | A photo of a swarming plate | The plate is found and its known diameter (93 mm by default) sets the scale; each colony's longest span, equivalent diameter and area are measured, and the photo is returned annotated. Runs on the backend (Python, OpenCV); photos over 2000 px are analysed at 2000 px on the longest side, so it fits a free server. |
 
 Both instruments go through the same curve-fitting code, so the same readings give the same curve on either. Every value shown is a real reading: there is no simulated device or demo data.
 
@@ -167,7 +167,7 @@ When the OLED shows `Web ok`, the device is online and the landing page shows it
 
 ```bash
 cd backend
-pytest        # 43 tests: device relay, live spectrum, swarming upload
+pytest        # 44 tests: device relay, live spectrum, swarming upload
 ```
 
 The firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen`.
