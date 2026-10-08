@@ -17,7 +17,7 @@
 
 const SWARMING_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 // What OpenCV decodes and a browser can also show as the preview (not TIFF).
-const SWARMING_TYPES = ["image/png", "image/jpeg", "image/webp", "image/bmp"];
+const SWARMING_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 let photo = null;      // the chosen File
 let photoUrl = null;   // its object URL, for the preview
@@ -118,7 +118,7 @@ function choosePhoto(input) {
   setStatus(document.getElementById("analyze-status"), "");
   setStatus(document.getElementById("export-status"), "");
   if (file && !SWARMING_TYPES.includes(file.type)) {
-    setStatus(status, `${file.name} is not a PNG or JPEG.`, "error");
+    setStatus(status, `${file.name} is not a PNG, JPEG or WebP.`, "error");
   } else if (file && file.size > SWARMING_MAX_UPLOAD_BYTES) {
     setStatus(status, `${file.name} is ${(file.size / 1048576).toFixed(1)} MB; the limit is 20 MB.`, "error");
   } else if (file) {
