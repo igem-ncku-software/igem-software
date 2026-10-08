@@ -30,7 +30,7 @@ const SWARMING_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const SWARMING_DOWNLOAD_GAP_MS = 350;
 
 // One entry per photo, in the order added:
-//   { id, file, strain, condition, replicate (text, as typed),
+//   { id, file, strain, condition, replicate (text), replicateAuto (numbered by the page until typed),
 //     state: "pending" | "analysing" | "done" | "failed", result, error, url (preview, lazy) }
 let photos = [];
 let nextPhotoId = 1;
@@ -150,14 +150,28 @@ const allAnalysed = () => photos.length > 0 && photos.every((p) => p.state === "
 
 // ---- Photos -------------------------------------------------------------------------------
 
-// The next replicate for a strain and condition: one past the highest already used.
-function nextReplicate(strain, condition) {
-  const key = groupKey(strain, condition);
-  let max = 0;
+// Numbers every replicate the user hasn't typed, in table order, within its strain and
+// condition: the lowest number that group hasn't used. A typed replicate keeps its number and
+// reserves it. Run after every change to strain, condition, replicate or the photo list, so a
+// photo whose strain is changed starts at 1 in its new group instead of keeping its old number.
+function renumberReplicates() {
+  const used = new Map();
+  const take = (p) => {
+    const key = groupKey(p.strain, p.condition);
+    if (!used.has(key)) used.set(key, new Set());
+    return used.get(key);
+  };
   for (const p of photos) {
-    if (groupKey(p.strain, p.condition) === key && replicateOk(p.replicate)) max = Math.max(max, Number(p.replicate));
+    if (!p.replicateAuto && replicateOk(p.replicate)) take(p).add(Number(p.replicate));
   }
-  return String(max + 1);
+  for (const p of photos) {
+    if (!p.replicateAuto) continue;
+    const taken = take(p);
+    let n = 1;
+    while (taken.has(n)) n++;
+    taken.add(n);
+    p.replicate = String(n);
+  }
 }
 
 function addPhotos(files) {
@@ -180,13 +194,16 @@ function addPhotos(files) {
       const condition = last?.condition ?? "";
       photos.push({
         id: nextPhotoId++, file, strain, condition,
-        replicate: nextReplicate(strain, condition),
+        replicate: "", replicateAuto: true,
         state: "pending", result: null, error: null, url: null,
       });
       added++;
     }
   }
-  if (added) exported = false;
+  if (added) {
+    renumberReplicates();
+    exported = false;
+  }
   const parts = [];
   if (added) parts.push(`Added ${plural(added, "photo", "photos")}.`);
   if (skipped.length) parts.push(`Skipped: ${skipped.join("; ")}.`);
@@ -199,6 +216,7 @@ function removePhoto(photo) {
   if (photo.state === "analysing") return;
   if (photo.url) URL.revokeObjectURL(photo.url);
   photos = photos.filter((p) => p !== photo);
+  renumberReplicates();
   openDetails.delete(photo.id);
   exported = false;
   setStatus(document.getElementById("photo-status"), `Removed ${photo.file.name}.`);
@@ -238,6 +256,8 @@ function renderPhotoTable() {
       box.setAttribute("aria-label", `${label}, photo ${i + 1}`);
       box.addEventListener("input", () => {
         p[field] = box.value;
+        if (field === "replicate") p.replicateAuto = false;
+        renumberReplicates();
         exported = false; // these go into the CSV
         render();
       });
@@ -276,6 +296,8 @@ function updatePhotoRows() {
     remove.disabled = p.state === "analysing";
     remove.title = remove.disabled ? "Being analysed" : "";
     for (const box of tr.querySelectorAll("input")) {
+      // A replicate the page renumbered; a typed value always equals p's already.
+      if (box.dataset.field === "replicate" && box.value !== p.replicate) box.value = p.replicate;
       const bad = box.dataset.field === "strain" ? !p.strain.trim()
         : box.dataset.field === "replicate" ? !replicateOk(p.replicate) || dup.has(p)
         : false;
