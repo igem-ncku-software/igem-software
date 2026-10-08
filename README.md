@@ -25,7 +25,7 @@ Apart from AHL, a fourth tool measures a phenotype:
 
 | Tool | For | Result |
 |---|---|---|
-| **Swarming Assay** | A photo of a swarming plate | The plate is found and its known diameter (93 mm by default) sets the scale; each colony's longest span, equivalent diameter and area are measured, and the photo is returned annotated. Runs on the backend (Python, OpenCV). |
+| **Swarming Assay** | Photos of swarming plates (up to 24 per batch) | The plate is found and its known diameter (93 mm by default) sets the scale; each colony's longest span, equivalent diameter and area are measured, and the photo is returned annotated. Runs on the backend (Python, OpenCV). |
 
 Both instruments go through the same curve-fitting code, so the same readings give the same curve on either. Every value shown is a real reading: there is no simulated device or demo data.
 
@@ -103,7 +103,7 @@ Load a Plate Reader Assay CSV and a CAPTURE-Screen batch (from this browser or i
 
 ### Swarming Assay
 
-Enter the date and strain, upload a photo of the plate taken from above, check the plate diameter, and press Analyse. Check that the green circle matches the plate edge, then export the CSV and the annotated photo.
+Enter the date, choose the plate photos (taken from above), give each its strain, condition and replicate, check the plate diameter, and press Analyse; the photos are analysed one after another. View each photo to check that the green circle matches the plate edge, then export the CSV (every photo's colonies in one file) and the annotated photos.
 
 ## Reproducing the main results
 
@@ -112,7 +112,7 @@ The repository ships no example dataset, because LasReader uses real readings on
 - **Plate Reader Assay:** the CSV holds every reading with its well and exclusion reason. Enter the readings again, apply the same exclusions and fit; the curve and inferred AHL are recomputed by [`js/curve_fit.js`](frontend/js/curve_fit.js).
 - **CAPTURE-Screen curve:** with the instrument, follow Usage steps 1–4. Without it, open Calibrate → *Enter recorded data*, type in the recorded standards and blanks with the configuration they were read under, and fit. A curve can also be restored from the Data page's backup.
 - **Cross-Validation:** load the same two CSVs and the same dilution.
-- **Swarming Assay:** upload the same photo with the same plate diameter; the CSV records both. The analysis is deterministic, so the numbers come out the same.
+- **Swarming Assay:** upload the same photos with the same plate diameter; the CSV records the photo name and diameter on every row. The analysis is deterministic, so the numbers come out the same.
 
 ## How it works
 

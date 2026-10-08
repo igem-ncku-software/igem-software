@@ -236,7 +236,9 @@ button.btn-danger:active { color: var(--error); }
 
 .result-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.7); }
 
-.table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+/* Relative so a visually hidden header label (absolute) stays inside the scroll box instead of
+   widening the page on a phone. */
+.table-wrapper { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
 table { width: 100%; min-width: 860px; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 th { color: var(--muted); background: var(--solid-soft); font-size: .74rem; font-weight: 700; }
@@ -327,6 +329,15 @@ canvas { max-width: 100%; }
 @media (max-width: 720px) {
   .swarm-images { grid-template-columns: 1fr; }
 }
+/* The batch's photo table: one row per photo, its plate's labels typed in place. */
+.swarm-photo-table { min-width: 720px; }
+.swarm-photo-table input.table-input { width: 100%; }
+.swarm-photo-table td:nth-child(5) input.table-input { min-width: 64px; width: 72px; }
+.swarm-photo-table td.photo-state { min-width: 150px; white-space: normal; }
+.cell-sub { display: block; margin-top: 2px; color: var(--muted); font-size: .8rem; white-space: normal; }
+.cell-sub.is-error { color: var(--error); }
+.swarm-table-note { margin: 8px 0 0; }
+tr.detail-row .swarm-images { margin-top: 4px; }
 
 .nav-card {
   display: flex; flex-direction: column; margin-top: 0;

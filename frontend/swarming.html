@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Swarming Assay · LasReader</title>
-  <meta name="description" content="Measure a swarming colony's spread from a photo of its plate." />
+  <meta name="description" content="Measure swarming colonies' spread from photos of their plates." />
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" type="image/png" href="assets/images/favicon.png" />
   <link rel="apple-touch-icon" href="assets/images/logo-mark.png" />
@@ -19,23 +19,23 @@
         <div class="site-header-text">
           <p class="eyebrow">iGEM NCKU-Tainan 2026 · Capture</p>
           <h1>Swarming Assay</h1>
-          <p class="subtitle">Colony spread measured from a photo of the plate</p>
+          <p class="subtitle">Colony spread measured from photos of the plates</p>
         </div>
         <img class="site-logo" src="assets/images/logo-wordmark.png"
              alt="iGEM NCKU-Tainan 2026 Capture" width="960" height="513" />
       </div>
     </header>
 
-    <!-- One photo at a time, analysed by the backend (POST /api/swarming/analyze) and never stored:
-         the CSV and the annotated image are the record. Every step derives its state from the page. -->
+    <!-- A batch of photos, analysed by the backend one at a time (POST /api/swarming/analyze) and never
+         stored: the CSV and the annotated images are the record. Every step derives its state from the page. -->
     <main>
-      <!-- 1. Photo: the experiment, then the plate photo. -->
+      <!-- 1. Photos: the experiment (shared by the batch), then one row per plate photo. -->
       <section class="card step-card" id="photo-card">
         <div class="step-card-head">
           <span class="step-card-num">1</span>
           <div>
-            <p class="section-label">Photo</p>
-            <h2>Plate photo</h2>
+            <p class="section-label">Photos</p>
+            <h2>Plate photos</h2>
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
@@ -50,14 +50,6 @@
                 <input type="date" id="info-date" />
               </div>
               <div class="field">
-                <label for="info-strain">Strain</label>
-                <input type="text" id="info-strain" autocomplete="off" />
-              </div>
-              <div class="field">
-                <label for="info-condition">Condition (optional)</label>
-                <input type="text" id="info-condition" autocomplete="off" />
-              </div>
-              <div class="field">
                 <label for="info-incubation">Incubation, h (optional)</label>
                 <input type="text" id="info-incubation" inputmode="decimal" autocomplete="off" />
               </div>
@@ -69,12 +61,12 @@
           </fieldset>
 
           <fieldset class="plain-fieldset">
-            <legend>Photo</legend>
-            <p class="plan-meta">Taken from above. PNG, JPEG or WebP, up to 20 MB. The plate's diameter sets the scale of every size.</p>
+            <legend>Photos</legend>
+            <p class="plan-meta">Taken from above. PNG, JPEG or WebP, up to 20 MB each, at most 24 per batch. Every plate must have the diameter entered here: it sets the scale of every size.</p>
             <div class="form-grid">
               <div class="field">
-                <label for="photo-file">Plate photo</label>
-                <input type="file" id="photo-file" accept="image/png,image/jpeg,image/webp" />
+                <label for="photo-file">Plate photos</label>
+                <input type="file" id="photo-file" accept="image/png,image/jpeg,image/webp" multiple />
               </div>
               <div class="field">
                 <label for="dish-diameter">Plate diameter (mm)</label>
@@ -82,6 +74,23 @@
               </div>
             </div>
             <p class="status-message" id="photo-status" aria-live="polite"></p>
+            <div class="table-wrapper" id="photo-table-wrapper" hidden>
+              <table class="manual-table swarm-photo-table">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col">Photo</th>
+                    <th scope="col">Strain</th>
+                    <th scope="col">Condition (optional)</th>
+                    <th scope="col">Replicate</th>
+                    <th scope="col">Analysis</th>
+                    <th scope="col"><span class="visually-hidden">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody id="photo-body"></tbody>
+              </table>
+            </div>
+            <p class="chart-note swarm-table-note">A new photo takes the previous row's strain and condition, as the next replicate.</p>
           </fieldset>
 
           <div class="button-row">
@@ -92,59 +101,38 @@
         </div>
       </section>
 
-      <!-- 2. Detection: what the backend found, drawn on the photo, then the numbers. -->
+      <!-- 2. Detection: one row per analysed photo; View opens what the backend found, drawn on the
+           photo, and its numbers. -->
       <section class="card step-card" id="detect-card">
         <div class="step-card-head">
           <span class="step-card-num">2</span>
           <div>
             <p class="section-label">Detection</p>
-            <h2>Plate and colony</h2>
+            <h2>Plates and colonies</h2>
           </div>
           <span class="flag-chip step-card-state">--</span>
         </div>
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <div class="swarm-images">
-            <figure>
-              <img id="photo-original" alt="Plate photo as uploaded" />
-              <figcaption>Photo</figcaption>
-            </figure>
-            <figure>
-              <img id="photo-annotated" alt="Plate photo with the detected plate edge and colony outlined" />
-              <figcaption>Detected: plate edge (green), colony outline (yellow), longest span and 10 mm scale bar (red)</figcaption>
-            </figure>
-          </div>
-
-          <h3 class="subsection-heading table-heading">Plate</h3>
-          <p class="status-message error" id="dish-warning" hidden>
-            Circle detection found no plate, so the fallback circle was used. Check the green circle
-            matches the plate edge before using these sizes.
-          </p>
+          <p class="status-message error" id="dish-warning" hidden></p>
           <div class="table-wrapper">
-            <table class="kv-table">
-              <tbody id="dish-body"></tbody>
-            </table>
-          </div>
-
-          <h3 class="subsection-heading table-heading">Colonies</h3>
-          <div class="table-wrapper" id="colony-table-wrapper">
             <table>
               <thead>
                 <tr>
                   <th scope="col">#</th>
-                  <th scope="col">Longest span</th>
-                  <th scope="col">Equivalent diameter</th>
-                  <th scope="col">Area</th>
+                  <th scope="col">Photo</th>
+                  <th scope="col">Plate</th>
+                  <th scope="col">Found by</th>
+                  <th scope="col">Colonies</th>
+                  <th scope="col">Largest span</th>
+                  <th scope="col"><span class="visually-hidden">Details</span></th>
                 </tr>
               </thead>
-              <tbody id="colony-body"></tbody>
+              <tbody id="result-body"></tbody>
             </table>
           </div>
-          <div class="empty-state" id="colony-empty" hidden>
-            <p>No colony found.</p>
-          </div>
-          <p class="chart-note">Longest span: the farthest two points on the outline. Equivalent diameter: a circle of the same area.</p>
+          <p class="chart-note swarm-table-note">Longest span: the farthest two points on the outline. Equivalent diameter: a circle of the same area. View a photo to check its plate circle and colony outlines.</p>
         </div>
       </section>
 
@@ -161,10 +149,10 @@
         <p class="blocked-reason step-card-waiting" hidden></p>
 
         <div class="step-card-body">
-          <p class="plan-meta">Nothing is stored. Export before leaving the page.</p>
+          <p class="plan-meta">Nothing is stored. Export before leaving the page. The CSV holds every photo's colonies, one row each; each annotated photo is its own PNG.</p>
           <div class="button-row">
             <button type="button" id="export-csv">Export CSV</button>
-            <button type="button" class="btn-secondary" id="export-png">Export annotated photo (PNG)</button>
+            <button type="button" class="btn-secondary" id="export-png">Export annotated photos (PNG)</button>
           </div>
           <p class="status-message" id="export-status" aria-live="polite"></p>
         </div>
