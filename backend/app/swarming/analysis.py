@@ -45,17 +45,9 @@ class PhotoUnreadable(ValueError):
     """The upload could not be decoded as an image."""
 
 
-class PhotoTooLarge(ValueError):
-    """The upload has more pixels than OPENCV_IO_MAX_IMAGE_PIXELS (set in __init__.py)."""
-
-
 def decode_photo(data: bytes) -> np.ndarray:
-    """The upload as a BGR image, as `cv2.imread` would have read the file (turned upright by
-    its EXIF orientation, as both do)."""
-    try:
-        img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-    except cv2.error as error:  # OpenCV checks the pixel cap from the header, before decoding
-        raise PhotoTooLarge("The photo has more than 50 megapixels.") from error
+    """The upload as a BGR image, as `cv2.imread` would have read the file."""
+    img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise PhotoUnreadable("The file could not be read as an image.")
     return img

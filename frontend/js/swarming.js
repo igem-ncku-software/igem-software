@@ -6,12 +6,10 @@
 //
 // POST /api/swarming/analyze (multipart: "file", and "dish_diameter_mm", 93 if left out) answers:
 //   { dish: { x_px, y_px, radius_px, diameter_mm, method: "hough" | "contour" },
-//     mm_per_px, image: { width_px, height_px }, original: { width_px, height_px },
+//     mm_per_px, image: { width_px, height_px },
 //     colonies: [{ index, feret_mm, eq_diameter_mm, area_mm2 }],
 //     annotated_png: base64 PNG }
-// and an error's `detail` is shown to the user verbatim. A photo larger than 2000 px on its longest
-// side is shrunk to that before the analysis (to fit Render's free tier): `image` is the size
-// analysed, which the plate's pixel values refer to, and `original` the size uploaded.
+// and an error's `detail` is shown to the user verbatim.
 //
 // Nothing is stored: the CSV and the annotated PNG are the record. Needs the backend, unlike the
 // Plate Reader Assay, so a sleeping Render backend is said to be waking rather than broken.
@@ -183,11 +181,10 @@ function renderDetection() {
   const rows = [
     ["Diameter (entered)", `${dish.diameter_mm} mm`],
     ["Found by", dish.method === "hough" ? "Circle detection" : "Fallback: largest bright region"],
-    ["Photo", `${result.original.width_px} × ${result.original.height_px} px`],
-    ["Analysed at", `${result.image.width_px} × ${result.image.height_px} px`],
-    ["Centre", `(${dish.x_px}, ${dish.y_px}) px, analysed image`],
-    ["Radius", `${dish.radius_px} px, analysed image`],
-    ["Scale", `${fmt(result.mm_per_px, 4)} mm/px, analysed image`],
+    ["Centre", `(${dish.x_px}, ${dish.y_px}) px`],
+    ["Radius", `${dish.radius_px} px`],
+    ["Scale", `${fmt(result.mm_per_px, 4)} mm/px`],
+    ["Photo", `${result.image.width_px} × ${result.image.height_px} px`],
   ];
   const dishBody = document.getElementById("dish-body");
   dishBody.replaceChildren(...rows.map(([key, value]) => {
@@ -238,7 +235,7 @@ function csvCell(value) {
 }
 
 const CSV_HEADERS = [
-  "date", "strain", "condition", "incubation_h", "notes", "photo", "photo_width_px", "photo_height_px", "analysed_width_px", "analysed_height_px",
+  "date", "strain", "condition", "incubation_h", "notes", "photo", "photo_width_px", "photo_height_px",
   "dish_diameter_mm", "dish_found_by", "dish_x_px", "dish_y_px", "dish_radius_px", "mm_per_px",
   "colony", "feret_mm", "eq_diameter_mm", "area_mm2",
 ];
@@ -248,7 +245,7 @@ function exportCsv() {
   const info = experiment();
   const d = result.dish;
   const base = [
-    info.date, info.strain, info.condition, info.incubation, info.notes, photo.name, result.original.width_px, result.original.height_px, result.image.width_px, result.image.height_px,
+    info.date, info.strain, info.condition, info.incubation, info.notes, photo.name, result.image.width_px, result.image.height_px,
     d.diameter_mm, d.method, d.x_px, d.y_px, d.radius_px, result.mm_per_px,
   ];
   const colonies = result.colonies.length ? result.colonies : [null];

@@ -30,9 +30,8 @@ class Colony(BaseModel):
 
 
 class SwarmingResult(BaseModel):
-    dish: Dish                # pixel values are in `image`, the photo as analysed
-    mm_per_px: float          # likewise
-    image: PhotoSize          # as analysed: shrunk to router.MAX_ANALYSIS_SIDE_PX if larger
-    original: PhotoSize       # as uploaded
+    dish: Dish
+    mm_per_px: float
+    image: PhotoSize
     colonies: list[Colony]
     annotated_png: str  # base64
