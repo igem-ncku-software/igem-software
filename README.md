@@ -21,6 +21,12 @@ A biosensor that reports AHL through a fluorescent protein gives a signal, not a
 | **CAPTURE-Screen** | The team's reader (ESP32 + AS7341) | A live spectrum, then four pages used in order: check the instrument → calibrate tube by tube → review curves → measure samples in replicate. |
 | **Cross-Validation** | Both | The same samples from both instruments, paired by name: a log-log plot, the geometric mean ratio and Bland–Altman 95% limits of agreement. |
 
+Apart from AHL, a fourth tool measures a phenotype:
+
+| Tool | For | Result |
+|---|---|---|
+| **Swarming Assay** | A photo of a swarming plate | The plate is found and its known diameter (93 mm by default) sets the scale; each colony's longest span, equivalent diameter and area are measured, and the photo is returned annotated. Runs on the backend (Python, OpenCV). |
+
 Both instruments go through the same curve-fitting code, so the same readings give the same curve on either. Every value shown is a real reading: there is no simulated device or demo data.
 
 **Who it is for:** wet-lab members of iGEM teams and other labs working with a fluorescent biosensor (no programming needed, and the Plate Reader Assay works with any plate reader); teams building a low-cost fluorescence reader, who can reuse CAPTURE-Screen's firmware and [data model](docs/capture_screen_model.md); and developers extending the tools.
@@ -95,6 +101,10 @@ Runs, curves and batches are kept in the browser; the **Data** page backs them u
 
 Load a Plate Reader Assay CSV and a CAPTURE-Screen batch (from this browser or its CSV), with the same sample names on both. Export the comparison as CSV and PNG.
 
+### Swarming Assay
+
+Enter the date and strain, upload a photo of the plate taken from above, check the plate diameter, and press Analyse. Check that the green circle matches the plate edge, then export the CSV and the annotated photo.
+
 ## Reproducing the main results
 
 The repository ships no example dataset, because LasReader uses real readings only; every result is reproduced from its exported file.
@@ -102,6 +112,7 @@ The repository ships no example dataset, because LasReader uses real readings on
 - **Plate Reader Assay:** the CSV holds every reading with its well and exclusion reason. Enter the readings again, apply the same exclusions and fit; the curve and inferred AHL are recomputed by [`js/curve_fit.js`](frontend/js/curve_fit.js).
 - **CAPTURE-Screen curve:** with the instrument, follow Usage steps 1–4. Without it, open Calibrate → *Enter recorded data*, type in the recorded standards and blanks with the configuration they were read under, and fit. A curve can also be restored from the Data page's backup.
 - **Cross-Validation:** load the same two CSVs and the same dilution.
+- **Swarming Assay:** upload the same photo with the same plate diameter; the CSV records both. The analysis is deterministic, so the numbers come out the same.
 
 ## How it works
 
@@ -120,14 +131,16 @@ flowchart LR
     subgraph BE["backend/ — FastAPI (Render)"]
         HUB["/api/hardware<br/>status · read"]
         LIVE["/api/live<br/>live spectrum"]
+        SW["/api/swarming<br/>photo analysis (OpenCV)"]
     end
+    SWP["Swarming Assay page"] -->|HTTPS, photo upload| SW
     HW -->|HTTPS| HUB
     FE -->|WebSocket| LIVE
     DEV -->|WebSocket, device dials out| HUB
 ```
 
-- **All analysis runs in the browser**, in plain JavaScript modules, so the Plate Reader Assay and Cross-Validation work without the backend.
-- **The backend only relays the device.** CAPTURE-Screen dials out to the backend (so it works behind any lab router) and pages talk to the backend. Each measurement is dark → light → dark, about 3 s.
+- **AHL analysis runs in the browser**, in plain JavaScript modules, so the Plate Reader Assay and Cross-Validation work without the backend. The Swarming Assay is the exception: its image analysis is the team's Python/OpenCV code, run on the backend, which stores neither the photo nor the result.
+- **For CAPTURE-Screen, the backend only relays the device.** CAPTURE-Screen dials out to the backend (so it works behind any lab router) and pages talk to the backend. Each measurement is dark → light → dark, about 3 s.
 - **Statistics.** A 4-parameter logistic curve fitted by weighted Levenberg–Marquardt; LOD and LOQ from the blanks; inversion with a delta-method 95% CI. No concentration is shown outside a curve's usable range: the software never extrapolates. A CAPTURE-Screen curve only converts readings taken with the same strain and instrument configuration. Cross-Validation compares on the log scale (geometric mean ratio, Bland–Altman limits of agreement).
 
 Every equation and the reasoning behind it are in **[docs/capture_screen_model.md](docs/capture_screen_model.md)**.
@@ -136,7 +149,7 @@ Every equation and the reasoning behind it are in **[docs/capture_screen_model.m
 
 ```
 frontend/   static site: one HTML page and one script per tool, shared js/curve_fit.js
-backend/    FastAPI: app/hardware (device relay), app/live (live spectrum), tests/
+backend/    FastAPI: app/hardware (device relay), app/live (live spectrum), app/swarming (photo analysis), tests/
 firmware/   CAPTURE-Screen firmware (one Arduino sketch)
 docs/       CAPTURE-Screen data model
 scripts/    setup and run scripts (.sh and .ps1)
@@ -154,7 +167,7 @@ When the OLED shows `Web ok`, the device is online and the landing page shows it
 
 ```bash
 cd backend
-pytest        # 39 tests: device relay and live spectrum
+pytest        # 43 tests: device relay, live spectrum, swarming upload
 ```
 
 The firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen`.
@@ -176,7 +189,8 @@ Fork it freely. To add a plate reader format, convert it into the Plate Reader A
 
 LasReader is part of **iGEM NCKU-Tainan 2026** (National Cheng Kung University, Tainan, Taiwan).
 
-- **Software:** Yu-Chun Sung designed and wrote all of the software in this repository: the web app, the backend and the CAPTURE-Screen firmware.
+- **Software:** Yu-Chun Sung designed and wrote the software in this repository: the web app, the backend and the CAPTURE-Screen firmware, apart from the analysis below.
+- **Swarming image analysis:** Tzu-Chiao Chou wrote the colony-measurement code (`iGEM_cv.ipynb`) that [`backend/app/swarming/analysis.py`](backend/app/swarming/analysis.py) runs; Yu-Chun Sung integrated it into LasReader.
 - **Hardware:** the CAPTURE-Screen device was developed by other team members; see the wiki's [Hardware](https://2026.igem.wiki/ncku-tainan/hardware) page.
 
 All team members and their contributions are listed on the wiki's [Team](https://2026.igem.wiki/ncku-tainan/team) and [Attributions](https://2026.igem.wiki/ncku-tainan/attributions) pages. We thank the authors of the open-source libraries LasReader uses.

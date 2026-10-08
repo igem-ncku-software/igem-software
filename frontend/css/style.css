@@ -304,6 +304,12 @@ canvas { max-width: 100%; }
   border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid var(--accent);
 }
 .nav-card-bridged { width: calc(50% - 10px); margin: 0 auto; }
+/* Swarming, at the bottom of the page and apart from the AHL tools: a divider and its own
+   heading, then the card at full width. */
+.nav-hub-phenotype { margin-top: 40px; padding-top: 24px; border-top: 1px solid rgba(7,90,62,.25); }
+.nav-section-head { margin-bottom: 16px; }
+.nav-section-title { margin: 0 0 6px; font-family: var(--heading-font); font-weight: 700; font-size: 1.6rem; color: var(--text); }
+.nav-section-head .section-description { margin: 0; }
 @media (max-width: 720px) {
   /* Stacked: one short arrow from the two cards above. */
   .nav-grid { grid-template-columns: 1fr; }
@@ -311,6 +317,15 @@ canvas { max-width: 100%; }
   .nav-bridge-stub, .nav-bridge-join { display: none; }
   .nav-bridge-down { top: 4px; }
   .nav-card-bridged { width: 100%; }
+}
+
+/* Swarming Assay: the photo and the detection side by side, stacked on a phone. */
+.swarm-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 0 0 16px; }
+.swarm-images figure { margin: 0; }
+.swarm-images img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--solid); }
+.swarm-images figcaption { margin-top: 6px; color: var(--text-dim); font-size: .85rem; }
+@media (max-width: 720px) {
+  .swarm-images { grid-template-columns: 1fr; }
 }
 
 .nav-card {

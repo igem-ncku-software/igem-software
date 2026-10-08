@@ -5,11 +5,12 @@ from app.config import settings
 from app.plate_assay.router import router as plate_assay_router
 from app.hardware.router import router as hardware_router
 from app.live.router import router as live_router
+from app.swarming.router import router as swarming_router
 
 
 app = FastAPI(
     title="LasReader API",
-    description="Backend API for LasReader: plate reader assay and CAPTURE-Screen hardware.",
+    description="Backend API for LasReader: plate reader assay, CAPTURE-Screen hardware, and the swarming assay.",
     version="1.3.0",
 )
 
@@ -27,6 +28,8 @@ app.add_middleware(
 app.include_router(plate_assay_router)
 app.include_router(hardware_router)
 app.include_router(live_router)
+# Swarming Assay: one plate photo in, the colony measurements out
+app.include_router(swarming_router)
 
 
 @app.get("/")
@@ -40,6 +43,7 @@ def root() -> dict:
         "hardware_read": "POST /api/hardware/read",
         "hardware_device": "WS /api/hardware/device",
         "live_spectrum": "WS /api/live/spectrum",
+        "swarming_analyze": "POST /api/swarming/analyze",
     }
 
 
