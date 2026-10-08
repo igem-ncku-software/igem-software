@@ -152,8 +152,9 @@ const allAnalysed = () => photos.length > 0 && photos.every((p) => p.state === "
 
 // Numbers every replicate the user hasn't typed, in table order, within its strain and
 // condition: the lowest number that group hasn't used. A typed replicate keeps its number and
-// reserves it. Run after every change to strain, condition, replicate or the photo list, so a
-// photo whose strain is changed starts at 1 in its new group instead of keeping its old number.
+// reserves it. A photo without a strain belongs to no group yet and is 1. Run after every
+// change to strain, condition, replicate or the photo list, so a photo whose strain is changed
+// starts at 1 in its new group instead of keeping its old number.
 function renumberReplicates() {
   const used = new Map();
   const take = (p) => {
@@ -166,6 +167,10 @@ function renumberReplicates() {
   }
   for (const p of photos) {
     if (!p.replicateAuto) continue;
+    if (!p.strain.trim()) {
+      p.replicate = "1";
+      continue;
+    }
     const taken = take(p);
     let n = 1;
     while (taken.has(n)) n++;
@@ -187,13 +192,9 @@ function addPhotos(files) {
     } else if (photos.length >= SWARMING_MAX_PHOTOS) {
       skipped.push(`${file.name} (at most ${SWARMING_MAX_PHOTOS} photos per batch)`);
     } else {
-      // A new photo starts from the previous one's strain and condition, as the next replicate
-      // (several added before any strain is typed are numbered 1, 2, 3...).
-      const last = photos[photos.length - 1];
-      const strain = last?.strain ?? "";
-      const condition = last?.condition ?? "";
+      // A new photo starts blank, replicate 1; it is numbered once its strain is typed.
       photos.push({
-        id: nextPhotoId++, file, strain, condition,
+        id: nextPhotoId++, file, strain: "", condition: "",
         replicate: "", replicateAuto: true,
         state: "pending", result: null, error: null, url: null,
       });
