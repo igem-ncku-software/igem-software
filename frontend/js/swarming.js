@@ -6,7 +6,9 @@
 //
 // POST /api/swarming/analyze (multipart: "file", and "dish_diameter_mm", 93 if left out) answers:
 //   { dish: { x_px, y_px, radius_px, diameter_mm, method: "hough" | "contour" },
-//     mm_per_px, image: { width_px, height_px },
+//     mm_per_px, mode: "normal" | "uv", purple_fraction,
+//     threshold: { otsu, loose, core, uv_base, uv_peak, uv_thr } (the other mode's are null),
+//     image: { width_px, height_px },
 //     colonies: [{ index, feret_mm, eq_diameter_mm, area_mm2 }],
 //     annotated_png: base64 PNG }
 // and an error's `detail` is shown to the user verbatim. One photo per request: the backend runs
@@ -372,12 +374,22 @@ function simpleTable(className, headers, rows) {
   return wrap;
 }
 
+const MODE_TEXT = { normal: "Normal", uv: "UV" };
+
+// The thresholds of the mode that ran, as the notebook labelled them.
+function thresholdText(r) {
+  const t = r.threshold;
+  return r.mode === "uv"
+    ? `G/B base ${fmt(t.uv_base, 2)}, peak ${fmt(t.uv_peak, 2)}, threshold ${fmt(t.uv_thr, 2)}`
+    : `Otsu ${fmt(t.otsu, 0)}, loose ${fmt(t.loose, 0)}, core ${fmt(t.core, 0)}`;
+}
+
 // One photo opened: the photo and the detection side by side, then its plate and colonies.
 function detailRow(p) {
   const r = p.result;
   const tr = el("tr", "detail-row");
   const td = el("td");
-  td.colSpan = 7;
+  td.colSpan = 8;
 
   if (!p.url) p.url = URL.createObjectURL(p.file);
   const images = el("div", "swarm-images");
@@ -408,6 +420,9 @@ function detailRow(p) {
     ["Centre", `(${r.dish.x_px}, ${r.dish.y_px}) px`],
     ["Radius", `${r.dish.radius_px} px`],
     ["Scale", `${fmt(r.mm_per_px, 4)} mm/px`],
+    ["Mode", MODE_TEXT[r.mode]],
+    ["Blue-purple share", `${fmt(r.purple_fraction * 100, 1)} % (UV above 35 %)`],
+    ["Thresholds", thresholdText(r)],
     ["Photo", `${r.image.width_px} × ${r.image.height_px} px`],
   ].map(([key, value]) => {
     const row = el("tr");
@@ -488,6 +503,7 @@ function renderDetection() {
       el("td", null, p.file.name),
       el("td", null, photoLabel(p)),
       plate,
+      el("td", null, MODE_TEXT[r.mode]),
       el("td", null, String(r.colonies.length)),
       el("td", null, r.colonies.length ? `${fmt(largest, 2)} mm` : "--"),
       action,
@@ -533,6 +549,7 @@ const CSV_HEADERS = [
   "date", "strain", "condition", "replicate", "incubation_h", "notes",
   "photo_number", "photo", "photo_width_px", "photo_height_px",
   "dish_diameter_mm", "dish_found_by", "dish_x_px", "dish_y_px", "dish_radius_px", "mm_per_px",
+  "mode", "purple_fraction", "otsu_threshold", "loose_threshold", "core_threshold", "uv_base", "uv_peak", "uv_threshold",
   "colony", "feret_mm", "eq_diameter_mm", "area_mm2",
 ];
 
@@ -548,6 +565,8 @@ function exportCsv() {
       info.date, p.strain.trim(), p.condition.trim(), Number(p.replicate), info.incubation, info.notes,
       photoNumber(p), p.file.name, r.image.width_px, r.image.height_px,
       d.diameter_mm, d.method, d.x_px, d.y_px, d.radius_px, r.mm_per_px,
+      r.mode, r.purple_fraction, r.threshold.otsu, r.threshold.loose, r.threshold.core,
+      r.threshold.uv_base, r.threshold.uv_peak, r.threshold.uv_thr,
     ];
     const colonies = r.colonies.length ? r.colonies : [null];
     for (const c of colonies) rows.push([...base, c?.index, c?.feret_mm, c?.eq_diameter_mm, c?.area_mm2]);

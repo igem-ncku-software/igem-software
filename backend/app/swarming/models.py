@@ -17,6 +17,19 @@ class Dish(BaseModel):
     method: Literal["hough", "contour"]
 
 
+class Threshold(BaseModel):
+    """The thresholds of the mode that ran (the notebook's `thr_label`); the other mode's are None."""
+
+    # Normal mode, on the background-corrected gray scaled to 0-255.
+    otsu: float | None = None
+    loose: float | None = None
+    core: float | None = None
+    # UV mode, on the blurred G/B ratio.
+    uv_base: float | None = None
+    uv_peak: float | None = None
+    uv_thr: float | None = None
+
+
 class PhotoSize(BaseModel):
     width_px: int
     height_px: int
@@ -32,6 +45,11 @@ class Colony(BaseModel):
 class SwarmingResult(BaseModel):
     dish: Dish
     mm_per_px: float
+    # "uv": blue-purple pixels are over UV_FRAC_THRESHOLD of the photo, so colonies are found by
+    # their G/B ratio; "normal": Otsu with the core filter.
+    mode: Literal["normal", "uv"]
+    purple_fraction: float
+    threshold: Threshold
     image: PhotoSize
     colonies: list[Colony]
     annotated_png: str  # base64

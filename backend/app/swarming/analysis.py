@@ -10,8 +10,10 @@ their values. Only the input and output changed to fit a web request:
   (`cv2.imread`); both read it as 3-channel BGR;
 - `ACTUAL_DISH_DIAMETER_MM` is an argument, defaulting to the notebook's 93 mm, since a plate
   of another size would scale every result wrongly;
-- what the notebook printed (plate, scale, the colony table, "Hough found no plate") and the
-  figure it showed are returned instead: the numbers as a dict, the annotated image as PNG bytes.
+- what the notebook printed (plate, scale, the purple fraction and the mode it chose, the colony
+  table, "Hough found no plate") and the figure it showed are returned instead: the numbers as a
+  dict, the annotated image as PNG bytes. The thresholds the notebook kept in `thr_label` (but
+  did not print) are returned too, as numbers.
 
 Changing a formula, threshold or rule here changes every result, so keep it the notebook's.
 """
@@ -26,8 +28,8 @@ import numpy as np
 # ==========================================
 INNER_RATIO = 0.90          # detection area as a share of the plate radius; widen for many colonies
 SIGMA_RATIO = 0.15          # background blur; larger for large colonies
-USE_OTSU = True             # True: automatic threshold; False: PERCENTILE
-PERCENTILE = 94
+USE_OTSU = True             # defined in the notebook, not used by it
+PERCENTILE = 94             # defined in the notebook, not used by it
 MIN_AREA_PX = 500
 MIN_CIRCULARITY = 0.3       # defined in the notebook, not used by it
 MAX_COLONIES = 10
@@ -35,6 +37,10 @@ SHOW_DEBUG = True
 SCALE_BAR_MM = 10
 RED = (0, 0, 255)
 ACTUAL_DISH_DIAMETER_MM = 93
+
+# Purple / UV background detection.
+UV_FRAC_THRESHOLD = 0.35    # blue-purple pixels above this share of the whole photo -> UV
+UV_HALF = 0.5               # UV-mode threshold position between background and colony peak, 0.4-0.6
 
 # Watershed: split only regions that don't look like one colony.
 SPLIT_SOLIDITY = 0.80       # below this, something is stuck to it and it is split
@@ -56,7 +62,7 @@ def decode_photo(data: bytes) -> np.ndarray:
 def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) -> dict:
     """Find the plate and the colonies in a BGR photo and measure each colony.
 
-    Returns {dish, mm_per_px, image, colonies, annotated_png}: see swarming.js for the shape.
+    Returns {dish, mm_per_px, mode, purple_fraction, threshold, image, colonies, annotated_png}: see swarming.js for the shape.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -92,6 +98,14 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
     mm_per_px = dish_diameter_mm / (dish_r * 2)
 
     # ==========================================
+    # Is the background purple / UV?
+    # ==========================================
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    Hh, Ss, Vv = cv2.split(hsv)
+    purple_frac = ((Hh >= 100) & (Hh <= 165) & (Ss > 50) & (Vv > 40)).mean()
+    IS_UV = purple_frac > UV_FRAC_THRESHOLD
+
+    # ==========================================
     # Step 2: colony detection (background correction + Otsu + watershed)
     # ==========================================
     inner_r = int(dish_r * INNER_RATIO)
@@ -106,16 +120,52 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
     bg = cv2.GaussianBlur(filled, (0, 0), w * SIGMA_RATIO)
     corrected = cv2.GaussianBlur(gray_f - bg, (9, 9), 0)
 
-    if USE_OTSU:
+    if IS_UV:
+        # ---------- UV mode: the G/B ratio finds the cyan-green regions ----------
+        b, g, r = [c.astype(np.float32) for c in cv2.split(img)]
+        ratio = g / (b + 1.0)
+        ratio = cv2.GaussianBlur(ratio, (0, 0), max(1.5, dish_r * 0.005))
+
+        vals = ratio[inside]
+        base = np.median(vals)
+        peak = np.percentile(vals, 99.8)
+        uv_thr = base + UV_HALF * (peak - base)
+
+        thresh = ((ratio > uv_thr) & inside).astype(np.uint8) * 255
+        corrected = ratio
+        threshold = {"uv_base": float(base), "uv_peak": float(peak), "uv_thr": float(uv_thr)}
+
+    else:
+        # ---------- Normal mode: Otsu + core filter ----------
         vals = corrected[inside]
         lo, hi = np.percentile(vals, [1, 99.5])
         norm = np.clip((corrected - lo) / (hi - lo + 1e-6) * 255, 0, 255).astype(np.uint8)
         otsu_thr, _ = cv2.threshold(norm[inside].reshape(-1, 1), 0, 255,
                                     cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        thresh = ((norm > otsu_thr*0.95) & inside).astype(np.uint8) * 255
-    else:
-        thr = np.percentile(corrected[inside], PERCENTILE)
-        thresh = ((corrected > thr) & inside).astype(np.uint8) * 255
+
+        # Loose outline: Otsu raised a little
+        loose_thr = otsu_thr * 1.1
+        loose = ((norm > loose_thr) & inside).astype(np.uint8) * 255
+
+        # Core: pixels far above Otsu (a colony always has some, a reflection doesn't)
+        core_thr = otsu_thr + 0.6 * (255 - otsu_thr)
+        core = ((norm > core_thr) & inside).astype(np.uint8) * 255
+
+        # Fill holes
+        cnts, _ = cv2.findContours(loose, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled = np.zeros_like(loose)
+        cv2.drawContours(filled, cnts, -1, 255, -1)
+        loose = filled
+
+        # Keep only the connected regions that contain core
+        n_l, lab_l = cv2.connectedComponents(loose)
+        thresh = np.zeros_like(loose)
+        for l in range(1, n_l):
+            comp = lab_l == l
+            if (core[comp] > 0).sum() >= 30:
+                thresh[comp] = 255
+
+        threshold = {"otsu": float(otsu_thr), "loose": float(loose_thr), "core": float(core_thr)}
 
     # ---------- Morphology ----------
     k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
@@ -260,6 +310,9 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
             "method": dish_method,
         },
         "mm_per_px": float(mm_per_px),
+        "mode": "uv" if IS_UV else "normal",
+        "purple_fraction": float(purple_frac),
+        "threshold": threshold,
         "image": {"width_px": int(w), "height_px": int(h)},
         "colonies": [
             {"index": idx, "feret_mm": float(f), "eq_diameter_mm": float(e), "area_mm2": float(a)}
