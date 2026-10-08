@@ -847,9 +847,6 @@ tr.detail-row td, tr.detail-row:hover td { white-space: normal; background: var(
 /* Plate import: an 8 x 12 map of wells. Each well is a small button showing its mark and value;
    the global button styles (44 px, solid mint) are undone here so 96 of them fit. The map sits in a
    .table-wrapper, so it is already on white. */
-.plate-import { margin-top: 14px; }
-.plate-import summary { width: fit-content; color: var(--accent); font-weight: 700; cursor: pointer; }
-.plate-import summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .plate-import textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--fs-label); white-space: pre; }
 .plate-grid { width: auto; min-width: 0; border-collapse: separate; border-spacing: 3px; }
 .plate-grid th, .plate-grid td { padding: 0; border: 0; background: none; text-align: center; }

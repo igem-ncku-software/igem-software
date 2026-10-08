@@ -81,19 +81,29 @@
                 Fluorescence ÷ OD600
               </label>
             </div>
-            <p class="plan-meta">
-              Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution factor (≥ 1, e.g. 10 for 1:10).
-              Paste a block from Excel into any cell.
-            </p>
             <p class="plan-meta" id="od-note" hidden>
               F and OD of each replicate come from the same well. Medium blank: medium only, no cells;
               its mean F and OD are subtracted from every well before dividing.
             </p>
+          </fieldset>
+
+          <fieldset class="plain-fieldset">
+            <legend>Enter by</legend>
+            <div class="radio-row" role="radiogroup" aria-label="How the readings are entered">
+              <label class="check-field">
+                <input type="radio" name="entry-method" value="plate" checked />
+                Pasting a plate (8 &times; 12)
+              </label>
+              <label class="check-field">
+                <input type="radio" name="entry-method" value="table" />
+                Typing the table
+              </label>
+            </div>
 
             <!-- Import from a plate: the 8 x 12 block any reader exports, marked well by well, then
-                 turned into the table below (js/plate_layout.js). -->
-            <details class="plate-import" id="plate-import">
-              <summary>Import from a plate (8 &times; 12)</summary>
+                 turned into the table below (js/plate_layout.js). The table stays the one format. -->
+            <div class="plate-import" id="plate-import">
+              <h3 class="subsection-heading table-heading">Paste the plate</h3>
               <p class="plan-meta">Paste the plate as the reader exports it, with or without row letters and column numbers.</p>
               <div class="form-grid">
                 <div class="field">
@@ -146,7 +156,13 @@
               <button type="button" id="plate-fill-button">Fill the table (replaces it)</button>
               <p class="blocked-reason" id="plate-fill-reason" hidden></p>
               <p class="status-message" id="plate-fill-status" aria-live="polite"></p>
-            </details>
+            </div>
+
+            <h3 class="subsection-heading table-heading">The table</h3>
+            <p class="plan-meta">
+              Standard: AHL in nM, 0 for blanks (cells, no AHL). Sample: a unique name and its dilution factor (≥ 1, e.g. 10 for 1:10).
+              Paste a block from Excel into any cell.
+            </p>
             <div class="table-wrapper table-spaced">
               <table class="manual-table assay-table">
                 <thead id="entry-head"></thead>

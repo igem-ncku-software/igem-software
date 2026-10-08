@@ -336,6 +336,13 @@ function renderPlateMode() {
   renderPlate();
 }
 
+// Entering by plate shows the import above the table; typing hides it. The table always shows,
+// since the import only fills it. Hidden marks and pasted text are kept.
+function renderEntryMethod() {
+  const plate = document.querySelector('input[name="entry-method"]:checked').value === "plate";
+  document.getElementById("plate-import").hidden = !plate;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   for (const id of ["plate-f", "plate-od"]) {
     document.getElementById(id).addEventListener("input", () => {
@@ -357,5 +364,9 @@ document.addEventListener("DOMContentLoaded", () => {
   for (const radio of document.querySelectorAll('input[name="signal-mode"]')) {
     radio.addEventListener("change", renderPlateMode);
   }
+  for (const radio of document.querySelectorAll('input[name="entry-method"]')) {
+    radio.addEventListener("change", renderEntryMethod);
+  }
+  renderEntryMethod();
   renderPlateMode();
 });
