@@ -203,7 +203,8 @@ function renderPath() {
   else setNode("backend", { text: "Reachable", tone: "ok", sub: backendName() });
 
   if (link === "online") {
-    setNode("device", { text: "Online", tone: "ok", sub: `Heartbeat ${formatClockTime(new Date(status.last_seen))}` });
+    setNode("device", { text: "Online", tone: "ok",
+      sub: `${HardwareProcessing.readerName(status.device_id)} · heartbeat ${formatClockTime(new Date(status.last_seen))}` });
   } else if (link === "offline") {
     setNode("device", { text: "Offline", tone: "error", sub: deviceLastSeen() });
   } else if (link === "invalid") {
@@ -261,13 +262,17 @@ function ledNode(status) {
 function renderConfig(tbody, status) {
   const { config } = status;
   const rows = [
-    ["LED current", `${config.led_current_mA} mA`, "Firmware constant, bench-measured"],
+    // The 3D-printed build's firmware reports 0 until its LED current is filled in, and refuses reads.
+    ["LED current", `${config.led_current_mA} mA`, config.led_current_mA === 0
+      ? "Not measured yet: reads are refused until it is set in the firmware"
+      : "Firmware constant, bench-measured"],
     ["Gain", `${config.gain}×`, "AS7341 analog gain"],
     ["ATIME / ASTEP", `${config.atime} / ${config.astep}`, "AS7341 integration registers"],
     ["Integration time", `${HardwareProcessing.integrationTimeMs(config).toFixed(2)} ms`, "(ATIME + 1) × (ASTEP + 1) × 2.78 µs"],
     ["Full scale", `${formatCounts(HardwareProcessing.fullScaleCounts(config))} counts`, "min(65535, (ATIME + 1) × (ASTEP + 1))"],
     ["Build ID", config.build_id, "Hardware and reading-path revision"],
     ["Config fingerprint", config.fingerprint, "Hash of LED current, gain, ATIME, ASTEP and build ID; curves are bound to it"],
+    ["Reader", HardwareProcessing.readerName(status.device_id), "Which CAPTURE-Screen build is connected"],
     ["Device ID", status.device_id, "This unit's assigned name"],
     ["Wi-Fi signal", `${status.wifi_rssi} dBm`, "Signal strength at the device"],
     ["Uptime", formatUptime(status.uptime_ms), "Since the device last started"],

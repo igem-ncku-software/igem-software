@@ -150,27 +150,36 @@ Every equation and the reasoning behind it are in **[docs/capture_screen_model.m
 ```
 frontend/   static site: one HTML page and one script per tool, shared js/curve_fit.js
 backend/    FastAPI: app/hardware (device relay), app/live (live spectrum), app/swarming (photo analysis), tests/
-firmware/   CAPTURE-Screen firmware (one Arduino sketch)
+firmware/   CAPTURE-Screen firmware: one Arduino sketch per build
 docs/       CAPTURE-Screen data model
 scripts/    setup and run scripts (.sh and .ps1)
 ```
 
 ## Hardware: CAPTURE-Screen
 
-1. In the Arduino IDE, install ESP32 board support (core 3.3.8) and the libraries DFRobot_AS7341 1.0.0, Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6, Adafruit BusIO 1.17.4, ArduinoJson 7.4.3 and WebSockets 2.7.2 (Markus Sattler).
-2. Copy `firmware/capture_screen/secrets.h.example` to `secrets.h` and enter your 2.4 GHz Wi-Fi name and password (`secrets.h` is never committed).
-3. Flash `firmware/capture_screen/capture_screen.ino` to an ESP32 Dev Module.
+CAPTURE-Screen has two builds, each with its own sketch. Both speak the same protocol, so every page works with either; one is connected at a time, and each has its own build ID, so a curve made on one never converts the other's readings.
 
-When the OLED shows `Web ok`, the device is online and the landing page shows its live spectrum. If not, the Serial Monitor (115200) shows `[wifi]` and `[backend]` lines. To use a local backend instead, set `BACKEND_HOST`, `BACKEND_PORT` and `BACKEND_USE_TLS` in `secrets.h`.
+| Build | Sketch | Has |
+|---|---|---|
+| Laser-cut | `firmware/capture_screen/` | OLED status display, Live button on GPIO 13 |
+| 3D-printed | `firmware/capture_screen_3d/` | No display or button: Live is switched from the website |
+
+1. In the Arduino IDE, install ESP32 board support (core 3.3.8) and the libraries DFRobot_AS7341 1.0.0, ArduinoJson 7.4.3 and WebSockets 2.7.2 (Markus Sattler); the laser-cut build also needs Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6 and Adafruit BusIO 1.17.4.
+2. In the build's folder, copy `secrets.h.example` to `secrets.h` and enter your 2.4 GHz Wi-Fi name and password (`secrets.h` is never committed).
+3. Flash the build's `.ino` to an ESP32 Dev Module.
+
+When the device is online, the landing page names the build and shows its live spectrum (the laser-cut build's OLED also shows `Web ok`). If not, the Serial Monitor (115200) shows `[wifi]` and `[backend]` lines. To use a local backend instead, set `BACKEND_HOST`, `BACKEND_PORT` and `BACKEND_USE_TLS` in `secrets.h`.
+
+**3D-printed build: measure its LED current first.** Its sketch ships with `LED_CURRENT_MA` at 0, which means "not measured", and refuses every read until it is set (Live still works). Switch Live on so the LED stays lit, measure the DC voltage across R1 with a multimeter, divide by R1's resistance (217 Ω measured), enter the result in mA to three decimals, and flash again. The value feeds the config fingerprint every calibration curve is bound to, so make no curves before it is set. This build kept its radio off under its earlier serial firmware, because a Wi-Fi transmit burst can pull on the supply the LED shares; the sketch sends nothing during a read, and the self-check's dark stability and repeated reads of one cuvette are how to confirm on the bench that Wi-Fi doesn't show in the readings.
 
 ## Testing
 
 ```bash
 cd backend
-pytest        # 45 tests: device relay, live spectrum, swarming upload
+pytest        # 46 tests: device relay, live spectrum, swarming upload
 ```
 
-The firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen`.
+Each build's firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 firmware/capture_screen` (or `firmware/capture_screen_3d`).
 
 ## Known limitations
 

@@ -281,6 +281,8 @@ function renderLive() {
   empty.hidden = !message && !liveStreaming;
   // No new frames arrive during a measurement: the chart and F4 fade, so the last frame doesn't look like a current value.
   liveEl("live-spectrum").closest(".live-card").classList.toggle("is-paused", liveStreaming && liveDevice?.state === "MEASURING");
+  // Which of the two builds this is, once the device has reported (one is connected at a time).
+  setLiveText("live-reader", liveDevice ? `CAPTURE-Screen · ${HardwareProcessing.readerName(liveDevice.device_id)}` : "CAPTURE-Screen");
   renderSettings();
 }
 

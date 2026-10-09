@@ -65,19 +65,20 @@ Every stored measurement comes from one `POST /api/hardware/read`. The firmware 
 
 | Frame | LED | Settle before reading |
 |---|---|---|
-| `dark_1` | off | 50 ms (`DARK_SETTLE_MS`) |
+| `dark_1` | off | 50 ms (`DARK_SETTLE_MS`); 100 ms (`TX_QUIET_MS`) on the 3D-printed build |
 | `light` | on | 100 ms (`LIGHT_SETTLE_MS`) |
 | `dark_2` | off | 50 ms |
 
 The LED is on only during the `light` frame. This limits heating and photobleaching of the sample. The dark frames on either side measure everything that is not LED-excited fluorescence: ambient light leaking into the chamber, sensor offset, and the drift between the two dark frames.
 
-The sensor settings at boot are:
+CAPTURE-Screen has two builds, each with its own firmware and the same protocol: the laser-cut build ([`capture_screen.ino`](../firmware/capture_screen/capture_screen.ino)) and the 3D-printed build ([`capture_screen_3d.ino`](../firmware/capture_screen_3d/capture_screen_3d.ino)). On the 3D-printed build nothing is sent during a read, and the first dark read waits `TX_QUIET_MS` after the last message, to keep the firmware's own Wi-Fi traffic out of the readings. The sensor settings at boot are:
 
-| Setting | Value | Consequence |
-|---|---|---|
-| Gain | 512× (register code 10) | |
-| ATIME, ASTEP | 59, 999 | Integration time (59+1)(999+1) × 2.78 µs ≈ **166.8 ms**; full scale (59+1)(999+1) = **60 000 counts** |
-| LED current | 5.553 mA | Bench-measured on 2026-08-25. The firmware cannot read it back, so it is a constant. |
+| Setting | Laser-cut build | 3D-printed build | Consequence |
+|---|---|---|---|
+| Gain | 512× (register code 10) | 512× (register code 10) | |
+| ATIME, ASTEP | 59, 999 | 255, 280 | Integration time (ATIME+1)(ASTEP+1) × 2.78 µs ≈ **166.8 ms** / **200.0 ms**; full scale min(65535, (ATIME+1)(ASTEP+1)) = **60 000** / **65 535 counts** |
+| LED current | 5.553 mA | Not yet measured | Bench-measured; the firmware cannot read it back, so it is a constant. The 3D-printed build reports 0 and refuses every read until its value is entered. |
+| Build ID | `P1-PROTO-01` | `3D-V2-01` | Part of the config fingerprint (§5), so a curve made on one build never converts the other's readings. |
 
 Live-stream frames (`mode: "live"`) are never turned into Measurements. They have no dark frames, so they carry the ambient background, and `toMeasurement()` refuses any reading whose `mode` isn't `"measurement"`.
 
@@ -203,7 +204,7 @@ canonical   = LED current to 3 decimals | gain | atime | astep | build_id     (j
 fingerprint = first 6 hex digits of FNV-1a-32( UTF-8(canonical) )
 ```
 
-With the default settings the canonical string is `5.553|512|59|999|<build_id>`. The order and formatting are fixed: the firmware sends `led_current_mA` as a 3-decimal string, and a future backend must reproduce the same string exactly. The emission filter is part of the `HardwareConfig` contract but is not in the fingerprint yet, because the firmware doesn't know which filter is installed.
+With the laser-cut build's default settings the canonical string is `5.553|512|59|999|P1-PROTO-01`. The order and formatting are fixed: the firmware sends `led_current_mA` as a 3-decimal string, and a future backend must reproduce the same string exactly. The emission filter is part of the `HardwareConfig` contract but is not in the fingerprint yet, because the firmware doesn't know which filter is installed.
 
 ---
 
@@ -582,4 +583,4 @@ Dark level and light − dark stay informational until a baseline has been measu
 | Batch estimates | `localGroupEstimate`, `recordBatchReading` | `hardware_local.js` |
 | Curve usability | `curveBlockReason` | [`hardware_common.js`](../frontend/js/hardware_common.js) |
 | Self-check grading | `analyzeSelfCheck` | [`hardware.js`](../frontend/js/hardware.js) |
-| Acquisition timing | measurement sequence, `DARK_SETTLE_MS`, `LIGHT_SETTLE_MS` | [`capture_screen.ino`](../firmware/capture_screen/capture_screen.ino) |
+| Acquisition timing | measurement sequence, `DARK_SETTLE_MS`, `LIGHT_SETTLE_MS` (and `TX_QUIET_MS` on the 3D-printed build) | [`capture_screen.ino`](../firmware/capture_screen/capture_screen.ino), [`capture_screen_3d.ino`](../firmware/capture_screen_3d/capture_screen_3d.ino) |

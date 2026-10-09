@@ -52,6 +52,17 @@ const HardwareProcessing = (() => {
     return Math.min(ADC_MAX_COUNTS, (config.atime + 1) * (config.astep + 1));
   }
 
+  // The two CAPTURE-Screen builds, by the device_id their firmware sends (firmware/capture_screen
+  // and firmware/capture_screen_3d). One is connected at a time; an unknown id is shown as it is.
+  const READER_NAMES = {
+    "capture-screen-p1": "Laser-cut build",
+    "capture-screen-3d": "3D-printed build",
+  };
+
+  function readerName(deviceId) {
+    return READER_NAMES[deviceId] ?? deviceId ?? null;
+  }
+
   function countsToBasic(counts, config) {
     return counts / (config.gain * integrationTimeMs(config));
   }
@@ -284,6 +295,7 @@ const HardwareProcessing = (() => {
     integrationTimeMs,
     fullScaleCounts,
     countsToBasic,
+    readerName,
     toHardwareConfig,
     validateDeviceStatus,
     validateDeviceReading,

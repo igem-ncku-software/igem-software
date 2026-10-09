@@ -1,8 +1,8 @@
 """Data contracts between the CAPTURE-Screen firmware, this backend, and the browser.
 
-Field names match the JSON that firmware/capture_screen/capture_screen.ino sends and the
-validators in frontend/js/hardware_processing.js. Renaming one means
-changing all three.
+Field names match the JSON that both firmwares send (firmware/capture_screen, the laser-cut
+build, and firmware/capture_screen_3d, the 3D-printed build) and the validators in
+frontend/js/hardware_processing.js. Renaming one means changing all four.
 """
 
 from datetime import datetime

@@ -166,6 +166,23 @@ def test_a_sensor_offline_read_says_so_in_words():
     asyncio.run(scenario())
 
 
+def test_an_unmeasured_led_current_read_says_so_in_words():
+    # The 3D-printed build's firmware refuses reads until its LED current is filled in.
+    async def scenario():
+        hub, device = await connected_hub()
+        read = asyncio.create_task(hub.read())
+        command = await next_command(device)
+        await hub.handle_device_message(
+            device,
+            json.dumps({"mode": "error", "request_id": command["request_id"], "error": "led_current_unmeasured"}),
+        )
+        with pytest.raises(DeviceError, match="LED current hasn't been measured") as caught:
+            await read
+        assert "led_current_unmeasured" not in str(caught.value)
+
+    asyncio.run(scenario())
+
+
 def test_read_times_out_when_the_device_never_answers():
     async def scenario():
         hub, _ = await connected_hub(read_timeout_s=0.05)

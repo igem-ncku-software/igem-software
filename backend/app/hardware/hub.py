@@ -181,6 +181,15 @@ class DeviceHub:
             future.set_exception(DeviceBusy("CAPTURE-Screen is busy. Try again."))
         elif error == "sensor_offline":
             future.set_exception(DeviceError("The AS7341 sensor isn't responding. Check its I2C wiring."))
+        elif error == "led_current_unmeasured":
+            # firmware/capture_screen_3d refuses reads until its LED current is measured, since
+            # the current feeds the config fingerprint every curve is bound to.
+            future.set_exception(
+                DeviceError(
+                    "This reader's LED current hasn't been measured yet, so it refuses reads. "
+                    "Enter the measured value in its firmware and flash it again."
+                )
+            )
         else:
             future.set_exception(DeviceError(f"CAPTURE-Screen rejected the read: {error[:80]}"))
 
