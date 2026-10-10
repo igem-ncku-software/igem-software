@@ -37,8 +37,16 @@ MIN_CIRCULARITY = 0.3       # defined in the notebook, not used by it
 MAX_COLONIES = 10
 SHOW_DEBUG = True
 SCALE_BAR_MM = 10
-RED = (0, 0, 255)
 ACTUAL_DISH_DIAMETER_MM = 93
+
+# Annotation colours (BGR)
+TEXT_COLOR = (255, 255, 255)         # label text
+TEXT_OUTLINE_COLOR = (0, 0, 0)       # label outline
+DIM_LINE_COLOR = (0, 0, 255)         # measurement lines and scale bar
+DISH_CIRCLE_COLOR = (0, 255, 0)      # plate circle
+COLONY_CONTOUR_COLOR = (0, 255, 255) # colony outlines
+
+FONT_STYLE = cv2.FONT_HERSHEY_SIMPLEX
 
 # Purple / UV background detection.
 UV_FRAC_THRESHOLD = 0.35    # blue-purple pixels above this share of the whole photo -> UV
@@ -258,6 +266,8 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
 
     def centroid(c):
         m = cv2.moments(c)
+        if m["m00"] == 0:
+            return (0, 0)
         return (m["m10"] / m["m00"], m["m01"] / m["m00"])
     colonies = sorted(colonies, key=lambda c: (round(centroid(c)[1] / (dish_r * 0.4)), centroid(c)[0]))
 
@@ -267,24 +277,24 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
     output = img.copy()
     thick = max(2, int(w / 800 * 3))
     font_scale = w / 800 * 0.8
-    tt = max(2, int(w / 800 * 2))                  # red text thickness
-    outline = tt * 5                               # black outline thickness
+    tt = max(2, int(w / 400 * 1))                  # text stroke thickness
+    outline = tt * 3                               # outline stroke thickness
 
-    def put_text(im, text, pos, scale=font_scale, color=RED):
-        cv2.putText(im, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), outline, cv2.LINE_AA)  # black outline
-        cv2.putText(im, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, color, tt, cv2.LINE_AA)            # red text
+    def put_text(im, text, pos, scale=font_scale, color=TEXT_COLOR):
+        cv2.putText(im, text, pos, FONT_STYLE, scale, TEXT_OUTLINE_COLOR, outline, cv2.LINE_AA)  # outline
+        cv2.putText(im, text, pos, FONT_STYLE, scale, color, tt, cv2.LINE_AA)                    # text
 
     def draw_dimension(im, p1, p2, label, offset):
         p1, p2 = np.array(p1, float), np.array(p2, float)
-        cv2.line(im, tuple(p1.astype(int)), tuple(p2.astype(int)), RED, thick)
+        cv2.line(im, tuple(p1.astype(int)), tuple(p2.astype(int)), DIM_LINE_COLOR, thick)
         v = (p2 - p1) / (np.linalg.norm(p2 - p1) + 1e-6)
         n = np.array([-v[1], v[0]]) * (8 * w / 800)
         for p in (p1, p2):
-            cv2.line(im, tuple((p - n).astype(int)), tuple((p + n).astype(int)), RED, thick)
+            cv2.line(im, tuple((p - n).astype(int)), tuple((p + n).astype(int)), DIM_LINE_COLOR, thick)
         put_text(im, label, tuple(offset.astype(int)))
 
     if SHOW_DEBUG:
-        cv2.circle(output, (dish_x, dish_y), dish_r, (0, 255, 0), thick)
+        cv2.circle(output, (dish_x, dish_y), dish_r, DISH_CIRCLE_COLOR, thick)
 
     results = []
     for idx, c in enumerate(colonies, start=1):
@@ -300,7 +310,7 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
         results.append((idx, feret_mm, eq_mm, area_mm2))
 
         if SHOW_DEBUG:
-            cv2.drawContours(output, [c], -1, (0, 255, 255), thick)
+            cv2.drawContours(output, [c], -1, COLONY_CONTOUR_COLOR, thick)
 
         # Label at the line's midpoint, offset perpendicular so it doesn't sit on the colony
         mid = (p1 + p2) / 2
@@ -314,10 +324,10 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
     margin = int(w * 0.06)
     x2, y = w - margin, h - margin
     x1 = x2 - bar_px
-    cv2.line(output, (x1, y), (x2, y), RED, thick)
+    cv2.line(output, (x1, y), (x2, y), DIM_LINE_COLOR, thick)
     for x in (x1, x2):
-        cv2.line(output, (x, y - int(8 * w / 800)), (x, y + int(8 * w / 800)), RED, thick)
-    put_text(output, f"{SCALE_BAR_MM} mm", (x1 + bar_px // 2 - int(30 * w / 800), y - int(18 * w / 800)))
+        cv2.line(output, (x, y - int(8 * w / 800)), (x, y + int(8 * w / 800)), DIM_LINE_COLOR, thick)
+    put_text(output, f" {SCALE_BAR_MM} mm", (x1 + bar_px // 2 - int(30 * w / 800), y - int(18 * w / 800)))
 
     ok, png = cv2.imencode(".png", output)
     if not ok:
