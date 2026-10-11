@@ -9,7 +9,9 @@ their values. Only the input and output changed to fit a web request:
 - the photo arrives as bytes from an upload (`cv2.imdecode`) instead of a Google Drive path
   (`cv2.imread`); both read it as 3-channel BGR;
 - a photo wider than ANALYSIS_MAX_WIDTH_PX is shrunk to that width before the analysis
-  (`fit_width`), which the notebook did not do; `analyze()` itself is unchanged;
+  (`fit_width`), which the notebook did not do;
+- the annotation is drawn on a copy enlarged to at least ANNOTATION_MIN_WIDTH_PX wide, with
+  every coordinate scaled to it, so its text is sharp; the detection and measurement are untouched;
 - `ACTUAL_DISH_DIAMETER_MM` is an argument, defaulting to the notebook's 93 mm, since a plate
   of another size would scale every result wrongly;
 - what the notebook printed (plate, scale, the purple fraction and the mode it chose, the colony
@@ -58,6 +60,11 @@ CORE_RATIO = 0.5
 
 # Not the notebook's: a wider photo is shrunk to this width before `analyze()` (see `fit_width`).
 ANALYSIS_MAX_WIDTH_PX = 1200
+# Not the notebook's: the annotation is drawn on a copy enlarged to at least this width, so the
+# labels have enough pixels to stay sharp. The notebook sized lines and text to the photo's width,
+# so a 440 px screenshot got ~10 px text that blurred when the page enlarged it. Only the drawing
+# changes; every number is measured on the analysed image before it.
+ANNOTATION_MIN_WIDTH_PX = 1200
 
 
 class PhotoUnreadable(ValueError):
@@ -92,7 +99,8 @@ def fit_width(img: np.ndarray) -> np.ndarray:
 def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) -> dict:
     """Find the plate and the colonies in a BGR photo and measure each colony.
 
-    Returns {dish, mm_per_px, mode, purple_fraction, threshold, image, colonies, annotated_png}: see swarming.js for the shape.
+    Returns {dish, mm_per_px, mode, purple_fraction, threshold, image, annotated_image, colonies,
+    annotated_png}: see swarming.js for the shape.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -274,10 +282,15 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
     # ==========================================
     # Step 4: measure and annotate
     # ==========================================
-    output = img.copy()
-    thick = max(2, int(w / 800 * 3))
-    font_scale = w / 800 * 0.8
-    tt = max(2, int(w / 400 * 1))                  # text stroke thickness
+    # Not the notebook's: drawn on a copy enlarged k times (see ANNOTATION_MIN_WIDTH_PX). Line and
+    # text sizes follow the copy's width `aw` as the notebook's followed `w`, and every coordinate
+    # measured on the analysed image is multiplied by k.
+    k = max(1.0, ANNOTATION_MIN_WIDTH_PX / w)
+    aw, ah = round(w * k), round(h * k)
+    output = img.copy() if k == 1 else cv2.resize(img, (aw, ah), interpolation=cv2.INTER_CUBIC)
+    thick = max(2, int(aw / 800 * 3))
+    font_scale = aw / 800 * 0.8
+    tt = max(2, int(aw / 400 * 1))                 # text stroke thickness
     outline = tt * 3                               # outline stroke thickness
 
     def put_text(im, text, pos, scale=font_scale, color=TEXT_COLOR):
@@ -288,13 +301,13 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
         p1, p2 = np.array(p1, float), np.array(p2, float)
         cv2.line(im, tuple(p1.astype(int)), tuple(p2.astype(int)), DIM_LINE_COLOR, thick)
         v = (p2 - p1) / (np.linalg.norm(p2 - p1) + 1e-6)
-        n = np.array([-v[1], v[0]]) * (8 * w / 800)
+        n = np.array([-v[1], v[0]]) * (8 * aw / 800)
         for p in (p1, p2):
             cv2.line(im, tuple((p - n).astype(int)), tuple((p + n).astype(int)), DIM_LINE_COLOR, thick)
         put_text(im, label, tuple(offset.astype(int)))
 
     if SHOW_DEBUG:
-        cv2.circle(output, (dish_x, dish_y), dish_r, DISH_CIRCLE_COLOR, thick)
+        cv2.circle(output, (round(dish_x * k), round(dish_y * k)), round(dish_r * k), DISH_CIRCLE_COLOR, thick)
 
     results = []
     for idx, c in enumerate(colonies, start=1):
@@ -310,24 +323,25 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
         results.append((idx, feret_mm, eq_mm, area_mm2))
 
         if SHOW_DEBUG:
-            cv2.drawContours(output, [c], -1, COLONY_CONTOUR_COLOR, thick)
+            cv2.drawContours(output, [np.round(c * k).astype(np.int32)], -1, COLONY_CONTOUR_COLOR, thick)
 
         # Label at the line's midpoint, offset perpendicular so it doesn't sit on the colony
-        mid = (p1 + p2) / 2
-        v = (p2 - p1) / (np.linalg.norm(p2 - p1) + 1e-6)
+        q1, q2 = p1 * k, p2 * k
+        mid = (q1 + q2) / 2
+        v = (q2 - q1) / (np.linalg.norm(q2 - q1) + 1e-6)
         nrm = np.array([-v[1], v[0]])
-        text_pos = mid + nrm * (25 * w / 800) - np.array([30 * w / 800, 0])
-        draw_dimension(output, p1, p2, f"#{idx} {feret_mm:.1f} mm", text_pos)
+        text_pos = mid + nrm * (25 * aw / 800) - np.array([30 * aw / 800, 0])
+        draw_dimension(output, q1, q2, f"#{idx} {feret_mm:.1f} mm", text_pos)
 
     # Scale bar
-    bar_px = int(SCALE_BAR_MM / mm_per_px)
-    margin = int(w * 0.06)
-    x2, y = w - margin, h - margin
+    bar_px = int(SCALE_BAR_MM / mm_per_px * k)
+    margin = int(aw * 0.06)
+    x2, y = aw - margin, ah - margin
     x1 = x2 - bar_px
     cv2.line(output, (x1, y), (x2, y), DIM_LINE_COLOR, thick)
     for x in (x1, x2):
-        cv2.line(output, (x, y - int(8 * w / 800)), (x, y + int(8 * w / 800)), DIM_LINE_COLOR, thick)
-    put_text(output, f" {SCALE_BAR_MM} mm", (x1 + bar_px // 2 - int(30 * w / 800), y - int(18 * w / 800)))
+        cv2.line(output, (x, y - int(8 * aw / 800)), (x, y + int(8 * aw / 800)), DIM_LINE_COLOR, thick)
+    put_text(output, f" {SCALE_BAR_MM} mm", (x1 + bar_px // 2 - int(30 * aw / 800), y - int(18 * aw / 800)))
 
     ok, png = cv2.imencode(".png", output)
     if not ok:
@@ -346,6 +360,7 @@ def analyze(img: np.ndarray, dish_diameter_mm: float = ACTUAL_DISH_DIAMETER_MM) 
         "purple_fraction": float(purple_frac),
         "threshold": threshold,
         "image": {"width_px": int(w), "height_px": int(h)},
+        "annotated_image": {"width_px": int(aw), "height_px": int(ah)},
         "colonies": [
             {"index": idx, "feret_mm": float(f), "eq_diameter_mm": float(e), "area_mm2": float(a)}
             for idx, f, e, a in results

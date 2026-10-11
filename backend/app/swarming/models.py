@@ -51,8 +51,10 @@ class SwarmingResult(BaseModel):
     purple_fraction: float
     threshold: Threshold
     # The photo as analysed (shrunk by fit_width when wider than ANALYSIS_MAX_WIDTH_PX): every
-    # *_px above and the annotated image are in its pixels. original_image is the upload's size.
+    # *_px above is in its pixels. original_image is the upload's size; annotated_image is the
+    # annotated PNG's, enlarged to at least ANNOTATION_MIN_WIDTH_PX wide so its text stays sharp.
     image: PhotoSize
     original_image: PhotoSize
+    annotated_image: PhotoSize
     colonies: list[Colony]
     annotated_png: str  # base64

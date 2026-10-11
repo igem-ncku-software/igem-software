@@ -9,8 +9,10 @@
 //     mm_per_px, mode: "normal" | "uv", purple_fraction,
 //     threshold: { otsu, loose, core, uv_base, uv_peak, uv_thr } (the other mode's are null),
 //     image: { width_px, height_px } (as analysed: a photo wider than 1200 px is shrunk to 1200 px
-//       wide first, and every *_px and the annotated image are in its pixels),
+//       wide first, and every *_px is in its pixels),
 //     original_image: { width_px, height_px } (as uploaded),
+//     annotated_image: { width_px, height_px } (the annotated PNG, enlarged to at least 1200 px
+//       wide so its text stays sharp),
 //     colonies: [{ index, feret_mm, eq_diameter_mm, area_mm2 }],
 //     annotated_png: base64 PNG }
 // and an error's `detail` is shown to the user verbatim. One photo per request: the backend runs
@@ -455,6 +457,8 @@ function detailRow(p) {
     ["Thresholds", thresholdText(r)],
     ["Photo", `${originalSize(r).width_px} × ${originalSize(r).height_px} px`],
     ["Analysed at", `${r.image.width_px} × ${r.image.height_px} px`],
+    // A backend from before the enlarged annotation drew it at the analysed size.
+    ["Annotated image", `${(r.annotated_image ?? r.image).width_px} × ${(r.annotated_image ?? r.image).height_px} px`],
   ].map(([key, value]) => {
     const row = el("tr");
     const th = el("th", null, key);
