@@ -4,7 +4,7 @@
 // The 3D-printed reader: a 3D-printed optical core on a base plate, the
 // electronics on a breadboard beside it (source, CAD and parts list in the
 // team's capture-screen-hardware repository).
-//   Excitation: Cree C503B-BCN 470 nm, 2N7000 low-side switch on GPIO 25
+//   Excitation: Cree C503B-BCN 470 nm, 2N7000 low-side switch on GPIO 26
 //               (R2 217 ohm to the gate, R3 9.9 kohm gate to ground),
 //               R1 one 220-ohm resistor (217 ohm measured) since 2026-10-03
 //   Detector:   DFRobot SEN0365 (AS7341, I2C 0x39), no emission filter
@@ -87,10 +87,11 @@
 // reports 0.000 and every read is refused with led_current_unmeasured, so no
 // calibration curve can be bound to a placeholder. Live still works, which is
 // how the LED is kept lit for the measurement.
-#define LED_CURRENT_MA   0.0f
+// Measured 2026-10-13: 2.71 V across R1 (217 ohm) under Live = 12.488 mA.
+#define LED_CURRENT_MA   12.488f
 
 // ---- Pins ----
-const int LED_PIN = 25;             // the 2N7000's gate through R2; R3 holds it off during boot
+const int LED_PIN = 26;             // the 2N7000's gate through R2; R3 holds it off during boot
 const int I2C_SDA = 21;
 const int I2C_SCL = 22;
 
