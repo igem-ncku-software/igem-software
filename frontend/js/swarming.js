@@ -1,5 +1,5 @@
 // =========================================================
-// swarming.html: Swarming Assay. Plate photos are sent to the backend one at a time, in order;
+// swarming.html: Colony Imaging. Plate photos are sent to the backend one at a time, in order;
 // for each it finds the plate (its known diameter gives the scale) and the colonies, and returns
 // their sizes and the photo annotated. The detection is the team's notebook (iGEM_cv.ipynb),
 // unchanged, in backend/app/swarming/; this page only uploads, shows and exports.
@@ -18,9 +18,11 @@
 // and an error's `detail` is shown to the user verbatim. One photo per request: the backend runs
 // one analysis at a time anyway, and a failed photo then costs only itself.
 //
-// One batch per page: date, incubation, notes and the plate diameter are shared; strain,
-// condition and replicate belong to each photo. Nothing is stored: the CSV (every photo's
-// colonies in one file) and the annotated PNGs are the record. Needs the backend, unlike the
+// One batch per page: assay type, date, incubation, notes and the plate diameter are shared;
+// strain, condition and replicate belong to each photo. The assay type (Swarming by default) is
+// a label only — the detection is the same whatever phenotype the plate shows — but it names
+// the exported files and sits on every CSV row, so a batch says what it measured. Nothing is
+// stored: the CSV (every photo's colonies in one file) and the annotated PNGs are the record. Needs the backend, unlike the
 // Plate Reader Assay, so a sleeping Render backend is said to be waking rather than broken.
 // =========================================================
 
@@ -82,6 +84,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 function experiment() {
   return {
+    assay: document.getElementById("info-assay").value.trim(),
     date: document.getElementById("info-date").value,
     incubation: document.getElementById("info-incubation").value.trim(),
     notes: document.getElementById("info-notes").value.trim(),
@@ -129,6 +132,7 @@ function duplicatePlates() {
 // Every problem that holds Analyse (and the later steps), all at once.
 function setupProblems() {
   const missing = [];
+  if (!experiment().assay) missing.push("assay type");
   if (!experiment().date) missing.push("date");
   if (!photos.length) missing.push("at least one photo");
   const noStrain = photos.filter((p) => !p.strain.trim());
@@ -553,8 +557,11 @@ function renderDetection() {
 
 const safe = (text) => text.trim().replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
 
+// The batch's assay type names its files, so a folder of exports says what each one measured.
+const filePrefix = () => safe(experiment().assay).toLowerCase() || "colony";
+
 function annotatedName(p) {
-  const parts = [`swarming-${experiment().date}`, String(photoNumber(p)).padStart(2, "0"), safe(p.strain), safe(p.condition), `r${p.replicate.trim()}`];
+  const parts = [`${filePrefix()}-${experiment().date}`, String(photoNumber(p)).padStart(2, "0"), safe(p.strain), safe(p.condition), `r${p.replicate.trim()}`];
   return `${parts.filter(Boolean).join("-")}.png`;
 }
 
@@ -581,7 +588,7 @@ function csvCell(value) {
 }
 
 const CSV_HEADERS = [
-  "date", "strain", "condition", "replicate", "incubation_h", "notes",
+  "assay_type", "date", "strain", "condition", "replicate", "incubation_h", "notes",
   "photo_number", "photo", "photo_width_px", "photo_height_px", "analysed_width_px", "analysed_height_px",
   "dish_diameter_mm", "dish_found_by", "dish_x_px", "dish_y_px", "dish_radius_px", "mm_per_px",
   "mode", "purple_fraction", "otsu_threshold", "loose_threshold", "core_threshold", "uv_base", "uv_peak", "uv_threshold",
@@ -597,7 +604,7 @@ function exportCsv() {
     const r = p.result;
     const d = r.dish;
     const base = [
-      info.date, p.strain.trim(), p.condition.trim(), Number(p.replicate), info.incubation, info.notes,
+      info.assay, info.date, p.strain.trim(), p.condition.trim(), Number(p.replicate), info.incubation, info.notes,
       photoNumber(p), p.file.name, originalSize(r).width_px, originalSize(r).height_px,
       r.image.width_px, r.image.height_px,
       d.diameter_mm, d.method, d.x_px, d.y_px, d.radius_px, r.mm_per_px,
@@ -608,7 +615,7 @@ function exportCsv() {
     for (const c of colonies) rows.push([...base, c?.index, c?.feret_mm, c?.eq_diameter_mm, c?.area_mm2]);
   }
   const text = [CSV_HEADERS, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const name = `swarming-${info.date}.csv`;
+  const name = `${filePrefix()}-${info.date}.csv`;
   downloadBlob(name, new Blob([`﻿${text}\r\n`], { type: "text/csv;charset=utf-8" }));
   exported = true;
   setStatus(document.getElementById("export-status"), `Exported ${name}: ${plural(photos.length, "photo", "photos")}, ${plural(rows.length, "row", "rows")}.`, "success");
@@ -641,6 +648,7 @@ function render() {
   setBlocked(button, document.getElementById("analyze-reason"),
     analyzing ? "Analysing…"
       : problems ?? (pending ? null : "Every photo is analysed. Add photos to analyse more."));
+  document.getElementById("info-assay").setAttribute("aria-invalid", String(!experiment().assay));
   document.getElementById("info-date").setAttribute("aria-invalid", String(!experiment().date));
   const diameter = document.getElementById("dish-diameter");
   diameter.setAttribute("aria-invalid", String(dishDiameter() === null));
@@ -669,7 +677,7 @@ document.addEventListener("DOMContentLoaded", () => {
     addPhotos(Array.from(fileInput.files));
     fileInput.value = ""; // so a photo removed by mistake can be chosen again
   });
-  for (const id of ["info-date", "info-incubation", "info-notes"]) {
+  for (const id of ["info-assay", "info-date", "info-incubation", "info-notes"]) {
     // The fields go into the CSV, so a change after an export needs another.
     document.getElementById(id).addEventListener("input", () => {
       exported = false;
