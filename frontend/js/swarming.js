@@ -1,5 +1,5 @@
 // =========================================================
-// swarming.html: Colony Imaging. Plate photos are sent to the backend one at a time, in order;
+// swarming.html: Plate Imaging · Agar Vision. Plate photos are sent to the backend one at a time, in order;
 // for each it finds the plate (its known diameter gives the scale) and the colonies, and returns
 // their sizes and the photo annotated. The detection is the team's notebook (iGEM_cv.ipynb),
 // unchanged, in backend/app/swarming/; this page only uploads, shows and exports.
