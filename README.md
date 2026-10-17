@@ -145,6 +145,14 @@ flowchart LR
 
 Every equation and the reasoning behind it are in **[docs/capture_screen_model.md](docs/capture_screen_model.md)**.
 
+### Standards and interfaces
+
+- **Standards it builds on:** the 96-well plate layout (wells A1–H12) for plate import; RFC 4180 CSV (UTF-8) for every export, which Cross-Validation reads back; any signal unit, so readings already calibrated to a fluorescein standard (the iGEM InterLab's MEFL) go in unchanged; the four-parameter logistic, LOD/LOQ at 3 and 10 blank SDs, and Bland–Altman limits of agreement. SBOL is not used: LasReader handles measurements, not genetic designs.
+- **Fitting module:** [`js/curve_fit.js`](frontend/js/curve_fit.js) is pure functions with no dependencies. `CurveFit.fit(points)` returns the curve, LOD, LOQ and usable range; `CurveFit.invert(signal, fit, n)` returns a concentration with its 95% CI, or says it is out of range. The wiki's "Try it with your data" panel loads it unchanged.
+- **HTTP API:** `/api/hardware` (device status and reads), `/api/live/spectrum` (WebSocket), `/api/swarming/analyze` (photo analysis). The HTTP routes are described as OpenAPI at `/docs`.
+- **Device protocol:** JSON over WebSocket, checked against [`backend/app/hardware/models.py`](backend/app/hardware/models.py).
+- **Files:** the Plate Reader Assay CSV has 40 named columns, with the curve and each sample's result beside every reading; CAPTURE-Screen batches export as CSV and back up as JSON; Plate Imaging · Agar Vision exports CSV and annotated photos.
+
 ### Repository layout
 
 ```
@@ -183,7 +191,8 @@ Each build's firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp3
 
 ## Known limitations
 
-- **Validation pending.** The Plate Reader Assay's OD normalization (subtracting a medium blank) is not yet confirmed against the wet lab's protocol, and the assay is yet to be checked against a real dataset.
+- **One real calibration so far.** The Plate Reader Assay has fitted one calibration from the team's wet lab (Figure 8 on the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software#results) page). Its OD normalization (subtracting a medium blank) is not yet confirmed against the wet lab's protocol, CAPTURE-Screen and Cross-Validation have no real dataset yet, and the fit has not been compared with an established fitting tool on the same readings.
+- **No automated tests for the curve fit.** The 46 tests cover the backend; `js/curve_fit.js` runs in the browser and is checked by hand.
 - **Placeholder signal.** CAPTURE-Screen uses the F4 channel alone until an sfGFP standard's spectrum is measured ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
 - **No thresholds without data.** No replicate CV limit and no pass/fail for cross-validation agreement until real data shows what to expect.
 - **Browser-only storage** for CAPTURE-Screen; back up from the Data page.
