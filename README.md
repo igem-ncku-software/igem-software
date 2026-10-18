@@ -81,7 +81,7 @@ Pages served from `localhost` use the local backend; anywhere else they use the 
 
 Read the AHL standards (0 nM blanks included) and the samples on the same plate.
 
-1. **Enter data** — date, strain and detection; one row per standard concentration or sample (with its dilution), 1–6 replicates. Type, paste from Excel, or use *Import from a plate (8 × 12)* and mark the wells on a plate map. *Fluorescence ÷ OD600* adds an OD600 value per replicate and a medium blank.
+1. **Enter data** — date, strain and detection; one row per standard concentration or sample (with its dilution), 1–6 replicates. Enter by *Pasting a plate (8 × 12)* (the default: paste the reader's export and mark the wells on a plate map) or *Typing the table* (type, or paste from Excel). *Fluorescence ÷ OD600* adds an OD600 value per replicate and a medium blank.
 2. **Fit** — exclude a reading only with a reason, then fit (at least 4 concentrations and 2 blanks).
 3. **Results** — each sample's AHL in the well and in the sample, with a 95% CI; outside the usable range only the bound is shown.
 4. **Export** — CSV of every reading and result, and the curve as PNG. Nothing is stored.
@@ -123,6 +123,7 @@ flowchart LR
         PA["Plate Reader Assay"]
         HW["CAPTURE-Screen pages"]
         CMP["Cross-Validation"]
+        SWP["Plate Imaging · Agar Vision"]
         CF["curve_fit.js<br/>shared 4PL fit & inversion"]
         PA --> CF
         HW --> CF
@@ -133,7 +134,7 @@ flowchart LR
         LIVE["/api/live<br/>live spectrum"]
         SW["/api/swarming<br/>photo analysis (OpenCV)"]
     end
-    SWP["Plate Imaging · Agar Vision page"] -->|HTTPS, photo upload| SW
+    SWP -->|HTTPS, photo upload| SW
     HW -->|HTTPS| HUB
     FE -->|WebSocket| LIVE
     DEV -->|WebSocket, device dials out| HUB
@@ -156,7 +157,7 @@ Every equation and the reasoning behind it are in **[docs/capture_screen_model.m
 ### Repository layout
 
 ```
-frontend/   static site: one HTML page and one script per tool, shared js/curve_fit.js
+frontend/   static site: one HTML page and one script per page (CAPTURE-Screen has five), shared js/curve_fit.js
 backend/    FastAPI: app/hardware (device relay), app/live (live spectrum), app/swarming (photo analysis), tests/
 firmware/   CAPTURE-Screen firmware: one Arduino sketch per build
 docs/       CAPTURE-Screen data model
@@ -192,6 +193,7 @@ Each build's firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp3
 ## Known limitations
 
 - **Few real runs so far.** The Plate Reader Assay has fitted one calibration from the team's wet lab, a SpectraMax M3 plate (Figure 2 on the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software#results) page), and CAPTURE-Screen has run calibrations at the bench (Figures 8a–8b there). Neither gives a validated AHL concentration, because the biosensor's response to AHL is not yet established. The Plate Reader Assay's OD normalization (subtracting a medium blank) is not yet confirmed against the wet lab's protocol, Cross-Validation has no real dataset yet, and the fit has not been compared with an established fitting tool on the same readings.
+- **Plate Imaging · Agar Vision needs a clean photo.** The scale assumes the plate was photographed square-on, and a bright, even reflection can be read as a colony; photograph from above, lid off, away from overhead light, and View each result. Its filters were set on swarming plates.
 - **No automated tests for the curve fit.** The 46 tests cover the backend; `js/curve_fit.js` runs in the browser and is checked by hand.
 - **Placeholder signal.** CAPTURE-Screen uses the F4 channel alone until an sfGFP standard's spectrum is measured ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
 - **No thresholds without data.** No replicate CV limit and no pass/fail for cross-validation agreement until real data shows what to expect.
