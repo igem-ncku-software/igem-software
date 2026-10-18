@@ -319,7 +319,7 @@ and the weight $w_i = 1/\sigma_i^2$. Taking the larger of the tube's own read no
 
 ### 8.3 No noise information: the unweighted fallback
 
-For a manual dataset with one tube per concentration, there is no read-noise SD and no replicate spread ($a = b = 0$ and every SD is 0). In that case the fit is **unweighted** ($\sigma_i = 1$). The reading variance used later for LOD and the inversion CI is then estimated from the fit's own residuals:
+When only the blanks are replicated (one tube per standard concentration), §8.1 has a single group, so $b = 0$ and $a$ is the blanks' variance: every tube without its own read-noise SD gets the same weight. Only when the replicates show no spread at all and no tube has a read-noise SD ($a = b = 0$ and every SD is 0) is the fit **unweighted** ($\sigma_i = 1$). The reading variance used later for LOD and the inversion CI is then estimated from the fit's own residuals:
 
 $$
 a = \frac{\mathrm{RSS}}{N-4}, \qquad b = 0

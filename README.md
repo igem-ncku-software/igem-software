@@ -40,7 +40,7 @@ Both instruments go through the same curve-fitting code, so the same readings gi
 | OSI-approved license | [LICENSE](LICENSE), MIT |
 | Reproducible build and run | [`scripts/`](scripts/) (`setup` + `dev`, `.sh` and `.ps1`); no compiled binaries |
 | Pinned dependencies | [`backend/requirements.txt`](backend/requirements.txt) pins every package, direct and transitive (tested on Python 3.14.3); Chart.js 4.4.1; firmware libraries under [Hardware](#hardware-capture-screen) |
-| Repository under 50 MB | About 1 MB |
+| Repository under 50 MB | About 2 MB with its history (about 1 MB of files) |
 
 ## Installation
 
@@ -170,7 +170,7 @@ CAPTURE-Screen has two builds, each with its own sketch. Both speak the same pro
 | Build | Sketch | Has |
 |---|---|---|
 | Laser-cut | `firmware/capture_screen/` | OLED status display, Live button on GPIO 13 |
-| 3D-printed | `firmware/capture_screen_3d/` | No display or button: Live is switched from the website |
+| 3D-printed | `firmware/capture_screen_3d/` | No display or button: Live is switched from the website. LED gate on GPIO26 |
 
 1. In the Arduino IDE, install ESP32 board support (core 3.3.8) and the libraries DFRobot_AS7341 1.0.0, ArduinoJson 7.4.3 and WebSockets 2.7.2 (Markus Sattler); the laser-cut build also needs Adafruit SSD1306 2.5.17, Adafruit GFX 1.12.6 and Adafruit BusIO 1.17.4.
 2. In the build's folder, copy `secrets.h.example` to `secrets.h` and enter your 2.4 GHz Wi-Fi name and password (`secrets.h` is never committed).
@@ -178,7 +178,7 @@ CAPTURE-Screen has two builds, each with its own sketch. Both speak the same pro
 
 When the device is online, the landing page names the build and shows its live spectrum (the laser-cut build's OLED also shows `Web ok`). If not, the Serial Monitor (115200) shows `[wifi]` and `[backend]` lines. To use a local backend instead, set `BACKEND_HOST`, `BACKEND_PORT` and `BACKEND_USE_TLS` in `secrets.h`.
 
-**3D-printed build: measure its LED current first.** Its sketch ships with `LED_CURRENT_MA` at 0, which means "not measured", and refuses every read until it is set (Live still works). Switch Live on so the LED stays lit, measure the DC voltage across R1 with a multimeter, divide by R1's resistance (217 Ω measured), enter the result in mA to three decimals, and flash again. The value feeds the config fingerprint every calibration curve is bound to, so make no curves before it is set. This build kept its radio off under its earlier serial firmware, because a Wi-Fi transmit burst can pull on the supply the LED shares; the sketch sends nothing during a read, and the self-check's dark stability and repeated reads of one cuvette are how to confirm on the bench that Wi-Fi doesn't show in the readings.
+**3D-printed build: measure its LED current first.** Its sketch ships with `LED_CURRENT_MA` set to our build's measured value (12.488 mA); on another build, measure your own and replace it. A value of 0 means "not measured" and makes the sketch refuse every read until it is set (Live still works). Switch Live on so the LED stays lit, measure the DC voltage across R1 with a multimeter, divide by R1's resistance (217 Ω measured), enter the result in mA to three decimals, and flash again. The value feeds the config fingerprint every calibration curve is bound to, so make no curves before it is set. This build kept its radio off under its earlier serial firmware, because a Wi-Fi transmit burst can pull on the supply the LED shares; the sketch sends nothing during a read, and the self-check's dark stability and repeated reads of one cuvette are how to confirm on the bench that Wi-Fi doesn't show in the readings.
 
 ## Testing
 
@@ -191,7 +191,7 @@ Each build's firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp3
 
 ## Known limitations
 
-- **One real calibration so far.** The Plate Reader Assay has fitted one calibration from the team's wet lab (Figure 8 on the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software#results) page). Its OD normalization (subtracting a medium blank) is not yet confirmed against the wet lab's protocol, CAPTURE-Screen and Cross-Validation have no real dataset yet, and the fit has not been compared with an established fitting tool on the same readings.
+- **Few real runs so far.** The Plate Reader Assay has fitted one calibration from the team's wet lab, a SpectraMax M3 plate (Figure 2 on the wiki's [Software](https://2026.igem.wiki/ncku-tainan/software#results) page), and CAPTURE-Screen has run calibrations at the bench (Figures 8a–8b there). Neither gives a validated AHL concentration, because the biosensor's response to AHL is not yet established. The Plate Reader Assay's OD normalization (subtracting a medium blank) is not yet confirmed against the wet lab's protocol, Cross-Validation has no real dataset yet, and the fit has not been compared with an established fitting tool on the same readings.
 - **No automated tests for the curve fit.** The 46 tests cover the backend; `js/curve_fit.js` runs in the browser and is checked by hand.
 - **Placeholder signal.** CAPTURE-Screen uses the F4 channel alone until an sfGFP standard's spectrum is measured ([model §3.3](docs/capture_screen_model.md#33-unmixing-choosing-the-signal)).
 - **No thresholds without data.** No replicate CV limit and no pass/fail for cross-validation agreement until real data shows what to expect.
