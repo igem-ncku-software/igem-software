@@ -199,7 +199,6 @@ Each build's firmware compiles with `arduino-cli compile --fqbn esp32:esp32:esp3
 - **No thresholds without data.** No replicate CV limit and no pass/fail for cross-validation agreement until real data shows what to expect.
 - **Browser-only storage** for CAPTURE-Screen; back up from the Data page.
 - **No authentication** on the device link yet.
-- Plate reader files such as SoftMax Pro `.sda` are not read directly; paste the plate instead.
 
 ## For future teams
 
